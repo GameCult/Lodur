@@ -34,9 +34,10 @@ Signal flows one way per tick; each layer has one owner.
 1. **Perception.** Contacts, impulses, temperature, proximity and named game
    stimuli become typed stimuli on body regions. A poke that barely moves the
    body is still a stimulus.
-2. **Reflex.** Fast, local, involuntary responses to stimuli (withdrawal,
-   startle, bracing), each with a latency, overlaid on whatever the body is
-   doing. Physiology sets the scale: withdrawal roughly 60-150 ms, voluntary
+2. **Reflex.** Fast, local responses to stimuli (withdrawal, startle,
+   bracing), each with a latency, overlaid on whatever the body is doing.
+   Their gain is set from above by the drive, the way descending pathways
+   modulate spinal reflexes: the Gom Jabbar case. Physiology sets the scale: withdrawal roughly 60-150 ms, voluntary
    reaction about 200 ms (figures `[M]` in the research doc; verify before
    they become constants).
 3. **Drive.** Per-character state that evolves every tick: pain accumulates
@@ -67,9 +68,14 @@ through the engine's runner (Unity Inference Engine, ONNX Runtime).
   directly; swapping the PD ragdoll for a learned tracker changes no layer above.
 - `one-physics-world`: the body simulates in the host's physics world. No
   second world that the game's objects cannot touch.
-- `reflex-below-voluntary`: a reflex acts on its own shorter latency and
-  overlays the running behaviour; it never waits for behaviour selection, and
-  behaviour selection never cancels a reflex already in flight.
+- `reflex-gain-from-drive`: a reflex fires on its own shorter latency and
+  overlays the running behaviour; it never waits for behaviour selection. Will
+  acts on reflexes ahead of time, not after: drive state (resolve, the pull of
+  the objective) sets each reflex's gain, so a resolved character can hold its
+  hand in the box. Suppression is never free: the stimulus still feeds pain,
+  and holding a reflex down shows as visible strain until resolve breaks.
+  Deliberate behaviour takes over a fired reflex only after its own, longer
+  latency. (`motion-pipeline:ruling:lodur-reflexes-suppressible-by-will`.)
 - `drive-is-state`: what a hurt character does is decided by drive state
   evolving over time, never by a per-wound lookup.
 - `bounded-tick`: per-character work per tick is bounded and allocates nothing
