@@ -66,8 +66,9 @@ Section numbers did not survive the page; clauses are cited by heading.
   retain copyright, patent, trademark and attribution notices in the source
   form of distributed Derivative Works; and, "If the Work includes a 'NOTICE'
   text file", Derivative Works must carry "Licensed by NVIDIA Corporation under
-  the NVIDIA Open Model Agreement." (The repo's `NOTICE` file is 14 bytes at
-  this commit, so check what it says before shipping anything.) You may add
+  the NVIDIA Open Model Agreement." (The repo has no `NOTICE` file at this
+  commit, so the attribution clause has nothing to trigger on in the code
+  repo; the Hugging Face checkpoint repos were not checked.) You may add
   "additional or different license terms" to your own modifications.
 - **Other terms.** Trademarks not granted. As-is warranty and liability
   disclaimers. Delaware law, Santa Clara County courts. Export and sanctions
@@ -235,8 +236,8 @@ or Lodur work that exists whether or not MotionBricks is used.
 - Whether the Open Model Agreement's indemnity sentence is acceptable under
   GameCult's open-source rule (needs a ruling, and likely a lawyer).
 - RP1 licence text and what it says, if anything, about models trained on it.
-- Whether `NOTICE` carries the attribution line (the file is 14 bytes at
-  `54fc563`), and what ships in the HF checkpoint repos.
+- Whether the Hugging Face checkpoint repos ship a `NOTICE` file (none in the
+  GitHub repo at `54fc563`), which would trigger the attribution clause.
 - SOMA ONNX on CPU: speed, memory, and agreement with TensorRT output.
 - Bit determinism of one backend across runs; any sampling randomness inside
   the graph.
