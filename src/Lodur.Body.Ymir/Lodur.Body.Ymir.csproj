@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Layer 5, bound to Ymir's SoA world. The core never references this assembly. -->
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <RootNamespace>Lodur.Body.Ymir</RootNamespace>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Lodur.Core\Lodur.Core.csproj" />
+    <ProjectReference Include="$(YmirRoot)\src\Ymir.Box3D\Ymir.Box3D.csproj" />
+  </ItemGroup>
+
+</Project>

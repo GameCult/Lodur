@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Engine-free core (invariant core-engine-free): no engine, no physics, no Ymir. Unity-consumable. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+    <LangVersion>12.0</LangVersion>
+    <RootNamespace>Lodur</RootNamespace>
+  </PropertyGroup>
+
+</Project>

@@ -1,0 +1,5 @@
+<Solution>
+  <Project Path="src/Lodur.Core/Lodur.Core.csproj" />
+  <Project Path="src/Lodur.Body.Ymir/Lodur.Body.Ymir.csproj" />
+  <Project Path="tests/Lodur.Tests/Lodur.Tests.csproj" />
+</Solution>

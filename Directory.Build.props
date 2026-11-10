@@ -1,0 +1,9 @@
+<Project>
+  <PropertyGroup>
+    <!-- Sibling Ymir checkout (Ymir main, from the SoA-joints merge on): the body layer binds to its SoA world. -->
+    <YmirRoot Condition="'$(YmirRoot)' == '' and '$(YMIR_ROOT)' != ''">$(YMIR_ROOT)</YmirRoot>
+    <YmirRoot Condition="'$(YmirRoot)' == ''">$(MSBuildThisFileDirectory)..\Ymir</YmirRoot>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+</Project>

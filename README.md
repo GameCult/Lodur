@@ -4,8 +4,16 @@ A physics character middleware for characters that **feel and react**: they
 pull back from something hot, jump when poked, and, if they want their
 objective badly enough, crawl toward it after losing a leg.
 
-**Status: design only. No code exists yet.** The design is
-[`docs/lodur-target.md`](docs/lodur-target.md); read it first.
+**Status: design plus a first slice of layer 5.** The design is
+[`docs/lodur-target.md`](docs/lodur-target.md); read it first. What runs today is a
+PD-muscle active ragdoll on Ymir's Box3D SoA world: [`docs/first-slice.md`](docs/first-slice.md)
+(measured and unmeasured). Layers 1-4 (perception, reflex, drive, behaviour) are not
+coded.
+
+Entry points: `src/Lodur.Core/PdMuscle.cs` (engine-free PD law, strength per muscle),
+`src/Lodur.Body.Ymir/HumanoidRagdoll.cs` (the ragdoll and `Drive`), `tests/Lodur.Tests`
+(stand, fall, rest, same-seed-same-hash). Needs a sibling Ymir checkout at
+`main` (the SoA joints merge, 2026-11-10, or later); `dotnet test tests/Lodur.Tests` builds its native library with cmake.
 
 ## The problem
 
