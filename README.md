@@ -12,8 +12,8 @@ coded.
 
 Entry points: `src/Lodur.Core/PdMuscle.cs` (engine-free PD law, strength per muscle),
 `src/Lodur.Body.Ymir/HumanoidRagdoll.cs` (the ragdoll and `Drive`), `tests/Lodur.Tests`
-(stand, fall, rest, same-seed-same-hash). Needs a sibling Ymir checkout on branch
-`nibu/soa-joints`; `dotnet test tests/Lodur.Tests` builds its native library with cmake.
+(stand, fall, rest, same-seed-same-hash). Needs a sibling Ymir checkout at
+`main` (the SoA joints merge, 2026-11-10, or later); `dotnet test tests/Lodur.Tests` builds its native library with cmake.
 
 ## The problem
 
