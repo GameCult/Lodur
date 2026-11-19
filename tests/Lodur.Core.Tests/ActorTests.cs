@@ -84,6 +84,45 @@ public sealed class ActorTests
         Assert.Equal(PainBoxReplay.Withdraw[0].W, r.Targets[0].W, 5);
     }
 
+    [Fact]
+    public void Resolve_recovers_when_the_box_goes_quiet_and_not_when_recovery_is_off()
+    {
+        static double Resolve(double recovery)
+        {
+            var r = new PainBoxReplay(1, drive: new DriveParameters { ResolveRecovery = recovery });
+            for (var i = 0; i < 400; i++) r.Tick();           // 4 s in the box: resolve is down a little, will intact
+            var low = r.Actor.Drive.Resolve;
+            Assert.InRange(low, 0.85, 0.97);
+            for (var i = 0; i < 20000; i++) r.Tick(boxOn: false);  // 200 s quiet: pain falls under the recovery line
+            Assert.False(r.Actor.Drive.WillBroken);
+            return r.Actor.Drive.Resolve - low;
+        }
+        Assert.True(Resolve(0.02) > 0.04);   // recovers what it lost
+        Assert.True(Resolve(0.0) <= 0.0);    // with recovery off it never rises (lingering pain still drains it)
+    }
+
+    [Fact]
+    public void A_flinch_is_a_suppressed_reflex_leaking_so_none_is_reported_after_the_will_breaks()
+    {
+        // Across seeds, some runs have a leak over the threshold, outside the refractory window, in the ticks
+        // between WillBroke and Withdrew (BDS counts none there). The golden table pins the totals; this pins the rule.
+        var sawLeakAfterBreak = 0;
+        for (ulong seed = 1; seed <= 60; seed++)
+        {
+            var r = new PainBoxReplay(seed);
+            var broke = false;
+            for (var i = 0; i < 4000; i++)
+            {
+                var e = r.Tick();
+                if (broke) Assert.Equal(0, (int)(e & TickEvents.Flinch));
+                broke |= (e & TickEvents.WillBroke) != 0;
+                if ((e & TickEvents.Withdrew) != 0) break;
+            }
+            sawLeakAfterBreak += broke ? 1 : 0;
+        }
+        Assert.Equal(60, sawLeakAfterBreak);
+    }
+
     private static long BreakTick(double intensity, double pull)
     {
         var (broke, _, _) = new PainBoxReplay(1, intensity, pull).Run(3000.0);

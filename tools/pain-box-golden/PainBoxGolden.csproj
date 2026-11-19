@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Generator of tests/Lodur.Core.Tests/pain-box-golden.tsv from Bad Day Simulator's own pain box.
+       Not a product target (not in Lodur.slnx); run tools/pain-box-golden/generate.sh. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Compile Include="$(BdsRoot)\src\BadDay.Core\*.cs" />
+  </ItemGroup>
+
+</Project>

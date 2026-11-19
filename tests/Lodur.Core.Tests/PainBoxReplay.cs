@@ -49,12 +49,12 @@ internal sealed class PainBoxReplay
     }
 
     /// <summary>One tick of the replayed stimulus; the tick index is Actor.TickCount before the call.</summary>
-    public TickEvents Tick()
+    public TickEvents Tick(bool boxOn = true)
     {
         var tick = Actor.TickCount;
         var noise = _rng.NextSigned();
         var ramp = Math.Min(1.0, tick * Dt / 2.0);
-        Sources[0].Intensity = Math.Max(0.0, _intensity * ramp * (1.0 + 0.1 * noise));
+        Sources[0].Intensity = boxOn ? Math.Max(0.0, _intensity * ramp * (1.0 + 0.1 * noise)) : 0.0;
         return Actor.Tick(_p, _p, _p, Sources, Strengths, Targets);
     }
 
