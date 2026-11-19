@@ -162,6 +162,18 @@ namespace Lodur
                 throw new ArgumentException($"x, y and z need {_regions} entries, one per region.");
             }
 
+            if (_senses != null)
+            {
+                // Refused before any state steps, so a bad emitter leaves the tick unrun.
+                for (var i = 0; i < emitters.Length; i++)
+                {
+                    if ((uint)emitters[i].Channel >= ChannelCount)
+                    {
+                        throw new ArgumentException($"Emitter {i} has channel {(int)emitters[i].Channel}; the channels are Audio, Visual and Interrupt.", nameof(emitters));
+                    }
+                }
+            }
+
             var slot = (int)(_tick % _slots);
             for (var r = 0; r < _regions; r++)
             {

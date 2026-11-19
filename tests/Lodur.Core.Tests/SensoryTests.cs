@@ -137,4 +137,43 @@ public sealed class SensoryPerceptionTests
     {
         Assert.Throws<ArgumentOutOfRangeException>(() => Senses(Plain(), regions: 2, senseRegion: 2));
     }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void The_sense_point_is_the_sense_regions_and_the_distance_counts_every_axis(int axis)
+    {
+        // Three regions; the sense region is the middle one. The first and last sit exactly on the emitter, the middle one half a radius away along one axis.
+        float[] x = { 0f, 0f, 0f }, y = { 0f, 0f, 0f }, z = { 0f, 0f, 0f };
+        var offset = new[] { x, y, z }[axis];
+        offset[1] = 0.5f;
+        var p = Senses(Plain(), regions: 3, senseRegion: 1);
+        var emitters = new[] { new Emitter(Channel.Audio, 0f, 0f, 0f, 1f, 0.8) };
+        p.Sense(x, y, z, NoBoxes, emitters);
+        Assert.Equal(0.4, p.ChannelStimulus(Channel.Audio), 12);
+    }
+
+    [Fact]
+    public void An_emitter_with_a_channel_outside_the_three_is_refused_up_front_and_leaves_the_tick_unrun()
+    {
+        var p = Senses(Plain());
+        var good = new[] { new Emitter(Channel.Audio, 0f, 0f, 0f, 1f, 0.8) };
+        for (var i = 0; i < 3; i++) Sense(p, good);
+        var stimulus = p.ChannelStimulus(Channel.Audio);
+        var afferent = p.ChannelAfferent(Channel.Audio);
+        var load = p.Load;
+
+        var bad = new[] { new Emitter(Channel.Audio, 0f, 0f, 0f, 1f, 0.8), new Emitter((Channel)7, 0f, 0f, 0f, 1f, 0.8) };
+        var e = Assert.Throws<ArgumentException>(() => Sense(p, bad));
+        Assert.Contains("Emitter 1", e.Message);
+        Assert.Equal(stimulus, p.ChannelStimulus(Channel.Audio));
+        Assert.Equal(afferent, p.ChannelAfferent(Channel.Audio));
+        Assert.Equal(load, p.Load);
+
+        // The tick did not advance: a twin that never saw the bad call stays identical from here on.
+        var twin = Senses(Plain());
+        for (var i = 0; i < 3; i++) Sense(twin, good);
+        for (var i = 0; i < 20; i++) { Sense(p, good); Sense(twin, good); Assert.Equal(twin.Load, p.Load); }
+    }
 }
