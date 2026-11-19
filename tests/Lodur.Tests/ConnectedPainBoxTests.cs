@@ -164,6 +164,26 @@ public sealed class ConnectedPainBoxTests
         Assert.True(Dist(full.Hand[last].Hand, plain.Hand[last].Hand) > 0.023f);
     }
 
+    private static float VerticalPeakToPeak(Timeline t, int fromSecond)
+    {
+        var seg = t.Hand.Skip(fromSecond * Hz).Take(Hz).Select(h => h.Hand.Y).ToList();
+        return seg.Max() - seg.Min();
+    }
+
+    [Fact]
+    public void Strain_shows_as_a_visible_shake_of_the_hand_which_the_shipped_amplitude_makes_and_zero_does_not()
+    {
+        // Seconds 8 to 13 of seed 1: strain is about 3, the will has not broken (it breaks at 14.75 s). Measured at the
+        // shipped StrainShake 0.03 / ShakeHz 3.5: 3.9-4.7 cm peak to peak in hand height per second; at 0, 0.3-0.7 cm.
+        var shaking = Run(seed: 1, new HoldParameters(), maxSeconds: 16.0);
+        var still = Run(seed: 1, new HoldParameters { StrainShake = 0.0 }, maxSeconds: 16.0);
+        for (var s = 8; s <= 13; s++)
+        {
+            Assert.True(VerticalPeakToPeak(shaking, s) > 0.03f, $"shipped shake only {VerticalPeakToPeak(shaking, s)} m peak to peak in second {s}");
+            Assert.True(VerticalPeakToPeak(still, s) < 0.015f, $"no shake still moved {VerticalPeakToPeak(still, s)} m in second {s}");
+        }
+    }
+
     [Fact]
     public void The_same_seed_twice_gives_the_same_events_and_the_same_world_state_hash()
     {
