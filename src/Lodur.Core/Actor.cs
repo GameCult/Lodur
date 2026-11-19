@@ -7,7 +7,7 @@ namespace Lodur
     public enum TickEvents
     {
         None = 0,
-        /// <summary>A reflex flinched while the will still held.</summary>
+        /// <summary>A reflex leaked past the suppression the will still held. After the will breaks nothing is suppressed, so there is no flinch.</summary>
         Flinch = 1,
         /// <summary>Resolve reached zero this tick.</summary>
         WillBroke = 2,
@@ -76,6 +76,7 @@ namespace Lodur
             ReadOnlySpan<BoxStimulus> sources, Span<float> strengths, Span<Quat> targets)
         {
             var events = TickEvents.None;
+            // A flinch is the leak of a suppressed reflex; once the will has broken nothing is suppressed, so none is reported.
             var holding = !_drive.WillBroken;
 
             _perception.Sense(regionX, regionY, regionZ, sources);
