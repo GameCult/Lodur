@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- References only Lodur.Core: the core's tests build and run without Ymir (invariant core-engine-free). -->
+  <!-- References only Lodur.Core: the core tests build and run with no physics engine present (invariant core-engine-free). -->
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
