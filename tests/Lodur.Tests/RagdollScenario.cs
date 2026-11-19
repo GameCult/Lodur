@@ -75,17 +75,20 @@ internal sealed class RagdollScenario : IDisposable
         return (lin, ang);
     }
 
-    /// <summary>FNV-1a 64 over every body and joint state lane, byte for byte, in lane order.</summary>
-    public ulong StateHash()
+    /// <summary>FNV-1a 64 over every body and joint state lane of this scenario's world.</summary>
+    public ulong StateHash() => HashOf(World);
+
+    /// <summary>FNV-1a 64 over every body and joint state lane of any world.</summary>
+    public static ulong HashOf(Box3DSoaWorld world)
     {
-        var v = World.View;
+        var v = world.View;
         var h = 14695981039346656037ul;
         void Bytes(ReadOnlySpan<byte> b)
         {
             foreach (var x in b) { h ^= x; h *= 1099511628211ul; }
         }
         void F(ReadOnlySpan<float> lane) => Bytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(lane));
-        Bytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(BitConverter.GetBytes(World.StepCount).AsSpan()));
+        Bytes(System.Runtime.InteropServices.MemoryMarshal.AsBytes(BitConverter.GetBytes(world.StepCount).AsSpan()));
         F(v.PositionX); F(v.PositionY); F(v.PositionZ);
         F(v.RotationX); F(v.RotationY); F(v.RotationZ); F(v.RotationW);
         F(v.VelocityX); F(v.VelocityY); F(v.VelocityZ);
