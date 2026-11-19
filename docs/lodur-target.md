@@ -27,11 +27,13 @@ Named after the god in Voluspa who gives the first humans blood, warmth and good
 Signal flows one way per tick, in this order; each layer has one owner. Layers 1-4 are `Lodur.Core`
 (`netstandard2.1`, no references); layer 5 is a body binding.
 
-1. **Perception** (`Perception`, `NerveParameters`, `BoxStimulus`). Contacts, impulses, temperature,
+1. **Perception** (`Perception`, `NerveParameters`, `BoxStimulus`, `Emitter`). Contacts, impulses, temperature,
    proximity and named game stimuli become typed signals on body regions. Input: one point per body region
-   (from the body binding, read-only) and the game's stimulus sources. Today one channel (noxious) and one
-   source kind: a box volume with an intensity the game writes each tick. Output per region: the stimulus, and
-   the afferent signal after threshold, sensitisation and conduction delay. A poke that barely moves the body
+   (from the body binding, read-only) and the game's stimulus sources. Two source kinds today: noxious box
+   volumes with an intensity the game writes each tick, and point emitters on the audio, visual and interrupt
+   channels (position, radius and intensity written each tick, falling off linearly to the radius), sensed at
+   one region and combined into one load, `1 - prod(1 - afferent)`. Output per region: the stimulus, and
+   the afferent signal after threshold, sensitisation and conduction delay; and the load. A poke that barely moves the body
    is still a stimulus.
 2. **Reflex** (`WithdrawalReflex`, `WithdrawalParameters`). Fast, local responses to afferent signals
    (withdrawal now; startle and bracing later), each with a latency, overlaid on whatever the body is doing.
@@ -41,7 +43,8 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    flinch events. Physiology sets the scale: withdrawal roughly 60-150 ms, voluntary reaction about 200 ms
    (figures `[M]` in the research doc; verify before they become constants).
 3. **Drive** (`DriveState`, `DriveParameters`). Per-character state that evolves every tick: pain from
-   afferent input, strain from suppressed reflexes, resolve drained by both and scaled by the objective's pull;
+   afferent input, strain from suppressed reflexes, arousal from sensory load; resolve drained by all three and
+   scaled by the objective's pull, recovering only when pain and arousal are both low;
    later shock on a clock that blood loss speeds and adrenaline that spikes on threat. Resolve reaching zero
    breaks the will, which releases every suppression. Static per-character values are this state with its
    dynamics frozen. (`motion-pipeline:ruling:euphoria-drive-is-dynamic-state`.)
