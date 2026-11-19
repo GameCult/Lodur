@@ -29,7 +29,7 @@ namespace Lodur
     /// <summary>The nerve's tunables: threshold, sensitisation under sustained stimulus, conduction delay, and a per-character gain.</summary>
     public sealed record NerveParameters
     {
-        public double NociceptorThreshold { get; init; } = 0.1;
+        public double Threshold { get; init; } = 0.1;
         public double SensitisationGrowth { get; init; } = 0.04;
         public double SensitisationRecovery { get; init; } = 0.02;
         public double SensitisationCap { get; init; } = 2.0;
@@ -99,7 +99,7 @@ namespace Lodur
                 }
 
                 // Nociceptor: threshold, then sensitisation, then conduction delay.
-                var above = Math.Max(0.0, stimulus - _p.NociceptorThreshold);
+                var above = Math.Max(0.0, stimulus - _p.Threshold);
                 var sens = _sens[r] + _dt * (_p.SensitisationGrowth * above - _p.SensitisationRecovery * (_sens[r] - 1.0));
                 sens = Math.Min(Math.Max(sens, 1.0), _p.SensitisationCap);
                 _sens[r] = sens;
