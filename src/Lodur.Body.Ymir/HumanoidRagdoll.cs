@@ -9,6 +9,12 @@ namespace Lodur.Body.Ymir
         Spine, Neck, ShoulderL, ShoulderR, ElbowL, ElbowR, HipL, HipR, KneeL, KneeR, AnkleL, AnkleR
     }
 
+    /// <summary>The body regions perception senses at, in the order of the point arrays <see cref="HumanoidRagdoll.ReadRegions"/> fills.</summary>
+    public enum Region
+    {
+        HandL, HandR
+    }
+
     /// <summary>The ragdoll's bodies, also the limb label written into the world's limb lane.</summary>
     internal enum Limb
     {
@@ -26,9 +32,12 @@ namespace Lodur.Body.Ymir
     {
         public const int MuscleCount = 12;
         public const int LimbCount = 13;
+        public const int RegionCount = 2;
 
         private const float Density = 1000f;
         private const float Friction = 0.8f;
+        private const float LowerArmRadius = 0.04f;
+        private const float LowerArmHalf = 0.10f;
         private const float HeadRolling = 0.1f; // a bare sphere on the ground rolls on, so the fallen head never settles
 
         private readonly Box3DSoaWorld _world;
@@ -69,7 +78,7 @@ namespace Lodur.Body.Ymir
             foreach (var (side, sx) in new[] { (0, 1f), (1, -1f) })
             {
                 var upperArm = Capsule(Limb.UpperArmL + side, torso, sx * 0.21f, 1.395f, 0.045f, 0.11f);
-                var lowerArm = Capsule(Limb.LowerArmL + side, upperArm, sx * 0.21f, 1.10f, 0.04f, 0.10f);
+                var lowerArm = Capsule(Limb.LowerArmL + side, upperArm, sx * 0.21f, 1.10f, LowerArmRadius, LowerArmHalf);
                 var thigh = Capsule(Limb.ThighL + side, pelvis, sx * 0.09f, 0.79f, 0.07f, 0.18f);
                 var shin = Capsule(Limb.ShinL + side, thigh, sx * 0.09f, 0.31f, 0.06f, 0.17f);
                 Box(Limb.FootL + side, shin, sx * 0.09f, 0.04f, 0.05f, 0.05f, 0.04f, 0.12f);
@@ -133,6 +142,30 @@ namespace Lodur.Body.Ymir
                 var parent = v.JointBodyA[j];
                 v.TorqueX[child] += wx; v.TorqueY[child] += wy; v.TorqueZ[child] += wz;
                 v.TorqueX[parent] -= wx; v.TorqueY[parent] -= wy; v.TorqueZ[parent] -= wz;
+            }
+        }
+
+        /// <summary>
+        /// Writes each <see cref="Region"/>'s world point into the caller's arrays, one entry per region: a hand is the
+        /// tip of its lower-arm capsule, the capsule's centre plus its rotation applied to (0, -(half length + radius), 0).
+        /// The ragdoll has no hand body, so perception senses at this point. Allocates nothing.
+        /// </summary>
+        public void ReadRegions(Span<float> x, Span<float> y, Span<float> z)
+        {
+            if (x.Length != RegionCount || y.Length != RegionCount || z.Length != RegionCount)
+            {
+                throw new ArgumentException($"x, y and z need {RegionCount} entries, one per region.");
+            }
+
+            var v = _world.View;
+            for (var r = 0; r < RegionCount; r++)
+            {
+                var i = _bodyLane[(int)(r == (int)Region.HandL ? Limb.LowerArmL : Limb.LowerArmR)];
+                new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i])
+                    .Rotate(0f, -(LowerArmHalf + LowerArmRadius), 0f, out var dx, out var dy, out var dz);
+                x[r] = v.PositionX[i] + dx;
+                y[r] = v.PositionY[i] + dy;
+                z[r] = v.PositionZ[i] + dz;
             }
         }
     }
