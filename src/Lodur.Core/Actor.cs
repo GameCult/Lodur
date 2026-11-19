@@ -37,12 +37,13 @@ namespace Lodur
         public Actor(
             double tickSeconds, int regionCount,
             NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, HoldParameters hold,
-            ReadOnlySpan<Quat> holdPose, ReadOnlySpan<Quat> withdrawPose)
+            ReadOnlySpan<Quat> holdPose, ReadOnlySpan<Quat> withdrawPose,
+            NerveParameters? senses = null, int senseRegion = 0)
         {
             _dt = tickSeconds;
             _driveP = drive;
             _withdrawLatency = Math.Max(1, (long)Math.Round(withdrawal.LatencySeconds / tickSeconds));
-            _perception = new Perception(nerve, tickSeconds, regionCount);
+            _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);
             _reflexes = new WithdrawalReflex[regionCount];
             for (var r = 0; r < regionCount; r++)
             {
@@ -67,19 +68,28 @@ namespace Lodur
 
         public double Afferent(int region) => _perception.Afferent(region);
 
+        /// <summary>The sensory load this tick: the channels' afferents combined, 0..1.</summary>
+        public double Load => _perception.Load;
+
+        public double ChannelStimulus(Channel channel) => _perception.ChannelStimulus(channel);
+
+        public double ChannelAfferent(Channel channel) => _perception.ChannelAfferent(channel);
+
         /// <summary>
         /// Runs one physics step's worth of nervous system. The point spans hold one entry per region; the strengths
-        /// and targets spans one entry per muscle, written for the body to follow.
+        /// and targets spans one entry per muscle, written for the body to follow. The emitters are the game's point
+        /// sources, sensed at the sense region's point.
         /// </summary>
         public TickEvents Tick(
             ReadOnlySpan<float> regionX, ReadOnlySpan<float> regionY, ReadOnlySpan<float> regionZ,
-            ReadOnlySpan<BoxStimulus> sources, Span<float> strengths, Span<Quat> targets)
+            ReadOnlySpan<BoxStimulus> sources, Span<float> strengths, Span<Quat> targets,
+            ReadOnlySpan<Emitter> emitters = default)
         {
             var events = TickEvents.None;
             // A flinch is the leak of a suppressed reflex; once the will has broken nothing is suppressed, so none is reported.
             var holding = !_drive.WillBroken;
 
-            _perception.Sense(regionX, regionY, regionZ, sources);
+            _perception.Sense(regionX, regionY, regionZ, sources, emitters);
 
             double afferent = 0.0, strainLoad = 0.0, leak = 0.0;
             for (var r = 0; r < _reflexes.Length; r++)
@@ -95,7 +105,7 @@ namespace Lodur
                 }
             }
 
-            if (_drive.Step(_driveP, _dt, afferent, strainLoad))
+            if (_drive.Step(_driveP, _dt, afferent, strainLoad, _perception.Load))
             {
                 events |= TickEvents.WillBroke;
                 _withdrawTick = _tick + _withdrawLatency;
