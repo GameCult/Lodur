@@ -4,16 +4,23 @@ A physics character middleware for characters that **feel and react**: they
 pull back from something hot, jump when poked, and, if they want their
 objective badly enough, crawl toward it after losing a leg.
 
-**Status: design plus a first slice of layer 5.** The design is
-[`docs/lodur-target.md`](docs/lodur-target.md); read it first. What runs today is a
-PD-muscle active ragdoll on Ymir's Box3D SoA world: [`docs/first-slice.md`](docs/first-slice.md)
-(measured and unmeasured). Layers 1-4 (perception, reflex, drive, behaviour) are not
-coded.
+**Status: layers 1-3 and a layer-4 stand-in run on a PD-muscle ragdoll on Ymir.** The
+design is [`docs/lodur-target.md`](docs/lodur-target.md); read it first. `Lodur.Core`
+holds perception, the withdrawal reflex, the drive state and a hold-against-reflex
+stand-in, run per character by `Actor`; `Lodur.Body.Ymir` is the PD-muscle active ragdoll
+on Ymir's Box3D SoA world ([`docs/first-slice.md`](docs/first-slice.md), measured and
+unmeasured). Behaviour selection beyond the stand-in, impairment and the learned tracker
+are not coded.
 
-Entry points: `src/Lodur.Core/PdMuscle.cs` (engine-free PD law, strength per muscle),
-`src/Lodur.Body.Ymir/HumanoidRagdoll.cs` (the ragdoll and `Drive`), `tests/Lodur.Tests`
-(stand, fall, rest, same-seed-same-hash). Needs a sibling Ymir checkout at
-`main` (the SoA joints merge, 2026-11-10, or later); `dotnet test tests/Lodur.Tests` builds its native library with cmake.
+Entry points: `src/Lodur.Core/Actor.cs` (one character's nervous state, one tick per
+physics step), `src/Lodur.Core/PdMuscle.cs` (engine-free PD law, strength per muscle),
+`src/Lodur.Body.Ymir/HumanoidRagdoll.cs` (the ragdoll, `Drive` and `ReadRegions`),
+`tests/Lodur.Core.Tests` (the layers and parity with the pain box; builds without Ymir),
+`tests/Lodur.Tests` (stand, fall, rest, same-seed-same-hash, and the connected pain box:
+`ConnectedPainBoxTests`). The map this was cut from is
+[`docs/connect-rungs-map.md`](docs/connect-rungs-map.md). Needs a sibling Ymir checkout at
+`main` (the SoA joints merge, 2026-11-10, or later); `dotnet test tests/Lodur.Tests` builds
+its native library with cmake.
 
 ## The problem
 
@@ -30,7 +37,7 @@ time. Lodur is that layer.
   pain, shock, adrenaline and resolve that evolves every tick, and behaviour
   selection that turns the drive into targets plus muscle strength.
 - **Body** (per engine): follows those targets on the engine's own articulated
-  physics. v1 is a PD-tracking active ragdoll in Unity; v2 adds a small learned
+  physics. v1 is a PD-tracking active ragdoll on Ymir; v2 adds a small learned
   tracker for upright balance behind the same interface.
 
 ## First consumer
