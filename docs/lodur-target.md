@@ -85,6 +85,15 @@ caller-owned outputs, and reports its events (flinch, will broke, withdrew) as f
 - `content-is-cultcache`: persistent content (puppet and object definitions, drive parameters, saved levels
   in Bad Day Simulator) is CultCache, per the GameCult substrate doctrine. JSON is schema publication only.
   Parameters that are only code defaults are not yet content.
+- `one-severance-owner`: a part is damaged, disabled or severed only by Lodur's physiology. Ymir reports
+  contacts and joint stress and removes a joint only on command; no physics threshold removes anything by
+  itself.
+- `will-is-the-budget`: every voluntary motor layer (hold, clip, IK reach, look, aim, grip) is weighted by
+  available will (resolve times attention, capped by consciousness); reflexes act against it with their own
+  gains; nothing writes targets outside that mix. A distraction such as a startle lowers attention, and so the
+  will every layer can spend (`lodur:ruling:bds-sandbox-arenas-will-economy`).
+- `sandbox-is-content`: in Bad Day Simulator an arena is a level built from the commands the player has; no
+  engine path exists only for an arena; levels are CultCache.
 
 ## First consumer
 
@@ -98,8 +107,11 @@ the Synaptic Induction Chamber (`lodur:ruling:bds-pain-box-item`,
 
 ## Not in scope
 
-- Adapting to arbitrary changes of body topology. The operator called it too ambitious; impairment is handled
-  through the drive and the behaviour set.
+- Adapting to body topology outside the authored part tree (new limbs, re-rooted trees, morphology-agnostic
+  learned control). Losing a subtree of the authored tree is in scope as a closed set of impairment states per
+  limb slot (intact, impaired, disabled, severed), mirror-symmetric; the behaviour set compensates for each
+  (`lodur:ruling:bds-mvp-scope`).
+- Weapons, ballistics, gore and wound presentation: Bad Day Simulator content, not Lodur.
 - A Rust port of the core.
 - The StreamPixels overlay as a consumer before StreamPixels M1 ships.
 - Depending on RootMotion PuppetMaster (paid, not redistributable, and no balance control: research
@@ -108,13 +120,14 @@ the Synaptic Induction Chamber (`lodur:ruling:bds-pain-box-item`,
 
 ## Open
 
-- **Impairment states.** Self's proposal, not ruled: a closed set of named body states (intact, missing a leg,
-  missing an arm, both legs), with mirror symmetry; crawling as the first locomotion after any leg loss.
+- **The MVP map** (`docs/bds-mvp-map.md`): systems by owner, authority map, model page and cut order for
+  grab, poke, physiology, dismemberment, will-weighted animation and IK, and sandbox levels.
 - **How Bad Day Simulator consumes Lodur** (`lodur:question:bds-consumes-lodur`).
 - **The pain measure** (`lodur:question:pain-sweep-measure`).
-- **Ymir gaps Lodur needs next**: contact facts for pain from impacts, body removal, joint springs for stiff
-  ankles (`nibu-body:follow_up:ymir-soa-lodur-needs`).
-- **Renderer and rig** for Bad Day Simulator: nothing draws the puppet yet.
+- **Ymir gaps Lodur needs next**: contact facts, joint stress and removal, a grab anchor and impulses are
+  specced (`lodur:cut_spec:cut-ymir-contact-facts`, `cut-ymir-grab-anchor`, `cut-ymir-break-and-remove`);
+  joint springs for stiff ankles remain (`nibu-body:follow_up:ymir-soa-lodur-needs`).
+- **Renderer**: a Godot client (`lodur:ruling:bds-client-godot`), specced as `lodur:cut_spec:cut-godot-client-v1`.
 - **Training host for v2.** Raven trains only when the household's GPU allows
   (`motion-pipeline:ruling:raven-gpu-defers-to-household`).
 - **Trademark search** on "Bad Day Simulator" before anything public is announced.
