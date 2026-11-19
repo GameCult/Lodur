@@ -4,7 +4,7 @@ using Ymir.Box3D;
 namespace Lodur.Body.Ymir
 {
     /// <summary>The ragdoll's joints, in strength-array and target-array order.</summary>
-    internal enum Muscle
+    public enum Muscle
     {
         Spine, Neck, ShoulderL, ShoulderR, ElbowL, ElbowR, HipL, HipR, KneeL, KneeR, AnkleL, AnkleR
     }
@@ -16,7 +16,7 @@ namespace Lodur.Body.Ymir
     }
 
     /// <summary>The ragdoll's bodies, also the limb label written into the world's limb lane.</summary>
-    internal enum Limb
+    public enum Limb
     {
         Pelvis, Torso, Head, UpperArmL, UpperArmR, LowerArmL, LowerArmR, ThighL, ThighR, ShinL, ShinR, FootL, FootR
     }
@@ -25,10 +25,10 @@ namespace Lodur.Body.Ymir
     /// A 13-body humanoid built in a caller-owned Ymir SoA world (invariant one-physics-world): capsule limbs,
     /// box pelvis, torso and feet, a sphere head, spherical joints at spine, neck, shoulders and hips, hinges at
     /// elbows, knees and ankles. Facing +z, left is +x, standing on y = 0 at the creation pose, which is also
-    /// every joint's zero. <see cref="Drive"/> is the muscle layer: it turns caller-owned strengths and target
+    /// every joint's zero. The game owns the physics world: Build adds bodies to the caller's world and Lodur never creates or steps one. <see cref="Drive"/> is the muscle layer: it turns caller-owned strengths and target
     /// rotations into torques on the world's torque lanes and does nothing else to the physics.
     /// </summary>
-    internal sealed class HumanoidRagdoll
+    public sealed class HumanoidRagdoll
     {
         public const int MuscleCount = 12;
         public const int LimbCount = 13;

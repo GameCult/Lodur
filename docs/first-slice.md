@@ -33,7 +33,7 @@ Ymir's structure-of-arrays world. Nothing above layer 5 exists yet.
 
 ## Not measured, or limits found
 
-- Cross-platform bit-identity: unclaimed. Windows (2026-11-19, no MSVC): builds and passes with MinGW gcc, `CMAKE_GENERATOR="Ninja Multi-Config" CC=gcc`; MinGW names the DLL `libymir_box3d.dll` where `Ymir.Box3D.csproj` expects `ymir_box3d.dll`, so copy it to the unprefixed name in `artifacts/box3d-native/production/Debug/bin/Debug` until Ymir emits that name. Test classes that build worlds must not run in parallel there (two live worlds crashed the host). Unity consumption: unrun. One machine, Debug
+- Cross-platform bit-identity: unclaimed. Windows (2026-11-19, no MSVC): builds and passes with MinGW gcc, `CMAKE_GENERATOR="Ninja Multi-Config" CC=gcc`; Ymir 0b0321a emits `ymir_box3d.dll` under MinGW, so no rename is needed, and its world create/destroy lock makes test classes safe to run in parallel (before it, two live worlds crashed the host). Unity consumption: unrun. One machine, Debug
   native build only; no Release run, no run in a second process.
 - Explicit PD through torque lanes limits stiffness and damping: damping times the step must stay under the
   inertia it acts on. Hips and spine went unstable at damping 15 and 20 and are set to 3 and 4; the gains

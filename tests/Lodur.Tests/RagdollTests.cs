@@ -4,8 +4,6 @@ using Ymir.Box3D;
 
 namespace Lodur.Tests;
 
-/// Native Ymir worlds are not created concurrently (see NativeWorld.cs).
-[Collection(NativeWorld.Name)]
 public sealed class RagdollTests
 {
     private const float StandingHead = 1.74f;

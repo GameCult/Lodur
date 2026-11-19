@@ -73,7 +73,6 @@ internal sealed class ConnectedPainBox : IDisposable
     public void Dispose() => World.Dispose();
 }
 
-[Collection(NativeWorld.Name)]
 public sealed class ConnectedPainBoxTests
 {
     private static float Dist((float X, float Y, float Z) a, (float X, float Y, float Z) b) =>
