@@ -26,7 +26,44 @@ namespace Lodur
             MathF.Abs(x - CenterX) <= HalfX && MathF.Abs(y - CenterY) <= HalfY && MathF.Abs(z - CenterZ) <= HalfZ;
     }
 
-    /// <summary>The nerve's tunables: threshold, sensitisation under sustained stimulus, conduction delay, and a per-character gain.</summary>
+    /// <summary>The sensory channels a point emitter can speak on. Each has its own stimulus, sensitisation and nerve.</summary>
+    public enum Channel
+    {
+        Audio = 0,
+        Visual = 1,
+        Interrupt = 2,
+    }
+
+    /// <summary>
+    /// A game stimulus at a point: sound, flicker, a notification. The game writes its position and intensity every
+    /// tick; Lodur decides what reaches the sense region. What arrives is the intensity falling off linearly to zero
+    /// at the radius.
+    /// </summary>
+    public struct Emitter
+    {
+        public Channel Channel;
+        public float X, Y, Z;
+        public float Radius;
+        public double Intensity;
+
+        public Emitter(Channel channel, float x, float y, float z, float radius, double intensity = 0.0)
+        {
+            Channel = channel;
+            X = x; Y = y; Z = z;
+            Radius = radius;
+            Intensity = intensity;
+        }
+
+        /// <summary>Intensity * max(0, 1 - distance / Radius) at the point; zero at and beyond the radius.</summary>
+        public double Received(float x, float y, float z)
+        {
+            double dx = x - X, dy = y - Y, dz = z - Z;
+            var distance = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+            return Radius > 0f && distance < Radius ? Intensity * (1.0 - distance / Radius) : 0.0;
+        }
+    }
+
+    /// <summary>The nerve's tunables, the transduction of any channel, noxious or sensory: threshold, sensitisation under sustained stimulus, conduction delay, and a per-character gain.</summary>
     public sealed record NerveParameters
     {
         public double Threshold { get; init; } = 0.1;
@@ -35,14 +72,15 @@ namespace Lodur
         public double SensitisationCap { get; init; } = 2.0;
         public double ConductionDelaySeconds { get; init; } = 0.06;
 
-        /// <summary>Per-character nociceptor gain (the consumer draws its trait spread).</summary>
+        /// <summary>Per-character gain (the consumer draws its trait spread).</summary>
         public double Gain { get; init; } = 1.0;
     }
 
     /// <summary>
     /// Layer 1 for one character, a fixed number of body regions. Each tick it takes one point per region and the
     /// game's stimulus sources and produces, per region, the stimulus there and the afferent signal after
-    /// threshold, sensitisation and conduction delay. Everything is allocated in the constructor.
+    /// threshold, sensitisation and conduction delay. With a sensory nerve it also senses point emitters at one
+    /// region on three channels and combines the channels into one load. Everything is allocated in the constructor.
     /// </summary>
     public sealed class Perception
     {
@@ -54,9 +92,20 @@ namespace Lodur
         private readonly double[] _sens;
         private readonly double[] _stimulus;
         private readonly double[] _afferent;
+        private readonly NerveParameters? _senses;
+        private readonly int _senseRegion;
+        private readonly int _senseSlots;
+        private readonly double[] _senseRing;  // afferent in flight per channel, channel-major
+        private readonly double[] _senseSens = new double[ChannelCount];
+        private readonly double[] _senseStimulus = new double[ChannelCount];
+        private readonly double[] _senseAfferent = new double[ChannelCount];
         private long _tick;
 
-        public Perception(NerveParameters parameters, double tickSeconds, int regionCount)
+        private const int ChannelCount = 3;
+
+        /// <param name="senses">The nerve of the sensory channels; null for a body with no senses (the load stays zero).</param>
+        /// <param name="senseRegion">The region whose point the emitters are sensed at.</param>
+        public Perception(NerveParameters parameters, double tickSeconds, int regionCount, NerveParameters? senses = null, int senseRegion = 0)
         {
             _p = parameters;
             _dt = tickSeconds;
@@ -68,6 +117,23 @@ namespace Lodur
             Array.Fill(_sens, 1.0);
             _stimulus = new double[regionCount];
             _afferent = new double[regionCount];
+            _senses = senses;
+            _senseRegion = senseRegion;
+            if (senses != null)
+            {
+                if ((uint)senseRegion >= (uint)regionCount)
+                {
+                    throw new ArgumentOutOfRangeException(nameof(senseRegion), $"The sense region must be one of {regionCount} regions.");
+                }
+
+                _senseSlots = Math.Max(1, (int)Math.Round(senses.ConductionDelaySeconds / tickSeconds));
+                _senseRing = new double[ChannelCount * _senseSlots];
+                Array.Fill(_senseSens, 1.0);
+            }
+            else
+            {
+                _senseRing = Array.Empty<double>();
+            }
         }
 
         public int RegionCount => _regions;
@@ -78,8 +144,18 @@ namespace Lodur
         /// <summary>The afferent signal arriving this tick: what the nerve took in a conduction delay ago.</summary>
         public double Afferent(int region) => _afferent[region];
 
+        /// <summary>The sensory signals combined: 1 - the product over channels of (1 - afferent, capped at 1). Zero with no senses or no emitters.</summary>
+        public double Load { get; private set; }
+
+        /// <summary>The largest intensity of the channel's emitters at the sense region's point this tick.</summary>
+        public double ChannelStimulus(Channel channel) => _senseStimulus[(int)channel];
+
+        /// <summary>The channel's afferent arriving this tick, after threshold, sensitisation and conduction delay.</summary>
+        public double ChannelAfferent(Channel channel) => _senseAfferent[(int)channel];
+
         /// <summary>Senses once per physics step. The spans are the caller's, one point per region.</summary>
-        public void Sense(ReadOnlySpan<float> x, ReadOnlySpan<float> y, ReadOnlySpan<float> z, ReadOnlySpan<BoxStimulus> sources)
+        public void Sense(ReadOnlySpan<float> x, ReadOnlySpan<float> y, ReadOnlySpan<float> z, ReadOnlySpan<BoxStimulus> sources,
+            ReadOnlySpan<Emitter> emitters = default)
         {
             if (x.Length != _regions || y.Length != _regions || z.Length != _regions)
             {
@@ -109,7 +185,43 @@ namespace Lodur
                 _stimulus[r] = stimulus;
             }
 
+            if (_senses != null)
+            {
+                SenseEmitters(x[_senseRegion], y[_senseRegion], z[_senseRegion], emitters);
+            }
+
             _tick++;
+        }
+
+        private void SenseEmitters(float x, float y, float z, ReadOnlySpan<Emitter> emitters)
+        {
+            var senses = _senses!;
+            var slot = (int)(_tick % _senseSlots);
+            Array.Clear(_senseStimulus, 0, ChannelCount);
+            for (var i = 0; i < emitters.Length; i++)
+            {
+                var c = (int)emitters[i].Channel;
+                var received = emitters[i].Received(x, y, z);
+                if (received > _senseStimulus[c])
+                {
+                    _senseStimulus[c] = received;
+                }
+            }
+
+            var quiet = 1.0;
+            for (var c = 0; c < ChannelCount; c++)
+            {
+                var above = Math.Max(0.0, _senseStimulus[c] - senses.Threshold);
+                var sens = _senseSens[c] + _dt * (senses.SensitisationGrowth * above - senses.SensitisationRecovery * (_senseSens[c] - 1.0));
+                sens = Math.Min(Math.Max(sens, 1.0), senses.SensitisationCap);
+                _senseSens[c] = sens;
+                var ring = c * _senseSlots + slot;
+                _senseAfferent[c] = _senseRing[ring]; // written one conduction delay ago
+                _senseRing[ring] = above * sens * senses.Gain;
+                quiet *= 1.0 - Math.Min(1.0, _senseAfferent[c]);
+            }
+
+            Load = 1.0 - quiet;
         }
     }
 }
