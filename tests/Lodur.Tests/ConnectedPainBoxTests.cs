@@ -179,6 +179,7 @@ public sealed class ConnectedPainBoxTests
         for (var s = 8; s <= 13; s++)
         {
             Assert.True(VerticalPeakToPeak(shaking, s) > 0.03f, $"shipped shake only {VerticalPeakToPeak(shaking, s)} m peak to peak in second {s}");
+            Assert.True(VerticalPeakToPeak(shaking, s) < 0.07f, $"shipped shake is {VerticalPeakToPeak(shaking, s)} m peak to peak in second {s}, more than a strain tremor");
             Assert.True(VerticalPeakToPeak(still, s) < 0.015f, $"no shake still moved {VerticalPeakToPeak(still, s)} m in second {s}");
         }
     }
