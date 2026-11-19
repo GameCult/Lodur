@@ -123,6 +123,24 @@ public sealed class ArousalTests
     }
 
     [Fact]
+    public void Arousal_updates_before_it_drains_resolve_on_the_same_tick()
+    {
+        var rig = new SensoryRig(SensoryRig.One(0.55), pull: 0.5);
+        for (var i = 0; i < 100; i++)
+        {
+            rig.Tick();
+            if (rig.Actor.Load > 0.0) break;
+            Assert.Equal(0.0, rig.Actor.Drive.Arousal);
+            Assert.Equal(1.0, rig.Actor.Drive.Resolve);
+        }
+
+        Assert.True(rig.Actor.Load > 0.0, "the load arrives within the conduction delay");
+        // On the tick the load first arrives, arousal has already risen and already drained: read a tick late, resolve would still be 1.
+        Assert.True(rig.Actor.Drive.Arousal > 0.0);
+        Assert.True(rig.Actor.Drive.Resolve < 1.0);
+    }
+
+    [Fact]
     public void Without_emitters_or_without_senses_arousal_and_load_stay_exactly_zero()
     {
         var silent = new SensoryRig(Array.Empty<Emitter>());
