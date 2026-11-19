@@ -30,6 +30,18 @@ namespace Lodur
             return new Quat(x * s, y * s, z * s, MathF.Cos(half));
         }
 
+        /// <summary>Normalised linear blend from <paramref name="a"/> (t = 0) to <paramref name="b"/> (t = 1), the shorter way round.</summary>
+        public static Quat Nlerp(in Quat a, in Quat b, float t)
+        {
+            var s = a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W < 0f ? -1f : 1f;
+            var x = a.X + t * (s * b.X - a.X);
+            var y = a.Y + t * (s * b.Y - a.Y);
+            var z = a.Z + t * (s * b.Z - a.Z);
+            var w = a.W + t * (s * b.W - a.W);
+            var inv = 1f / MathF.Sqrt(x * x + y * y + z * z + w * w);
+            return new Quat(x * inv, y * inv, z * inv, w * inv);
+        }
+
         /// <summary>Rotates the vector v by this quaternion.</summary>
         public void Rotate(float vx, float vy, float vz, out float rx, out float ry, out float rz)
         {
