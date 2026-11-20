@@ -71,7 +71,8 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    A goal can also carry a sensory gain and an arousal target (`SensoryGain`, `EntryArousal`), reached linearly over `EntrySeconds`
    from their values at takeover (0, the default, is at the takeover tick; the Start goal's apply at construction). The gain multiplies the sense
    channels' afferents as they leave the conduction delay, so sensitisation still follows the world; `Load` is built from the gated afferents and
-   `ChannelStimulus` stays the world's. The nociceptive region afferents, the withdrawal reflex and its flinch are never gated. The Actor owns the gain
+   `ChannelStimulus` stays the world's. Sense reads the gain at the start of each tick, so a change of gain reaches `Load` one tick after the Actor sets it;
+   the ramp's last tick assigns the targets exactly. The nociceptive region afferents, the withdrawal reflex and its flinch are never gated. The Actor owns the gain
    in force (`DriveState.SensoryGain`) and, through the ramp, arousal; after it the drive owns arousal again. Calm uses it to silence the office's
    stressors and drain the stress bar, tailing off over a few seconds rather than cutting
    (`lodur:ruling:stress-bar-shows-arousal-calm-silences`, `lodur:ruling:flinch-tail-after-stimulus`).

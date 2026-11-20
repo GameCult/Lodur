@@ -101,6 +101,44 @@ public sealed class EntryRampTests
     }
 
     [Fact]
+    public void A_ramp_ends_exactly_on_a_nonzero_target_not_a_float_step_away_from_it()
+    {
+        var brain = new Brain
+        {
+            Goals = new[]
+            {
+                new GoalSpec { Id = "a", SensoryGain = 0.8, Behaviour = Pose },
+                new GoalSpec
+                {
+                    Id = "b", Priority = 1.0, MinDwellSeconds = 1000.0, SensoryGain = 0.15, EntryArousal = 0.05, EntrySeconds = 0.5,
+                    When = new[] { new Condition(DriveQuantity.Arousal, ConditionOp.AtLeast, 0.2) }, Behaviour = Pose,
+                },
+            },
+        };
+        var rig = new Rig(brain);
+        Assert.Equal(0.8, rig.Actor.Drive.SensoryGain);
+        rig.UntilTakeover(1);
+        for (var k = 1; k < 50; k++) rig.Tick();
+        Assert.NotEqual(0.15, rig.Actor.Drive.SensoryGain);
+        rig.Tick();   // the ramp's last tick
+        Assert.Equal(0.15, rig.Actor.Drive.SensoryGain);   // 0.8 + (0.15 - 0.8) * 1 is not 0.15 in a double
+        Assert.Equal(0.05, rig.Actor.Drive.Arousal);   // from the arousal at takeover, 0.2142..., a lerp lands a step off 0.05 too
+    }
+
+    [Fact]
+    public void A_huge_finite_EntrySeconds_is_an_unending_ramp_not_a_snap_or_a_wrap()
+    {
+        // 1e300 / 0.01 is past the long range. On .NET 10 the cast of such a double saturates, so the guard in the Actor is not observable here
+        // (its mutant is equivalent on this runtime); the behaviour it protects on runtimes where the cast is undefined is pinned.
+        var rig = new Rig(StressThenCalm(1e300));
+        rig.UntilTakeover(1);
+        for (var i = 0; i < 2000; i++) rig.Tick();
+        Assert.Equal(1.0, rig.Actor.Drive.SensoryGain, 12);
+        Assert.True(rig.Actor.Drive.Arousal > 0.0);
+        Assert.True(rig.Actor.Load > 0.0);
+    }
+
+    [Fact]
     public void The_ramp_length_is_rounded_to_whole_ticks_so_a_quotient_just_under_an_integer_gets_that_integer()
     {
         var rig = new Rig(StressThenCalm(0.29));   // 0.29 / 0.01 is 28.999999999999996 ticks, not 28

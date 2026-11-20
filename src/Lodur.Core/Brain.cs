@@ -73,7 +73,8 @@ namespace Lodur
         /// <summary>
         /// The gain on the sense channels (not the nociceptive region afferents) while this goal is in force, in [0, 1], default 1; 0 is deaf and blind to the
         /// world's stimuli, which keep sounding (lodur:ruling:stress-bar-shows-arousal-calm-silences). Applied like <see cref="EntryResolve"/>: at the tick the goal
-        /// takes over, and at construction for the Start goal.
+        /// takes over, and at construction for the Start goal. The sense reads the gain at the start of each tick, so a change reaches
+        /// <see cref="Perception.Load"/> one tick after the Actor sets it.
         /// </summary>
         public double SensoryGain { get; init; } = 1.0;
 

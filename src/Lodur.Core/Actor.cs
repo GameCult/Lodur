@@ -189,16 +189,18 @@ namespace Lodur
             }
 
             // For EntrySeconds after a takeover the Actor, not the drive, takes the gain (and the arousal, if the goal declares one) from their values at
-            // takeover to the goal's targets, linearly; it ends exactly on them, and after it the drive owns arousal again. Sense reads the gain at the start of the next tick.
+            // takeover to the goal's targets, linearly; its last tick assigns the targets themselves (a lerp need not land on a nonzero target), and after it the drive
+            // owns arousal again. Sense reads the gain at the start of the next tick, so a change of gain reaches Load one tick after the Actor sets it.
             var sinceGoal = _tick - _goalSince;
             if (sinceGoal <= _rampTicks)
             {
                 var goal = _brain.Goals[_goal];
-                var k = _rampTicks == 0 ? 1.0 : (double)sinceGoal / _rampTicks;
-                _drive.SensoryGain = _rampGain0 + (goal.SensoryGain - _rampGain0) * k;
+                var last = sinceGoal == _rampTicks;   // also the takeover tick of a zero-length ramp
+                var k = last ? 1.0 : (double)sinceGoal / _rampTicks;
+                _drive.SensoryGain = last ? goal.SensoryGain : _rampGain0 + (goal.SensoryGain - _rampGain0) * k;
                 if (goal.EntryArousal is double target)
                 {
-                    _drive.Arousal = _rampArousal0 + (target - _rampArousal0) * k;
+                    _drive.Arousal = last ? target : _rampArousal0 + (target - _rampArousal0) * k;
                 }
             }
 
