@@ -81,7 +81,7 @@ namespace Lodur
         public double Strain { get; private set; }
 
         /// <summary>Sensory load carried over time, 0..1; it rises under load and decays when quiet.</summary>
-        public double Arousal { get; private set; }
+        public double Arousal { get; internal set; }
         public double Resolve { get; private set; }
 
         /// <summary>True from a break until the will mends: broken now, not "has ever broken" (see <see cref="Breaks"/>).</summary>

@@ -78,6 +78,19 @@ namespace Lodur
         public double SensoryGain { get; init; } = 1.0;
 
         /// <summary>
+        /// The arousal this goal brings, in [0, 1]; null leaves arousal to the drive. Calm drops it so the stress bar drains
+        /// (lodur:ruling:stress-bar-shows-arousal-calm-silences). Reached over <see cref="EntrySeconds"/>, then the drive owns arousal again.
+        /// </summary>
+        public double? EntryArousal { get; init; }
+
+        /// <summary>
+        /// How long after it takes over the goal's <see cref="EntryArousal"/> and <see cref="SensoryGain"/> are reached, finite and not negative, default 0 (at the
+        /// takeover tick): a linear ramp from their values at takeover, rounded to whole ticks once like the onset. The aftershock tail
+        /// of lodur:ruling:flinch-tail-after-stimulus. It does not ramp <see cref="EntryResolve"/>, which stays a snap. For the Start goal the targets apply at construction.
+        /// </summary>
+        public double EntrySeconds { get; init; }
+
+        /// <summary>
         /// How long after it takes over the goal runs without will (rounded to whole ticks once, like the dwell), not negative, default 0 (voluntary from the first tick);
         /// +infinity is involuntary throughout. While involuntary the behaviour writes at full weight and pays no Effort;
         /// after it the goal is voluntary: sustained by <see cref="DriveState.Will"/> like every other voluntary layer.
@@ -210,6 +223,16 @@ namespace Lodur
                 if (!(goal.SensoryGain >= 0.0 && goal.SensoryGain <= 1.0))
                 {
                     throw new ArgumentException($"Goal {goal.Id}: SensoryGain must be in [0, 1].");
+                }
+
+                if (goal.EntryArousal is double entryArousal && !(entryArousal >= 0.0 && entryArousal <= 1.0))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: EntryArousal must be in [0, 1].");
+                }
+
+                if (!(goal.EntrySeconds >= 0.0 && double.IsFinite(goal.EntrySeconds)))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: EntrySeconds must be finite and not negative.");
                 }
 
                 if (!(goal.Effort >= 0.0 && double.IsFinite(goal.Effort)))

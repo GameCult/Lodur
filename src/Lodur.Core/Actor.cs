@@ -29,6 +29,7 @@ namespace Lodur
         private readonly long _latency;
         private readonly long[] _dwell;
         private readonly long[] _onset;
+        private readonly long[] _entryTicks;
         private readonly Perception _perception;
         private readonly WithdrawalReflex[] _reflexes;
         private DriveState _drive = DriveState.Fresh;
@@ -37,6 +38,10 @@ namespace Lodur
         private int _pending = -1;
         private long _switchTick;
         private long _goalSince;
+        // The entry ramp of the goal in force: its length in ticks (-1: none, as for the Start goal) and the gain and arousal it started from.
+        private long _rampTicks = -1;
+        private double _rampGain0;
+        private double _rampArousal0;
 
         public Actor(
             double tickSeconds, int regionCount,
@@ -51,6 +56,10 @@ namespace Lodur
             _brain = brain;
             _goal = brain.Start;
             _drive.SensoryGain = brain.Goals[brain.Start].SensoryGain;
+            if (brain.Goals[brain.Start].EntryArousal is double startArousal)
+            {
+                _drive.Arousal = startArousal;
+            }
             // The Start goal takes over at construction: its entry effect applies like any other goal's.
             if (brain.Goals[brain.Start].EntryResolve is double startEntry)
             {
@@ -59,6 +68,7 @@ namespace Lodur
             _latency = Math.Max(1, (long)Math.Round(brain.DeliberateLatencySeconds / tickSeconds));
             _dwell = new long[brain.Goals.Count];
             _onset = new long[brain.Goals.Count];
+            _entryTicks = new long[brain.Goals.Count];
             for (var g = 0; g < _dwell.Length; g++)
             {
                 _dwell[g] = (long)Math.Round(brain.Goals[g].MinDwellSeconds / tickSeconds);
@@ -66,6 +76,9 @@ namespace Lodur
                 // A quotient past the long range (+infinity included) is involuntary throughout: the cast of an out-of-range double is not defined across runtimes.
                 var onsetTicks = brain.Goals[g].InvoluntarySeconds / tickSeconds;
                 _onset[g] = onsetTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(onsetTicks);
+                // The entry ramp is rounded once as well; EntrySeconds is finite, but its quotient can still pass the long range.
+                var entryTicks = brain.Goals[g].EntrySeconds / tickSeconds;
+                _entryTicks[g] = entryTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(entryTicks);
             }
 
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);
@@ -166,10 +179,26 @@ namespace Lodur
                 _pending = -1;
                 _goalSince = _tick;
                 events |= TickEvents.GoalChanged;
-                _drive.SensoryGain = _brain.Goals[_goal].SensoryGain;
+                _rampTicks = _entryTicks[_goal];
+                _rampGain0 = _drive.SensoryGain;
+                _rampArousal0 = _drive.Arousal;
                 if (_brain.Goals[_goal].EntryResolve is double entry)
                 {
                     _drive.Enter(_driveP, entry);
+                }
+            }
+
+            // For EntrySeconds after a takeover the Actor, not the drive, takes the gain (and the arousal, if the goal declares one) from their values at
+            // takeover to the goal's targets, linearly; it ends exactly on them, and after it the drive owns arousal again. Sense reads the gain at the start of the next tick.
+            var sinceGoal = _tick - _goalSince;
+            if (sinceGoal <= _rampTicks)
+            {
+                var goal = _brain.Goals[_goal];
+                var k = _rampTicks == 0 ? 1.0 : (double)sinceGoal / _rampTicks;
+                _drive.SensoryGain = _rampGain0 + (goal.SensoryGain - _rampGain0) * k;
+                if (goal.EntryArousal is double target)
+                {
+                    _drive.Arousal = _rampArousal0 + (target - _rampArousal0) * k;
                 }
             }
 

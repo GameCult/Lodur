@@ -68,6 +68,13 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    `HoldStrength x min(1, Will^WillCurve + leak x FlinchGain)`, an involuntary one at `HoldStrength`, so a failing
    will slackens the layer while a reflex that gets past it still moves the muscle
    (`lodur:ruling:bds-sandbox-arenas-will-economy`).
+   A goal can also carry a sensory gain and an arousal target (`SensoryGain`, `EntryArousal`), reached linearly over `EntrySeconds`
+   from their values at takeover (0, the default, is at the takeover tick; the Start goal's apply at construction). The gain multiplies the sense
+   channels' afferents as they leave the conduction delay, so sensitisation still follows the world; `Load` is built from the gated afferents and
+   `ChannelStimulus` stays the world's. The nociceptive region afferents, the withdrawal reflex and its flinch are never gated. The Actor owns the gain
+   in force (`DriveState.SensoryGain`) and, through the ramp, arousal; after it the drive owns arousal again. Calm uses it to silence the office's
+   stressors and drain the stress bar, tailing off over a few seconds rather than cutting
+   (`lodur:ruling:stress-bar-shows-arousal-calm-silences`, `lodur:ruling:flinch-tail-after-stimulus`).
    A built Brain owns copies of its data and reads back as read-only views. Considerations extend it.
 5. **Body.** Follows targets with per-muscle strength in the game's physics world. v1 is GameCult's own
    PD-tracking active ragdoll on **Ymir**, GameCult's boundary around a pinned Box3D, read and driven through
