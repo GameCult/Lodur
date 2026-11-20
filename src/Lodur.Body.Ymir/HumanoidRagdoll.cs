@@ -6,7 +6,8 @@ namespace Lodur.Body.Ymir
     /// <summary>The ragdoll's joints, in strength-array and target-array order.</summary>
     public enum Muscle
     {
-        Spine, Neck, ShoulderL, ShoulderR, ElbowL, ElbowR, HipL, HipR, KneeL, KneeR, AnkleL, AnkleR
+        Spine, Neck, ShoulderL, ShoulderR, ElbowL, ElbowR, HipL, HipR, KneeL, KneeR, AnkleL, AnkleR,
+        WristL, WristR, ThumbL, ThumbR, FingersL, FingersR
     }
 
     /// <summary>The body regions perception senses at, in the order of the point arrays <see cref="HumanoidRagdoll.ReadRegions"/> fills.</summary>
@@ -18,26 +19,28 @@ namespace Lodur.Body.Ymir
     /// <summary>The ragdoll's bodies, also the limb label written into the world's limb lane.</summary>
     public enum Limb
     {
-        Pelvis, Torso, Head, UpperArmL, UpperArmR, LowerArmL, LowerArmR, ThighL, ThighR, ShinL, ShinR, FootL, FootR
+        Pelvis, Torso, Head, UpperArmL, UpperArmR, LowerArmL, LowerArmR, ThighL, ThighR, ShinL, ShinR, FootL, FootR,
+        PalmL, PalmR, ThumbL, ThumbR, FingersL, FingersR
     }
 
     /// <summary>
-    /// A 13-body humanoid built in a caller-owned Ymir SoA world (invariant one-physics-world): capsule limbs,
-    /// box pelvis, torso and feet, a sphere head, spherical joints at spine, neck, shoulders and hips, hinges at
-    /// elbows, knees and ankles. Facing +z, left is +x, standing on y = 0 at the creation pose, which is also
+    /// A 19-body humanoid built in a caller-owned Ymir SoA world (invariant one-physics-world): capsule limbs,
+    /// box pelvis, torso, feet and palms, a sphere head, a thumb capsule and a fingers box per hand, 18 joints: spherical at
+    /// spine, neck, shoulders, hips, wrists and thumbs, hinges at elbows, knees, ankles and knuckles. Facing +z, left is +x, standing on y = 0 at the creation pose, which is also
     /// every joint's zero. The game owns the physics world: Build adds bodies to the caller's world and Lodur never creates or steps one. <see cref="Drive"/> is the muscle layer: it turns caller-owned strengths and target
     /// rotations into torques on the world's torque lanes and does nothing else to the physics.
     /// </summary>
     public sealed class HumanoidRagdoll
     {
-        public const int MuscleCount = 12;
-        public const int LimbCount = 13;
+        public const int MuscleCount = 18;
+        public const int LimbCount = 19;
         public const int RegionCount = 3;
 
         private const float Density = 1000f;
         private const float Friction = 0.8f;
-        private const float LowerArmRadius = 0.04f;
-        private const float LowerArmHalf = 0.10f;
+        /// <summary>The fingers' creation curl at the knuckle, radians: the relaxed resting hand (question hand-rest-curl).</summary>
+        private const float RestCurl = 0.35f;
+        private const float Thumb30 = 30f * MathF.PI / 180f; // the thumb's metacarpal, out of the palm plane
         private const float HeadRolling = 0.1f; // a bare sphere on the ground rolls on, so the fallen head never settles
 
         private readonly Box3DSoaWorld _world;
@@ -56,7 +59,7 @@ namespace Lodur.Body.Ymir
         /// <summary>Body and joint capacity a world needs to hold one ragdoll (plus whatever else the caller adds).</summary>
         public static (int Bodies, int Joints) Needs => (LimbCount, MuscleCount);
 
-        /// <summary>Builds the ragdoll standing with its feet on y = 0 at <paramref name="origin"/> (x, z used). Stable ids are firstStableId.. + 12.</summary>
+        /// <summary>Builds the ragdoll standing with its feet on y = 0 at <paramref name="origin"/> (x, z used). Stable ids are firstStableId.. + 18.</summary>
         public static HumanoidRagdoll Build(Box3DSoaWorld world, (float X, float Z) origin, ulong firstStableId)
         {
             var r = new HumanoidRagdoll(world);
@@ -78,10 +81,29 @@ namespace Lodur.Body.Ymir
             foreach (var (side, sx) in new[] { (0, 1f), (1, -1f) })
             {
                 var upperArm = Capsule(Limb.UpperArmL + side, torso, sx * 0.21f, 1.395f, 0.045f, 0.11f);
-                var lowerArm = Capsule(Limb.LowerArmL + side, upperArm, sx * 0.21f, 1.10f, LowerArmRadius, LowerArmHalf);
+                var lowerArm = Capsule(Limb.LowerArmL + side, upperArm, sx * 0.21f, 1.10f, 0.04f, 0.10f);
                 var thigh = Capsule(Limb.ThighL + side, pelvis, sx * 0.09f, 0.79f, 0.07f, 0.18f);
                 var shin = Capsule(Limb.ShinL + side, thigh, sx * 0.09f, 0.31f, 0.06f, 0.17f);
                 Box(Limb.FootL + side, shin, sx * 0.09f, 0.04f, 0.05f, 0.05f, 0.04f, 0.12f);
+            }
+
+            // Hands, appended after the base bodies. The palm faces -sx with the thumb forward (+z); the thumb capsule
+            // lies along its metacarpal axis, 30 degrees out of the palm plane; the fingers are created at the rest curl.
+            var cmcAxis = (0f, -MathF.Cos(Thumb30), MathF.Sin(Thumb30));
+            foreach (var (side, sx) in new[] { (0, 1f), (1, -1f) })
+            {
+                var lowerArm = r._bodyLane[(int)Limb.LowerArmL + side];
+                var palm = Box(Limb.PalmL + side, lowerArm, sx * 0.21f, 0.930f, 0f, 0.014f, 0.045f, 0.040f);
+                var thumbSpin = Quat.FromAxisAngle(1f, 0f, 0f, -Thumb30);
+                r._bodyLane[(int)Limb.ThumbL + side] = world.AddCapsule(id++,
+                    (ox + sx * 0.206f + 0.05f * cmcAxis.Item1, 0.955f + 0.05f * cmcAxis.Item2, oz + 0.03f + 0.05f * cmcAxis.Item3),
+                    0.011f, 0.03f, Density, (thumbSpin.X, thumbSpin.Y, thumbSpin.Z, thumbSpin.W),
+                    friction: Friction, parent: palm, limb: (int)Limb.ThumbL + side);
+                var curl = Quat.FromAxisAngle(0f, 0f, sx, -RestCurl);
+                r._bodyLane[(int)Limb.FingersL + side] = world.AddBox(id++,
+                    (ox + sx * 0.21f - sx * MathF.Sin(RestCurl) * 0.0425f, 0.885f - MathF.Cos(RestCurl) * 0.0425f, oz),
+                    (0.011f, 0.0425f, 0.038f), Density, (curl.X, curl.Y, curl.Z, curl.W),
+                    friction: Friction, parent: palm, limb: (int)Limb.FingersL + side);
             }
 
             void Joint(Muscle m, Box3DSoaJointKind kind, Limb parent, Limb child, float x, float y, float z,
@@ -101,11 +123,22 @@ namespace Lodur.Body.Ymir
             for (var side = 0; side < 2; side++)
             {
                 var sx = side == 0 ? 1f : -1f;
-                Joint(Muscle.ShoulderL + side, Box3DSoaJointKind.Spherical, Limb.Torso, Limb.UpperArmL + side, sx * 0.21f, 1.55f, 0f, up, new MuscleGains(20f, 1f, 1f, 0.02f), -1f, 1f, 1.5f);
-                Joint(Muscle.ElbowL + side, Box3DSoaJointKind.Revolute, Limb.UpperArmL + side, Limb.LowerArmL + side, sx * 0.21f, 1.24f, 0f, across, new MuscleGains(0f, 0f, 12f, 0.6f), -2.4f, 0f);
+                Joint(Muscle.ShoulderL + side, Box3DSoaJointKind.Spherical, Limb.Torso, Limb.UpperArmL + side, sx * 0.21f, 1.55f, 0f, up, new MuscleGains(20f, 1.5f, 1f, 0.02f), -1f, 1f, 1.5f); // damping carries the hand's mass (hands-gains: 1 and 0.6 before)
+                Joint(Muscle.ElbowL + side, Box3DSoaJointKind.Revolute, Limb.UpperArmL + side, Limb.LowerArmL + side, sx * 0.21f, 1.24f, 0f, across, new MuscleGains(0f, 0f, 12f, 0.9f), -2.4f, 0f);
                 Joint(Muscle.HipL + side, Box3DSoaJointKind.Spherical, Limb.Pelvis, Limb.ThighL + side, sx * 0.09f, 1.04f, 0f, up, new MuscleGains(600f, 3f, 10f, 0.15f), -0.5f, 0.5f, 1.2f);
                 Joint(Muscle.KneeL + side, Box3DSoaJointKind.Revolute, Limb.ThighL + side, Limb.ShinL + side, sx * 0.09f, 0.54f, 0f, across, new MuscleGains(0f, 0f, 300f, 8f), 0f, 2.4f);
                 Joint(Muscle.AnkleL + side, Box3DSoaJointKind.Revolute, Limb.ShinL + side, Limb.FootL + side, sx * 0.09f, 0.08f, 0f, across, new MuscleGains(0f, 0f, 100f, 0.5f), -0.6f, 0.6f);
+            }
+
+            // Hand gains are bounded by each body's own inertia, not the arm subtree's (explicit PD is stable only while
+            // damping * dt stays under the inertia it acts on; a wrist kd sized for the arm limit-cycles at once), and
+            // every hand joint keeps passive damping when limp so loose hands settle instead of ringing.
+            for (var side = 0; side < 2; side++)
+            {
+                var sx = side == 0 ? 1f : -1f;
+                Joint(Muscle.WristL + side, Box3DSoaJointKind.Spherical, Limb.LowerArmL + side, Limb.PalmL + side, sx * 0.21f, 0.975f, 0f, up, new MuscleGains(1f, 0.012f, 0.3f, 0.005f, 1f), -1.2f, 1.2f, 1.0f);
+                Joint(Muscle.ThumbL + side, Box3DSoaJointKind.Spherical, Limb.PalmL + side, Limb.ThumbL + side, sx * 0.206f, 0.955f, 0.03f, cmcAxis, new MuscleGains(0.06f, 0.001f, 0f, 0f, 1f), 0f, 0f, 0.7f); // twist locked: a free thumb spins
+                Joint(Muscle.FingersL + side, Box3DSoaJointKind.Revolute, Limb.PalmL + side, Limb.FingersL + side, sx * 0.21f, 0.885f, 0f, (0f, 0f, sx), new MuscleGains(0f, 0f, 0.3f, 0.004f, 1f), -1.6f + RestCurl, 0.35f + RestCurl);
             }
             return r;
         }
@@ -141,9 +174,8 @@ namespace Lodur.Body.Ymir
         }
 
         /// <summary>
-        /// Writes each <see cref="Region"/>'s world point into the caller's arrays, one entry per region: a hand is the
-        /// tip of its lower-arm capsule, the capsule's centre plus its rotation applied to (0, -(half length + radius), 0).
-        /// The ragdoll has no hand body, so perception senses at this point. The head is the head body's centre. Allocates nothing.
+        /// Writes each <see cref="Region"/>'s world point into the caller's arrays, one entry per region: a hand is its
+        /// palm body's centre, the head the head body's centre. Allocates nothing.
         /// </summary>
         public void ReadRegions(Span<float> x, Span<float> y, Span<float> z)
         {
@@ -155,12 +187,10 @@ namespace Lodur.Body.Ymir
             var v = _world.View;
             for (var r = 0; r < (int)Region.Head; r++)
             {
-                var i = _bodyLane[(int)(r == (int)Region.HandL ? Limb.LowerArmL : Limb.LowerArmR)];
-                new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i])
-                    .Rotate(0f, -(LowerArmHalf + LowerArmRadius), 0f, out var dx, out var dy, out var dz);
-                x[r] = v.PositionX[i] + dx;
-                y[r] = v.PositionY[i] + dy;
-                z[r] = v.PositionZ[i] + dz;
+                var i = _bodyLane[(int)(r == (int)Region.HandL ? Limb.PalmL : Limb.PalmR)];
+                x[r] = v.PositionX[i];
+                y[r] = v.PositionY[i];
+                z[r] = v.PositionZ[i];
             }
 
             var head = _bodyLane[(int)Limb.Head];

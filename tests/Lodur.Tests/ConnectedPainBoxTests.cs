@@ -12,7 +12,8 @@ namespace Lodur.Tests;
 internal sealed class ConnectedPainBox : IDisposable
 {
     public const double Dt = 1.0 / 120.0;
-    public static readonly (float X, float Y, float Z) Box = (-0.21f, 1.19f, 0.46f);
+    /// <summary>Where the right palm settles at the hold pose (the box and the shoulder-right strength-1 pose are fixed; measured seed 1 from 3 s).</summary>
+    public static readonly (float X, float Y, float Z) Box = (-0.210f, 1.116f, 0.441f);
 
     public readonly Box3DSoaWorld World;
     public readonly HumanoidRagdoll Ragdoll;
@@ -102,14 +103,14 @@ public sealed class ConnectedPainBoxTests
         MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
 
     [Fact]
-    public void ReadRegions_puts_the_hands_at_the_lower_arm_tips_at_the_creation_pose()
+    public void ReadRegions_puts_the_hands_at_the_palms_at_the_creation_pose()
     {
         using var s = new RagdollScenario(seed: 1);
         var x = new float[HumanoidRagdoll.RegionCount]; var y = new float[HumanoidRagdoll.RegionCount]; var z = new float[HumanoidRagdoll.RegionCount];
         s.Ragdoll.ReadRegions(x, y, z);
         Assert.Equal(0.21f, x[(int)Region.HandL], 3);
         Assert.Equal(-0.21f, x[(int)Region.HandR], 3);
-        Assert.Equal(0.96f, y[(int)Region.HandR], 3);
+        Assert.Equal(0.93f, y[(int)Region.HandR], 3);
         Assert.Equal(0f, z[(int)Region.HandR], 3);
         Assert.Equal(0f, x[(int)Region.Head], 3);   // the head body's centre, within a millimetre
         Assert.Equal(1.74f, y[(int)Region.Head], 3);

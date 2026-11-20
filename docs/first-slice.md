@@ -7,9 +7,9 @@ Ymir's structure-of-arrays world. Nothing above layer 5 exists yet.
 
 - `Lodur.Core` (`netstandard2.1`, no references): `Quat`, `MuscleGains`, `PdMuscle.Torque`. A PD law on one
   joint: the child's rotation relative to the parent and their relative angular velocity in, a torque out.
-  Strength is a multiplier on every gain; zero is limp and returns exactly zero. Swing (joint frame x, y) and
+  Strength is a multiplier on every gain; zero is limp and returns exactly zero, except that a muscle with `Passive` keeps that fraction of its damping (tissue viscosity). Swing (joint frame x, y) and
   twist (z) have separate gains.
-- `Lodur.Body.Ymir` (`net8.0`, references Ymir.Box3D): `HumanoidRagdoll` builds 13 bodies and 12 joints in a
+- `Lodur.Body.Ymir` (`net8.0`, references Ymir.Box3D): `HumanoidRagdoll` builds 19 bodies (palm, thumb and fingers per arm) and 18 joints in a
   caller-owned `Box3DSoaWorld`: capsule limbs, box pelvis, torso and feet, a sphere head, ball joints at
   spine, neck, shoulders and hips, hinges at elbows, knees and ankles. `Drive(strengths, targets)` writes
   each muscle's torque onto the world's torque lanes (equal and opposite on child and parent). The strength
