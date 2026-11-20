@@ -114,7 +114,13 @@ namespace Lodur
             return Math.Min(Math.Max(w, 0.0), 1.0);
         }
 
-        public void Write(double leak, double strain, double seconds, double secondsInGoal, Span<float> strengths, Span<Quat> targets)
+        /// <summary>
+        /// Writes one tick's strengths and targets. The strength is <see cref="HoldParameters.HoldStrength"/> scaled by the
+        /// <paramref name="weight"/> in [0, 1] (the will that powers the layer, or 1 while it is involuntary) plus the leaked
+        /// reflex, capped at 1: a reflex that gets past a failing will still moves the muscle. The target rule is
+        /// <see cref="Blend"/>, unchanged.
+        /// </summary>
+        public void Write(double weight, double leak, double strain, double seconds, double secondsInGoal, Span<float> strengths, Span<Quat> targets)
         {
             var count = MuscleCount;
             if (strengths.Length != count || targets.Length != count)
@@ -122,7 +128,13 @@ namespace Lodur
                 throw new ArgumentException($"strengths and targets need {count} entries, one per muscle.");
             }
 
+            if (!(weight >= 0.0 && weight <= 1.0))
+            {
+                throw new ArgumentOutOfRangeException(nameof(weight), "The weight must be in [0, 1].");
+            }
+
             var w = (float)Blend(leak, strain, seconds);
+            var strength = Hold.HoldStrength * (float)Math.Min(1.0, weight + leak * Hold.FlinchGain);
             var k = _keys.Length;
             var from = 0;
             var to = 0;
@@ -144,7 +156,7 @@ namespace Lodur
                     a = Quat.Nlerp(_keys[from][m], _keys[to][m], phase);
                 }
 
-                strengths[m] = Hold.HoldStrength;
+                strengths[m] = strength;
                 targets[m] = Quat.Nlerp(a, _flinch[m], w);
             }
         }

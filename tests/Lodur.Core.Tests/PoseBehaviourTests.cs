@@ -10,11 +10,11 @@ public sealed class PoseBehaviourTests
     private static PoseBehaviour Held(HoldParameters? p = null) =>
         new() { Keys = new[] { Hold }, FlinchPose = Withdraw, Hold = p ?? new HoldParameters() };
 
-    private static (float[] S, Quat[] T) Write(PoseBehaviour b, double leak, double strain, double t, double inGoal = 0.0)
+    private static (float[] S, Quat[] T) Write(PoseBehaviour b, double leak, double strain, double t, double inGoal = 0.0, double weight = 1.0)
     {
         var s = new float[2];
         var q = new Quat[2];
-        b.Write(leak, strain, t, inGoal, s, q);
+        b.Write(weight, leak, strain, t, inGoal, s, q);
         return (s, q);
     }
 
@@ -67,6 +67,36 @@ public sealed class PoseBehaviourTests
         var (s, _) = Write(Held(new HoldParameters { HoldStrength = 0.6f }), 0.0, 0.0, 0.0);
         Assert.All(s, x => Assert.Equal(0.6f, x));
     }
+
+    [Theory]
+    [InlineData(1.0, 0.0, 1.0)]
+    [InlineData(0.5, 0.0, 0.5)]
+    [InlineData(0.0, 0.0, 0.0)]
+    [InlineData(0.2, 0.1, 0.5)]
+    [InlineData(0.9, 0.2, 1.0)]    // capped at 1, never past it
+    public void A_voluntary_strength_is_the_hold_strength_scaled_by_the_weight_plus_the_leak_capped_at_one(double weight, double leak, double expectedScale)
+    {
+        var hold = new HoldParameters { HoldStrength = 0.8f, FlinchGain = 3.0, StrainShake = 0.0 };
+        var (s, _) = Write(Held(hold), leak, 0.0, 0.0, weight: weight);
+        // weight + leak x FlinchGain: 0.2 + 0.1 x 3 = 0.5; 0.9 + 0.2 x 3 caps at 1.
+        Assert.All(s, x => Assert.Equal(0.8f * (float)expectedScale, x));
+    }
+
+    [Fact]
+    public void The_weight_scales_strength_only_the_targets_are_the_same_at_every_weight()
+    {
+        var b = Held(new HoldParameters { StrainShake = 0.4 });
+        var (_, full) = Write(b, 0.07, 0.6, 0.31, weight: 1.0);
+        var (_, faint) = Write(b, 0.07, 0.6, 0.31, weight: 0.1);
+        for (var m = 0; m < full.Length; m++) SameBits(full[m], faint[m]);
+    }
+
+    [Theory]
+    [InlineData(-0.01)]
+    [InlineData(1.01)]
+    [InlineData(double.NaN)]
+    public void A_weight_outside_zero_to_one_is_refused(double weight) =>
+        Assert.Throws<ArgumentOutOfRangeException>(() => Held().Write(weight, 0.0, 0.0, 0.0, 0.0, new float[2], new Quat[2]));
 
     [Fact]
     public void The_shake_is_zero_at_zero_strain_and_its_amplitude_grows_with_strain()
@@ -125,8 +155,8 @@ public sealed class PoseBehaviourTests
     {
         var b = Held();
         Assert.Equal(2, b.MuscleCount);
-        Assert.Throws<ArgumentException>(() => b.Write(0.0, 0.0, 0.0, 0.0, new float[1], new Quat[2]));
-        Assert.Throws<ArgumentException>(() => b.Write(0.0, 0.0, 0.0, 0.0, new float[2], new Quat[3]));
+        Assert.Throws<ArgumentException>(() => b.Write(1.0, 0.0, 0.0, 0.0, 0.0, new float[1], new Quat[2]));
+        Assert.Throws<ArgumentException>(() => b.Write(1.0, 0.0, 0.0, 0.0, 0.0, new float[2], new Quat[3]));
 
         Brain Of(PoseBehaviour p) => new() { Goals = new[] { new GoalSpec { Id = "g", Behaviour = p } } };
         Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), Of(new PoseBehaviour())));

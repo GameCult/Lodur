@@ -48,6 +48,11 @@ namespace Lodur
                 throw new ArgumentException("WillMendsAt must be in (0, 1].");
             }
 
+            if (!(drive.WillCurve > 0.0 && double.IsFinite(drive.WillCurve)))
+            {
+                throw new ArgumentException("WillCurve must be finite and above 0.");
+            }
+
             _dt = tickSeconds;
             _driveP = drive;
             _brain = brain;
@@ -156,7 +161,10 @@ namespace Lodur
                 }
             }
 
-            _brain.Goals[_goal].Behaviour.Write(leak, _drive.Strain, _tick * _dt, (_tick - _goalSince) * _dt, strengths, targets);
+            // Every voluntary layer is held by will, in contest with the reflex; an involuntary one (the onset of a goal) is not.
+            var secondsInGoal = (_tick - _goalSince) * _dt;
+            var weight = secondsInGoal >= _brain.Goals[_goal].InvoluntarySeconds ? Math.Pow(_drive.Will, _driveP.WillCurve) : 1.0;
+            _brain.Goals[_goal].Behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets);
             _tick++;
             return events;
         }

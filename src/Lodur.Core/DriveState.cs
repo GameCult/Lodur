@@ -30,6 +30,12 @@ namespace Lodur
 
         /// <summary>Once the will has broken it mends when resolve climbs back to this, in (0, 1]; it can then break again.</summary>
         public double WillMendsAt { get; init; } = 0.25;
+
+        /// <summary>
+        /// How a voluntary layer's strength follows the will: the weight is Will^WillCurve, finite and above 0. Below 1 the layer
+        /// holds most of its strength until the will is nearly gone; above 1 it fades as soon as the will drops.
+        /// </summary>
+        public double WillCurve { get; init; } = 0.25;
     }
 
     /// <summary>

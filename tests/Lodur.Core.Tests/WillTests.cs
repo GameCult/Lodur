@@ -263,4 +263,82 @@ public sealed class WillTests
             Of(Base() with { EntryResolve = 0.0, Effort = 0.0, InvoluntarySeconds = double.PositiveInfinity }));
         _ = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), Of(Base() with { EntryResolve = 1.0 }));
     }
+
+    private static HoldParameters Hold07 => new() { HoldStrength = 0.7f };
+
+    [Fact]
+    public void A_voluntary_goal_writes_its_hold_strength_times_Will_to_the_WillCurve_with_no_leak()
+    {
+        // Effort drains resolve at a known rate with recovery off and the box off, so the leak is zero and Will is a clean ramp.
+        var drive = new DriveParameters { ResolveRecovery = 0.0, WillCurve = 0.5 };
+        var pose = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = Hold07 };
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Effort = 0.5, Behaviour = pose } } };
+        var r = new PainBoxReplay(1, drive: drive, brain: brain, jitter: 0.0);
+        var last = float.MaxValue;
+        for (var i = 0; i < 150; i++)
+        {
+            r.Tick(false);
+            Assert.Equal(0.0, r.Actor.Afferent(0));
+            var will = r.Actor.Drive.Will;
+            Assert.Equal(0.7f * (float)Math.Sqrt(will), r.Strengths[0]);
+            Assert.Equal(r.Strengths[0], r.Strengths[1]);
+            Assert.True(r.Strengths[0] <= last);
+            last = r.Strengths[0];
+        }
+
+        Assert.True(last < 0.6f, "the strength never fell with the will");
+    }
+
+    [Fact]
+    public void A_goal_that_takes_over_at_resolve_zero_writes_full_hold_strength_while_involuntary_and_what_leaks_while_voluntary()
+    {
+        float AtBreak(double involuntary)
+        {
+            var release = new GoalSpec
+            {
+                Id = "release", Priority = 1.0, InvoluntarySeconds = involuntary,
+                When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) },
+                Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Withdraw }, FlinchPose = PainBoxBrain.Withdraw, Hold = Hold07 },
+            };
+            var brain = new Brain { Goals = new[] { new GoalSpec { Id = "objective", Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = Hold07 } }, release } };
+            var r = new PainBoxReplay(1, brain: brain);
+            TickEvents e;
+            do { e = r.Tick(true); } while ((e & TickEvents.GoalChanged) == 0 && r.Actor.TickCount < 5000);
+            Assert.Equal(0.0, r.Actor.Drive.Resolve);
+            Assert.True(r.Actor.Afferent(0) > 0.3);
+            return r.Strengths[0];
+        }
+
+        Assert.Equal(0.7f, AtBreak(double.PositiveInfinity));
+        Assert.True(AtBreak(0.0) < 0.7f * 0.5f, "a voluntary goal at zero will held its strength");
+    }
+
+    [Theory]
+    [InlineData(1.0, 0.7f)]
+    [InlineData(0.3, 0.7f * 0.7401198f)]   // 0.3 ^ 0.25
+    public void The_tick_a_goal_takes_over_its_entry_resolve_is_the_will_its_first_write_is_weighted_by(double entry, float expected)
+    {
+        var pose = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = Hold07 };
+        var brain = new Brain
+        {
+            Goals = new[]
+            {
+                new GoalSpec { Id = "composure", Behaviour = pose },
+                new GoalSpec { Id = "rage", Priority = 1.0, EntryResolve = entry, When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) }, Behaviour = pose },
+            },
+        };
+        var r = new PainBoxReplay(1, brain: brain);
+        TickEvents e;
+        do { e = r.Tick(r.Actor.Drive.Breaks == 0); } while ((e & TickEvents.GoalChanged) == 0 && r.Actor.TickCount < 5000);
+        Assert.Equal(0.0, r.Actor.Afferent(0));
+        Assert.Equal(expected, r.Strengths[0], 4);
+    }
+
+    [Theory]
+    [InlineData(0.0)]
+    [InlineData(-1.0)]
+    [InlineData(double.NaN)]
+    [InlineData(double.PositiveInfinity)]
+    public void A_WillCurve_that_is_not_finite_and_above_zero_is_refused(double curve) =>
+        Assert.Throws<ArgumentException>(() => new PainBoxReplay(1, drive: new DriveParameters { WillCurve = curve }));
 }

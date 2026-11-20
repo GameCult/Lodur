@@ -23,7 +23,7 @@ internal sealed class ConnectedPainBox : IDisposable
     public readonly Quat[] Target = new Quat[HumanoidRagdoll.MuscleCount];
     private SplitMix64 _rng;
 
-    public ConnectedPainBox(ulong seed, HoldParameters? hold = null)
+    public ConnectedPainBox(ulong seed, HoldParameters? hold = null, DriveParameters? driveTunables = null)
     {
         World = new Box3DSoaWorld(capacity: HumanoidRagdoll.LimbCount + 2, jointCapacity: HumanoidRagdoll.MuscleCount + 1);
         World.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
@@ -67,7 +67,7 @@ internal sealed class ConnectedPainBox : IDisposable
             },
         };
         Actor = new Actor(Dt, HumanoidRagdoll.RegionCount, new NerveParameters { Gain = gain }, new WithdrawalParameters(),
-            new DriveParameters { DrainTrait = drain }, brain);
+            (driveTunables ?? new DriveParameters()) with { DrainTrait = drain }, brain);
     }
 
     public Box3DSoaView View => World.View;
@@ -130,9 +130,9 @@ public sealed class ConnectedPainBoxTests
 
     private sealed record Timeline(List<long> Flinches, long Broke, long Withdrew, List<(long Tick, (float X, float Y, float Z) Hand, bool InBox)> Hand, ulong Hash);
 
-    private static Timeline Run(ulong seed, HoldParameters? hold = null, double maxSeconds = 25.0)
+    private static Timeline Run(ulong seed, HoldParameters? hold = null, double maxSeconds = 25.0, DriveParameters? drive = null)
     {
-        using var s = new ConnectedPainBox(seed, hold);
+        using var s = new ConnectedPainBox(seed, hold, drive);
         var t = new Timeline(new List<long>(), -1, -1, new List<(long, (float, float, float), bool)>(), 0);
         long broke = -1, withdrew = -1;
         var max = (long)(maxSeconds / ConnectedPainBox.Dt);
@@ -177,8 +177,11 @@ public sealed class ConnectedPainBoxTests
     [Fact]
     public void The_movement_is_the_leak_not_the_body_without_it_the_hand_holds_still_and_with_it_the_hand_is_pulled_away_by_the_last_flinch()
     {
-        var plain = Run(seed: 1, new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 }, maxSeconds: 16.0);
-        var full = Run(seed: 1);
+        // Both runs hold at full strength until the will is nearly gone (a WillCurve this small weights by ~1): the will's own
+        // sag of the hold, which would move even a leak-free arm, is pinned in the next test, so this isolates the leak.
+        var flat = new DriveParameters { WillCurve = 0.001 };
+        var plain = Run(seed: 1, new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 }, maxSeconds: 16.0, flat);
+        var full = Run(seed: 1, drive: flat);
         Assert.Equal(full.Flinches, plain.Flinches); // the nervous state does not depend on the arm while the hand is in the box
 
         // No leak, no shake: after settling, the hand stays within 2.3 cm of the hold point until the will breaks.
@@ -187,6 +190,16 @@ public sealed class ConnectedPainBoxTests
         // With the leak, at the last flinch the hand is over 2.3 cm from where the leak-free arm is at the same tick.
         var last = (int)full.Flinches[^1];
         Assert.True(Dist(full.Hand[last].Hand, plain.Hand[last].Hand) > 0.023f);
+    }
+
+    [Fact]
+    public void A_failing_will_sags_the_hold_even_with_no_leak_and_no_shake_while_a_strong_will_holds_still()
+    {
+        var plain = Run(seed: 1, new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 }, maxSeconds: 16.0);
+        // Early, resolve is high and the weight near 1: the hand stays within 2.3 cm of the hold point (seed 1 measured 0.8-2.0 cm to 8 s).
+        for (var i = 3 * Hz; i < 6 * Hz; i++) Assert.True(Dist(plain.Hand[i].Hand, Centre) <= 0.023f, $"drift {Dist(plain.Hand[i].Hand, Centre)} at tick {i}");
+        // Late, the will is nearly gone: the voluntary hold has gone slack and the arm sags well out of the box before the break (measured 0.14 m at 14.2 s).
+        Assert.True(Dist(plain.Hand[(int)plain.Broke - 60].Hand, Centre) > 0.1f);
     }
 
     private static float VerticalPeakToPeak(Timeline t, int fromSecond)
@@ -239,11 +252,12 @@ public sealed class ConnectedPainBoxTests
     }
 
     [Fact]
-    public void Seed_1_to_16_seconds_replays_the_world_the_break_and_the_deliberate_switch_recorded_at_the_pre_brain_base()
+    public void Seed_1_to_16_seconds_replays_the_world_the_break_and_the_deliberate_switch_recorded_at_the_will_mix()
     {
-        // Recorded at Lodur 5d0fec8, before the Brain: the pain box authored as a Brain must drive the body with the same bits.
+        // Recorded at the will mix (voluntary strength = hold x Will^WillCurve + leak). Until then the bits were the pre-Brain base's
+        // (Lodur 5d0fec8, hand=e283e3615b6b2cbc); the break and switch ticks and the flinch count did not move, the arm's track did.
         var t = Run(seed: 1, maxSeconds: 16.0);
-        Assert.Equal("broke=1770 withdrew=1782 flinches=16 hand=e283e3615b6b2cbc world=cd1902f3dd65af64",
+        Assert.Equal("broke=1770 withdrew=1782 flinches=16 hand=a0fafe85c80e98f7 world=83155f2abf0e7e91",
             $"broke={t.Broke} withdrew={t.Withdrew} flinches={t.Flinches.Count} hand={HandTrackHash(t):x16} world={t.Hash:x16}");
     }
 }
