@@ -341,4 +341,26 @@ public sealed class WillTests
     [InlineData(double.PositiveInfinity)]
     public void A_WillCurve_that_is_not_finite_and_above_zero_is_refused(double curve) =>
         Assert.Throws<ArgumentException>(() => new PainBoxReplay(1, drive: new DriveParameters { WillCurve = curve }));
+
+    public static IEnumerable<object[]> BadDrives() => new[]
+    {
+        new object[] { new DriveParameters { DrainTrait = double.NaN } },
+        new object[] { new DriveParameters { DrainTrait = -1.0 } },
+        new object[] { new DriveParameters { PainRise = double.PositiveInfinity } },
+        new object[] { new DriveParameters { PainDecay = double.NaN } },
+        new object[] { new DriveParameters { StrainRecover = -0.1 } },
+        new object[] { new DriveParameters { ResolveDrainPain = double.NaN } },
+        new object[] { new DriveParameters { ResolveDrainStrain = double.NegativeInfinity } },
+        new object[] { new DriveParameters { ResolveRecovery = double.NaN } },
+        new object[] { new DriveParameters { ResolveRecoversBelowPain = double.NaN } },
+        new object[] { new DriveParameters { ArousalRise = -1.0 } },
+        new object[] { new DriveParameters { ArousalDecay = double.NaN } },
+        new object[] { new DriveParameters { ResolveDrainArousal = double.PositiveInfinity } },
+        new object[] { new DriveParameters { ResolveRecoversBelowArousal = double.NaN } },
+    };
+
+    [Theory]
+    [MemberData(nameof(BadDrives))]
+    public void A_drive_value_the_drive_cannot_run_on_is_refused_at_construction_before_any_tick(DriveParameters bad) =>
+        Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), bad, PainBoxBrain.Make(0.5)));
 }

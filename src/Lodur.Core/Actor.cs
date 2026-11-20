@@ -43,15 +43,7 @@ namespace Lodur
             NerveParameters? senses = null, int senseRegion = 0)
         {
             brain.Validate();
-            if (!(drive.WillMendsAt > 0.0 && drive.WillMendsAt <= 1.0))
-            {
-                throw new ArgumentException("WillMendsAt must be in (0, 1].");
-            }
-
-            if (!(drive.WillCurve > 0.0 && double.IsFinite(drive.WillCurve)))
-            {
-                throw new ArgumentException("WillCurve must be finite and above 0.");
-            }
+            drive.Validate();
 
             _dt = tickSeconds;
             _driveP = drive;

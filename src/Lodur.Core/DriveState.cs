@@ -36,6 +36,36 @@ namespace Lodur
         /// holds most of its strength until the will is nearly gone; above 1 it fades as soon as the will drops.
         /// </summary>
         public double WillCurve { get; init; } = 0.25;
+
+        /// <summary>Refuses a value the drive cannot run on, at construction rather than as a NaN several ticks in: every rate, trait and threshold is finite and not negative; WillMendsAt is in (0, 1]; WillCurve is above 0.</summary>
+        internal void Validate()
+        {
+            var rates = new[]
+            {
+                (PainRise, nameof(PainRise)), (PainDecay, nameof(PainDecay)), (StrainRecover, nameof(StrainRecover)),
+                (ResolveDrainPain, nameof(ResolveDrainPain)), (ResolveDrainStrain, nameof(ResolveDrainStrain)),
+                (ResolveRecovery, nameof(ResolveRecovery)), (ResolveRecoversBelowPain, nameof(ResolveRecoversBelowPain)),
+                (DrainTrait, nameof(DrainTrait)), (ArousalRise, nameof(ArousalRise)), (ArousalDecay, nameof(ArousalDecay)),
+                (ResolveDrainArousal, nameof(ResolveDrainArousal)), (ResolveRecoversBelowArousal, nameof(ResolveRecoversBelowArousal)),
+            };
+            foreach (var (value, name) in rates)
+            {
+                if (!(value >= 0.0 && double.IsFinite(value)))
+                {
+                    throw new ArgumentException($"{name} must be finite and not negative.");
+                }
+            }
+
+            if (!(WillMendsAt > 0.0 && WillMendsAt <= 1.0))
+            {
+                throw new ArgumentException("WillMendsAt must be in (0, 1].");
+            }
+
+            if (!(WillCurve > 0.0 && double.IsFinite(WillCurve)))
+            {
+                throw new ArgumentException("WillCurve must be finite and above 0.");
+            }
+        }
     }
 
     /// <summary>
