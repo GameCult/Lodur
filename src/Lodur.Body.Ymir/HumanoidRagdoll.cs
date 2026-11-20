@@ -12,7 +12,7 @@ namespace Lodur.Body.Ymir
     /// <summary>The body regions perception senses at, in the order of the point arrays <see cref="HumanoidRagdoll.ReadRegions"/> fills.</summary>
     public enum Region
     {
-        HandL, HandR
+        HandL, HandR, Head
     }
 
     /// <summary>The ragdoll's bodies, also the limb label written into the world's limb lane.</summary>
@@ -32,7 +32,7 @@ namespace Lodur.Body.Ymir
     {
         public const int MuscleCount = 12;
         public const int LimbCount = 13;
-        public const int RegionCount = 2;
+        public const int RegionCount = 3;
 
         private const float Density = 1000f;
         private const float Friction = 0.8f;
@@ -148,7 +148,7 @@ namespace Lodur.Body.Ymir
         /// <summary>
         /// Writes each <see cref="Region"/>'s world point into the caller's arrays, one entry per region: a hand is the
         /// tip of its lower-arm capsule, the capsule's centre plus its rotation applied to (0, -(half length + radius), 0).
-        /// The ragdoll has no hand body, so perception senses at this point. Allocates nothing.
+        /// The ragdoll has no hand body, so perception senses at this point. The head is the head body's centre. Allocates nothing.
         /// </summary>
         public void ReadRegions(Span<float> x, Span<float> y, Span<float> z)
         {
@@ -158,7 +158,7 @@ namespace Lodur.Body.Ymir
             }
 
             var v = _world.View;
-            for (var r = 0; r < RegionCount; r++)
+            for (var r = 0; r < (int)Region.Head; r++)
             {
                 var i = _bodyLane[(int)(r == (int)Region.HandL ? Limb.LowerArmL : Limb.LowerArmR)];
                 new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i])
@@ -167,6 +167,11 @@ namespace Lodur.Body.Ymir
                 y[r] = v.PositionY[i] + dy;
                 z[r] = v.PositionZ[i] + dz;
             }
+
+            var head = _bodyLane[(int)Limb.Head];
+            x[(int)Region.Head] = v.PositionX[head];
+            y[(int)Region.Head] = v.PositionY[head];
+            z[(int)Region.Head] = v.PositionZ[head];
         }
     }
 }

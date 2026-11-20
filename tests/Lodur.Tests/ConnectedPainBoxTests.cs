@@ -18,7 +18,7 @@ internal sealed class ConnectedPainBox : IDisposable
     public readonly HumanoidRagdoll Ragdoll;
     public readonly Actor Actor;
     public readonly BoxStimulus[] Sources = { new BoxStimulus(Box.X, Box.Y, Box.Z, 0.12f, 0.12f, 0.12f) };
-    public readonly float[] X = new float[2], Y = new float[2], Z = new float[2];
+    public readonly float[] X = new float[HumanoidRagdoll.RegionCount], Y = new float[HumanoidRagdoll.RegionCount], Z = new float[HumanoidRagdoll.RegionCount];
     public readonly float[] Strength = new float[HumanoidRagdoll.MuscleCount];
     public readonly Quat[] Target = new Quat[HumanoidRagdoll.MuscleCount];
     private SplitMix64 _rng;
@@ -82,12 +82,15 @@ public sealed class ConnectedPainBoxTests
     public void ReadRegions_puts_the_hands_at_the_lower_arm_tips_at_the_creation_pose()
     {
         using var s = new RagdollScenario(seed: 1);
-        var x = new float[2]; var y = new float[2]; var z = new float[2];
+        var x = new float[HumanoidRagdoll.RegionCount]; var y = new float[HumanoidRagdoll.RegionCount]; var z = new float[HumanoidRagdoll.RegionCount];
         s.Ragdoll.ReadRegions(x, y, z);
         Assert.Equal(0.21f, x[(int)Region.HandL], 3);
         Assert.Equal(-0.21f, x[(int)Region.HandR], 3);
         Assert.Equal(0.96f, y[(int)Region.HandR], 3);
         Assert.Equal(0f, z[(int)Region.HandR], 3);
+        Assert.Equal(0f, x[(int)Region.Head], 3);   // the head body's centre, within a millimetre
+        Assert.Equal(1.74f, y[(int)Region.Head], 3);
+        Assert.Equal(0f, z[(int)Region.Head], 3);
         Assert.Throws<ArgumentException>(() => s.Ragdoll.ReadRegions(new float[1], y, z));
     }
 
@@ -95,7 +98,7 @@ public sealed class ConnectedPainBoxTests
     public void ReadRegions_allocates_nothing()
     {
         using var s = new RagdollScenario(seed: 1);
-        var x = new float[2]; var y = new float[2]; var z = new float[2];
+        var x = new float[HumanoidRagdoll.RegionCount]; var y = new float[HumanoidRagdoll.RegionCount]; var z = new float[HumanoidRagdoll.RegionCount];
         s.Ragdoll.ReadRegions(x, y, z);
         var before = GC.GetAllocatedBytesForCurrentThread();
         for (var i = 0; i < 1000; i++) s.Ragdoll.ReadRegions(x, y, z);
