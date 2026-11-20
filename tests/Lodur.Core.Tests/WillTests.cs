@@ -493,4 +493,93 @@ public sealed class WillTests
             Assert.Equal(0.7f * (float)Math.Sqrt(Math.Min(a.Drive.Resolve * attention, consciousness)), s[0]);
         }
     }
+
+    [Fact]
+    public void An_entered_goals_resolve_is_set_once_on_the_takeover_so_a_rage_with_effort_drains_the_will_it_was_given()
+    {
+        var rage = new GoalSpec
+        {
+            Id = "rage", Priority = 1.0, EntryResolve = 1.0, Effort = 0.5, InvoluntarySeconds = 0.3,
+            When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) }, Behaviour = Pose,
+        };
+        var r = new PainBoxReplay(1, brain: new Brain { Goals = new[] { new GoalSpec { Id = "composure", Behaviour = Pose }, rage } });
+        TickEvents e;
+        do { e = r.Tick(true); } while ((e & TickEvents.GoalChanged) == 0 && r.Actor.TickCount < 5000);
+        Assert.Equal(1.0, r.Actor.Drive.Resolve);
+
+        var onsetTicks = 30;
+        for (var i = 0; i < onsetTicks - 1; i++)
+        {
+            r.Tick(false);
+            Assert.True(r.Actor.Drive.Resolve > 0.95);   // the onset runs on the refilled will without paying its effort
+        }
+
+        for (var i = 0; i < 170; i++) r.Tick(false);
+        Assert.Equal(1, r.Actor.GoalIndex);
+        Assert.True(r.Actor.Drive.Resolve < 0.3, $"resolve is {r.Actor.Drive.Resolve}: the entry effect ran again, or the effort never drained it");
+    }
+
+    [Fact]
+    public void Each_entry_to_a_goal_sets_resolve_once_and_a_re_entry_sets_it_again()
+    {
+        var calm = new GoalSpec { Id = "calm", Behaviour = Pose };
+        var rage = new GoalSpec { Id = "rage", Priority = 1.0, EntryResolve = 0.5, When = new[] { new Condition(DriveQuantity.Pain, ConditionOp.AtLeast, 0.5) }, Behaviour = Pose };
+        var r = new PainBoxReplay(1, brain: new Brain { Goals = new[] { calm, rage } });
+        var entries = 0;
+        long sinceEntry = -1;
+        var checkedInside = 0;
+        for (var i = 0; i < 8000; i++)
+        {
+            var on = i < 800 || (i >= 4500 && i < 5300);
+            var e = r.Tick(on);
+            if ((e & TickEvents.GoalChanged) != 0 && r.Actor.GoalIndex == 1)
+            {
+                entries++;
+                sinceEntry = 0;
+                Assert.Equal(0.5, r.Actor.Drive.Resolve);
+            }
+            else if (sinceEntry >= 0 && r.Actor.GoalIndex == 1 && ++sinceEntry == 100)
+            {
+                Assert.True(r.Actor.Drive.Resolve < 0.499, $"resolve is {r.Actor.Drive.Resolve} 100 ticks into the goal: it was set again");
+                checkedInside++;
+            }
+        }
+
+        Assert.Equal(2, entries);
+        Assert.Equal(2, checkedInside);
+    }
+
+    [Fact]
+    public void A_goal_whose_entry_resolve_is_exactly_WillMendsAt_mends_the_will()
+    {
+        var rage = new GoalSpec { Id = "rage", Priority = 1.0, EntryResolve = 0.5, When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) }, Behaviour = Pose };
+        var r = new PainBoxReplay(1, drive: new DriveParameters { WillMendsAt = 0.5 }, brain: new Brain { Goals = new[] { new GoalSpec { Id = "composure", Behaviour = Pose }, rage } });
+        TickEvents e;
+        do { e = r.Tick(true); } while ((e & TickEvents.GoalChanged) == 0 && r.Actor.TickCount < 5000);
+        Assert.Equal(0.5, r.Actor.Drive.Resolve);
+        Assert.False(r.Actor.Drive.WillBroken);
+    }
+
+    [Fact]
+    public void Recovery_that_lands_exactly_on_WillMendsAt_mends_the_will_on_that_tick()
+    {
+        // Run once with a will that never mends to record resolve; then set WillMendsAt to a value that trace reaches exactly.
+        var trace = new List<double>();
+        var first = new PainBoxReplay(1, drive: new DriveParameters { WillMendsAt = 1.0 }, brain: Gate(DriveQuantity.Breaks, 99.0));
+        while (!first.Actor.Drive.WillBroken) first.Tick(true);
+        for (var i = 0; i < 7000; i++) { first.Tick(false); trace.Add(first.Actor.Drive.Resolve); }
+        var j = 6500;
+        var at = trace[j];
+        Assert.True(at > trace[j - 1] && at > 0.0 && at < 1.0, "the trace is not recovering at the probe tick");
+        var k = trace.FindIndex(x => x >= at);
+        Assert.Equal(j, k);
+
+        var second = new PainBoxReplay(1, drive: new DriveParameters { WillMendsAt = at }, brain: Gate(DriveQuantity.Breaks, 99.0));
+        while (!second.Actor.Drive.WillBroken) second.Tick(true);
+        for (var i = 0; i < 7000; i++)
+        {
+            second.Tick(false);
+            Assert.Equal(i < k, second.Actor.Drive.WillBroken);
+        }
+    }
 }
