@@ -44,14 +44,16 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    (figures `[M]` in the research doc; verify before they become constants).
 3. **Drive** (`DriveState`, `DriveParameters`). Per-character state that evolves every tick: pain from
    afferent input, strain from suppressed reflexes, arousal from sensory load; resolve drained by all three and
-   scaled by the objective's pull, recovering only when pain and arousal are both low;
+   scaled by the active goal's pull, recovering only when pain and arousal are both low;
    later shock on a clock that blood loss speeds and adrenaline that spikes on threat. Resolve reaching zero
    breaks the will, which releases every suppression. Static per-character values are this state with its
    dynamics frozen. (`motion-pipeline:ruling:euphoria-drive-is-dynamic-state`.)
-4. **Behaviour.** The drive selects and weights behaviours (hold against a reflex, withdraw, writhe, crawl to
-   the objective, pass out, get up) that emit targets and per-muscle strength into caller-owned arrays, and
-   nothing else. Today one stand-in: hold a pose against the withdrawal reflex, blended toward a withdraw pose
-   by the reflex leak, shaking with strain, and withdrawing once the will breaks.
+4. **The Brain.** The consumer's authored goals (a behaviour, a priority, a pull, conditions over the drive
+   state), selected after a deliberate latency: the eligible goal of highest priority is wanted, and the
+   Actor commits it. Lodur has no flip rule of its own; every rule is Brain data
+   (`lodur:ruling:npc-brain-authors-goals`). One behaviour, `PoseBehaviour`: a pose held or a loop of pose keys,
+   blended toward a flinch pose by the reflex leak and shaking with strain, emitting targets and per-muscle
+   strength into caller-owned arrays and nothing else. Considerations and the will mix extend it.
 5. **Body.** Follows targets with per-muscle strength in the game's physics world. v1 is GameCult's own
    PD-tracking active ragdoll on **Ymir**, GameCult's boundary around a pinned Box3D, read and driven through
    Ymir's structure-of-arrays world in place (`lodur:ruling:lodur-body-on-ymir`): `Lodur.Body.Ymir`. It owns
@@ -60,7 +62,7 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    policy) behind the same interface. (`motion-pipeline:ruling:euphoria-body-layer-order`.)
 
 `Actor` runs layers 1-4 for one character in that order once per physics step, from caller-owned inputs into
-caller-owned outputs, and reports its events (flinch, will broke, withdrew) as flags.
+caller-owned outputs, and reports its events (flinch, will broke, goal changed) as flags.
 
 ## Invariants
 

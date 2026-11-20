@@ -67,7 +67,7 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
    strain, resolve, `WillBroken` (`DriveState.cs`); behaviour blends two poses by leak and shake
    (`HoldAgainstReflex.cs:56-80`); the body takes 12 strengths and 12 joint-space targets
    (`HumanoidRagdoll.cs:120-146`). No IK, no clips, no physiology, no grip, no part tree beyond the `Limb` and
-   `Muscle` enums. Rung 3 adds emitters and arousal; rung 4 the goal flip and `PoseCycle`.
+   `Muscle` enums. Rung 3 adds emitters and arousal; rung 4 the goal flip and `PoseBehaviour`.
 9. **BDS today.** Headless and body pain box only (`src/BadDay.Ymir/BodyPainBox.cs`); the world is built per run
    with capacity 15 (58); the puppet is welded to a stool because the PD ragdoll cannot balance for 15 s (59-62).
    No session type survives beyond a run, no commands, no level content.
@@ -218,7 +218,7 @@ follow-up `scenario-session-unify`).
    standing, and its failure is the collapse People Playground shows.
 6. `bds-mvp-clips`: which animations exist. Options: poses only (idle, guard, cower, protect-head, brace, reach,
    aim); poses plus a few looping clips (idle sway, struggle, writhe); generated clips from Vili. Recommend poses
-   plus three loops, authored as pose keys (rung 4's `PoseCycle` generalised); Vili clips when its retarget to
+   plus three loops, authored as pose keys (rung 4's `PoseBehaviour` generalised); Vili clips when its retarget to
    this ragdoll exists.
 7. `bds-will-visible`: what failing will looks like. Options: tremor and sag (strain shake exists,
    `HoldAgainstReflex.cs:62`), slower and shorter reaches, aim wander; plus an on-screen will bar; plus vocal or
