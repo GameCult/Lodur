@@ -65,13 +65,23 @@ namespace Lodur
 
         internal static DriveState Fresh => new DriveState { Resolve = 1.0 };
 
-        /// <summary>Steps one tick; returns true on the tick the will breaks (each break, not only the first). <paramref name="pull"/> is the active goal's: it scales resolve drain by (1 - pull).</summary>
-        internal bool Step(DriveParameters p, double dt, double afferent, double strainLoad, double load, double pull)
+        /// <summary>A goal's entry effect: sets resolve, then the mend check runs (a break the entry lifts past <see cref="DriveParameters.WillMendsAt"/> is mended). It is not a break and counts none.</summary>
+        internal void Enter(DriveParameters p, double resolve)
+        {
+            Resolve = resolve;
+            if (WillBroken && Resolve >= p.WillMendsAt)
+            {
+                WillBroken = false;
+            }
+        }
+
+        /// <summary>Steps one tick; returns true on the tick the will breaks (each break, not only the first). <paramref name="pull"/> is the active goal's: it scales resolve drain by (1 - pull). <paramref name="effort"/> is the active goal's resolve drained per second to sustain it (0 while it is involuntary); it joins the drain sum, so pull scales it too.</summary>
+        internal bool Step(DriveParameters p, double dt, double afferent, double strainLoad, double load, double pull, double effort)
         {
             Arousal = Math.Min(Math.Max(Arousal + dt * (p.ArousalRise * load * (1.0 - Arousal) - p.ArousalDecay * Arousal), 0.0), 1.0);
             Pain = Math.Min(Math.Max(Pain + dt * (p.PainRise * afferent * (1.0 - Pain) - p.PainDecay * Pain), 0.0), 1.0);
             Strain = Math.Max(0.0, Strain + dt * (strainLoad - p.StrainRecover * Strain));
-            var drain = (p.ResolveDrainPain * Pain + p.ResolveDrainStrain * Strain + p.ResolveDrainArousal * Arousal) * (1.0 - pull) * p.DrainTrait;
+            var drain = (p.ResolveDrainPain * Pain + p.ResolveDrainStrain * Strain + p.ResolveDrainArousal * Arousal + effort) * (1.0 - pull) * p.DrainTrait;
             var recovery = Pain < p.ResolveRecoversBelowPain && Arousal < p.ResolveRecoversBelowArousal ? p.ResolveRecovery * (1.0 - Resolve) : 0.0;
             Resolve = Math.Min(Math.Max(Resolve + dt * (recovery - drain), 0.0), 1.0);
             if (WillBroken)

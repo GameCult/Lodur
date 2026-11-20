@@ -56,7 +56,7 @@ internal sealed class ConnectedPainBox : IDisposable
                 },
                 new GoalSpec
                 {
-                    Id = "release", Priority = 1.0, Pull = 0.5,
+                    Id = "release", Priority = 1.0, Pull = 0.5, InvoluntarySeconds = double.PositiveInfinity,
                     When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) },
                     Behaviour = new PoseBehaviour
                     {

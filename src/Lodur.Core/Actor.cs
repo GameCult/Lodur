@@ -124,7 +124,10 @@ namespace Lodur
                 }
             }
 
-            if (_drive.Step(_driveP, _dt, afferent, strainLoad, _perception.Load, _brain.Goals[_goal].Pull))
+            // Effort is paid only once the goal is voluntary: the onset (InvoluntarySeconds) runs without will, and without cost.
+            var inForce = _brain.Goals[_goal];
+            var effort = (_tick - _goalSince) * _dt >= inForce.InvoluntarySeconds ? inForce.Effort : 0.0;
+            if (_drive.Step(_driveP, _dt, afferent, strainLoad, _perception.Load, inForce.Pull, effort))
             {
                 events |= TickEvents.WillBroke;
             }
@@ -147,6 +150,10 @@ namespace Lodur
                 _pending = -1;
                 _goalSince = _tick;
                 events |= TickEvents.GoalChanged;
+                if (_brain.Goals[_goal].EntryResolve is double entry)
+                {
+                    _drive.Enter(_driveP, entry);
+                }
             }
 
             _brain.Goals[_goal].Behaviour.Write(leak, _drive.Strain, _tick * _dt, (_tick - _goalSince) * _dt, strengths, targets);

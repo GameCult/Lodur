@@ -131,4 +131,136 @@ public sealed class WillTests
 
     [Fact]
     public void A_WillMendsAt_of_one_is_allowed() => _ = new PainBoxReplay(1, drive: new DriveParameters { WillMendsAt = 1.0 });
+
+    private static PoseBehaviour Pose => new() { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw };
+
+    private static Brain Rage(double? entry) => new()
+    {
+        Goals = new[]
+        {
+            new GoalSpec { Id = "composure", Behaviour = Pose },
+            new GoalSpec
+            {
+                Id = "rage", Priority = 1.0, EntryResolve = entry,
+                When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) },
+                Behaviour = Pose,
+            },
+        },
+    };
+
+    [Theory]
+    [InlineData(1.0, false)]
+    [InlineData(0.1, true)]
+    public void A_goals_entry_resolve_is_set_on_the_tick_it_takes_over_and_mends_the_will_only_if_it_reaches_WillMendsAt(double entry, bool stillBroken)
+    {
+        var r = new PainBoxReplay(1, brain: Rage(entry));
+        TickEvents e;
+        do { e = r.Tick(true); } while ((e & TickEvents.GoalChanged) == 0 && r.Actor.TickCount < 5000);
+        Assert.NotEqual(0, (int)(e & TickEvents.GoalChanged));
+        Assert.Equal(1, r.Actor.GoalIndex);
+        Assert.Equal(entry, r.Actor.Drive.Resolve);
+        Assert.Equal(stillBroken, r.Actor.Drive.WillBroken);
+        Assert.Equal(1, r.Actor.Drive.Breaks);
+    }
+
+    [Fact]
+    public void A_goal_with_no_entry_resolve_leaves_resolve_alone()
+    {
+        var r = new PainBoxReplay(1, brain: Rage(null));
+        TickEvents e;
+        do { e = r.Tick(true); } while ((e & TickEvents.GoalChanged) == 0 && r.Actor.TickCount < 5000);
+        Assert.Equal(0.0, r.Actor.Drive.Resolve);
+        Assert.True(r.Actor.Drive.WillBroken);
+    }
+
+    [Theory]
+    [InlineData(1.0, 0.0, 0.5)]
+    [InlineData(1.0, 0.4, 2.0)]
+    [InlineData(0.0, 0.0, 0.5)]
+    public void Effort_drains_resolve_only_after_the_involuntary_onset_by_effort_times_one_minus_pull_times_the_trait(double onset, double pull, double effort)
+    {
+        var drive = new DriveParameters { ResolveRecovery = 0.0, DrainTrait = 1.0 };
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Pull = pull, Effort = effort, InvoluntarySeconds = onset, Behaviour = Pose } } };
+        var r = new PainBoxReplay(1, drive: drive, brain: brain, jitter: 0.0);
+        var first = -1L;
+        var last = 1.0;
+        var steps = 0;
+        for (long i = 0; i < 400; i++)
+        {
+            r.Tick(false);
+            var now = r.Actor.Drive.Resolve;
+            if (now <= 0.0) break;   // the floor clips the last step
+            if (now < 1.0 && first < 0)
+            {
+                first = i;
+                last = 1.0;
+            }
+
+            if (first >= 0)
+            {
+                Assert.Equal(0.01 * effort * (1.0 - pull), last - now, 12);
+                steps++;
+            }
+
+            last = now;
+        }
+
+        Assert.Equal((long)Math.Round(onset / 0.01), first);
+        Assert.True(steps > 20);
+    }
+
+    [Fact]
+    public void An_infinitely_involuntary_goal_never_pays_its_effort()
+    {
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Effort = 5.0, InvoluntarySeconds = double.PositiveInfinity, Behaviour = Pose } } };
+        var r = new PainBoxReplay(1, brain: brain);
+        for (var i = 0; i < 500; i++) r.Tick(false);
+        Assert.Equal(1.0, r.Actor.Drive.Resolve);
+    }
+
+    [Fact]
+    public void Onset_is_counted_from_the_tick_the_goal_takes_over_not_from_the_start()
+    {
+        var late = new GoalSpec { Id = "late", Priority = 1.0, Effort = 1.0, InvoluntarySeconds = 0.5, When = new[] { new Condition(DriveQuantity.Pain, ConditionOp.AtLeast, 0.3) }, Behaviour = Pose };
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "calm", Behaviour = Pose }, late } };
+        var r = new PainBoxReplay(1, brain: brain, drive: new DriveParameters { ResolveRecovery = 0.0 });
+        long took = -1;
+        long firstEffort = -1;
+        for (long i = 0; i < 3000 && firstEffort < 0; i++)
+        {
+            var before = r.Actor.Drive;
+            var e = r.Tick(true);
+            if ((e & TickEvents.GoalChanged) != 0) took = i;
+            var drainedWithoutEffort = before.Resolve - r.Actor.Drive.Resolve;
+            if (took >= 0 && drainedWithoutEffort > 0.01 * 1.0 * 0.5 * 0.99) firstEffort = i;
+        }
+
+        Assert.True(took > 0);
+        Assert.True(firstEffort - took >= 50, $"effort began {firstEffort - took} ticks after the goal took over, under the 50 of the onset");
+    }
+
+    [Fact]
+    public void Goal_values_outside_their_ranges_are_refused_naming_the_goal()
+    {
+        Brain Of(GoalSpec g) => new() { Goals = new[] { g } };
+        GoalSpec Base() => new() { Id = "bad", Behaviour = Pose };
+        void Refused(GoalSpec g)
+        {
+            var ex = Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), Of(g)));
+            Assert.Contains("bad", ex.Message);
+        }
+
+        Refused(Base() with { EntryResolve = -0.01 });
+        Refused(Base() with { EntryResolve = 1.01 });
+        Refused(Base() with { EntryResolve = double.NaN });
+        Refused(Base() with { Effort = -1.0 });
+        Refused(Base() with { Effort = double.PositiveInfinity });
+        Refused(Base() with { Effort = double.NaN });
+        Refused(Base() with { InvoluntarySeconds = -0.1 });
+        Refused(Base() with { InvoluntarySeconds = double.NaN });
+
+        _ = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(),
+            Of(Base() with { EntryResolve = 0.0, Effort = 0.0, InvoluntarySeconds = double.PositiveInfinity }));
+        _ = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), Of(Base() with { EntryResolve = 1.0 }));
+    }
 }

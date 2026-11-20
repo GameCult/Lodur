@@ -61,6 +61,22 @@ namespace Lodur
         /// </summary>
         public double MinDwellSeconds { get; init; }
 
+        /// <summary>
+        /// The resolve the character has the tick this goal takes over, in [0, 1]; null leaves resolve as it is. Rage is what
+        /// the will breaking leads to, and it resets the will (lodur:ruling:rage-involuntary-onset-then-voluntary).
+        /// </summary>
+        public double? EntryResolve { get; init; }
+
+        /// <summary>Resolve drained per second to sustain this goal, finite and not negative, default 0; it is not paid during <see cref="InvoluntarySeconds"/> and is scaled by (1 - Pull) like the rest of the drain.</summary>
+        public double Effort { get; init; }
+
+        /// <summary>
+        /// How long after it takes over the goal runs without will, not negative, default 0 (voluntary from the first tick);
+        /// +infinity is involuntary throughout. While involuntary the behaviour writes at full weight and pays no Effort;
+        /// after it the goal is voluntary: sustained by <see cref="DriveState.Will"/> like every other voluntary layer.
+        /// </summary>
+        public double InvoluntarySeconds { get; init; }
+
         private Condition[] _when = Array.Empty<Condition>();
         private IReadOnlyList<Condition> _whenView = Array.AsReadOnly(Array.Empty<Condition>());
 
@@ -177,6 +193,21 @@ namespace Lodur
                 if (!(goal.MinDwellSeconds >= 0.0 && double.IsFinite(goal.MinDwellSeconds)))
                 {
                     throw new ArgumentException($"Goal {goal.Id}: MinDwellSeconds must be finite (not infinite) and not negative.");
+                }
+
+                if (goal.EntryResolve is double entry && !(entry >= 0.0 && entry <= 1.0))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: EntryResolve must be in [0, 1].");
+                }
+
+                if (!(goal.Effort >= 0.0 && double.IsFinite(goal.Effort)))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: Effort must be finite and not negative.");
+                }
+
+                if (!(goal.InvoluntarySeconds >= 0.0))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: InvoluntarySeconds must not be negative or NaN (infinity is allowed).");
                 }
 
                 foreach (var c in goal.When)

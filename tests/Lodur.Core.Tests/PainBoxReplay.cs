@@ -38,7 +38,7 @@ internal static class PainBoxBrain
             },
             new GoalSpec
             {
-                Id = "release", Priority = 1.0, Pull = pull,
+                Id = "release", Priority = 1.0, Pull = pull, InvoluntarySeconds = double.PositiveInfinity,
                 When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) },
                 Behaviour = new PoseBehaviour
                 {
