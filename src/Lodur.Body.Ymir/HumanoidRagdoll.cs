@@ -127,11 +127,6 @@ namespace Lodur.Body.Ymir
             var v = _world.View;
             for (var m = 0; m < MuscleCount; m++)
             {
-                if (!(strengths[m] > 0f))
-                {
-                    continue; // limp (or NaN): no torque
-                }
-
                 var j = _jointLane[m];
                 var rotation = new Quat(v.JointRotationX[j], v.JointRotationY[j], v.JointRotationZ[j], v.JointRotationW[j]);
                 PdMuscle.Torque(rotation, v.JointAngularVelocityX[j], v.JointAngularVelocityY[j], v.JointAngularVelocityZ[j],

@@ -51,6 +51,25 @@ public sealed class PdMuscleTests
     }
 
     [Fact]
+    public void Passive_damping_survives_limp_and_stiffness_does_not()
+    {
+        var target = Quat.FromAxisAngle(1f, 0f, 0f, 0.4f);
+        var w = (1f, -2f, 3f);
+        PdMuscle.Torque(Quat.Identity, w.Item1, w.Item2, w.Item3, target, new MuscleGains(100f, 5f, 100f, 2f, passive: 1f), 0f, out var x, out var y, out var z);
+        Assert.Equal((-5f, 10f, -6f), (x, y, z)); // exactly -kd * omega per axis, nothing toward the target
+        PdMuscle.Torque(Quat.Identity, w.Item1, w.Item2, w.Item3, target, new MuscleGains(100f, 5f, 100f, 2f, passive: 0f), 0f, out x, out y, out z);
+        Assert.Equal((0f, 0f, 0f), (x, y, z));
+        // A half passive floor under a quarter strength damps at the floor, stiffens at the strength.
+        PdMuscle.Torque(Quat.Identity, w.Item1, 0f, 0f, target, new MuscleGains(100f, 5f, 100f, 2f, passive: 0.5f), 0.25f, out x, out y, out z);
+        var stiffOnly = Torque(Quat.Identity, default, target, 100f, 5f, 0.25f).X;
+        Assert.Equal(stiffOnly - 0.5f * 5f * 1f, x, 1e-3f);
+        // Above the floor strength rules: the whole law, as without Passive.
+        PdMuscle.Torque(Quat.Identity, w.Item1, w.Item2, w.Item3, target, new MuscleGains(100f, 5f, 100f, 2f, passive: 0.5f), 1f, out x, out y, out z);
+        var plain = Torque(Quat.Identity, w, target, 100f, 5f, 1f, twistKp: 100f, twistKd: 2f);
+        Assert.Equal((plain.X, plain.Y, plain.Z), (x, y, z));
+    }
+
+    [Fact]
     public void The_error_takes_the_shorter_way_round_even_when_the_quaternions_are_opposite_signs()
     {
         // 350 degrees about z is 10 degrees the other way.

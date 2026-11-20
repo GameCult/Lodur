@@ -65,10 +65,17 @@ namespace Lodur
     {
         public readonly float SwingStiffness, SwingDamping, TwistStiffness, TwistDamping;
 
-        public MuscleGains(float swingStiffness, float swingDamping, float twistStiffness, float twistDamping)
+        /// <summary>
+        /// The fraction of damping kept whatever the strength, in [0, 1] (tissue viscosity): a limp joint with Passive 1
+        /// still resists being swung, with no stiffness. Default 0, where limp is exactly zero torque.
+        /// </summary>
+        public readonly float Passive;
+
+        public MuscleGains(float swingStiffness, float swingDamping, float twistStiffness, float twistDamping, float passive = 0f)
         {
             SwingStiffness = swingStiffness; SwingDamping = swingDamping;
             TwistStiffness = twistStiffness; TwistDamping = twistDamping;
+            Passive = passive > 0f ? (passive < 1f ? passive : 1f) : 0f;
         }
     }
 
@@ -83,14 +90,18 @@ namespace Lodur
         /// Torque on the child, in the parent joint frame, that turns <paramref name="rotation"/> (child frame
         /// relative to parent frame) toward <paramref name="target"/> and damps <paramref name="angularVelocity"/>
         /// (child minus parent, in the parent frame). Strength scales every gain together, so the
-        /// damping ratio does not change with it; strength 0 is a limp joint and returns exactly zero.
+        /// damping ratio does not change with it. Damping is scaled by the larger of the strength and
+        /// <see cref="MuscleGains.Passive"/>, stiffness by the strength alone: strength 0 is a limp joint, exactly zero torque
+        /// when Passive is 0 and pure damping when it is not.
         /// The rotation error takes the shorter way round.
         /// </summary>
         public static void Torque(
             in Quat rotation, float wx, float wy, float wz, in Quat target, in MuscleGains gains, float strength,
             out float tx, out float ty, out float tz)
         {
-            if (strength <= 0f)
+            var stiff = strength > 0f ? strength : 0f; // negative or NaN strength is limp
+            var damp = stiff > gains.Passive ? stiff : gains.Passive;
+            if (damp <= 0f)
             {
                 tx = ty = tz = 0f;
                 return;
@@ -106,9 +117,18 @@ namespace Lodur
             var sin = MathF.Sqrt(e.X * e.X + e.Y * e.Y + e.Z * e.Z);
             // Rotation vector of the error: angle * axis, with the small-angle limit of 2 * vector part.
             var scale = sin < 1e-6f ? 2f : 2f * MathF.Atan2(sin, e.W) / sin;
-            tx = strength * (gains.SwingStiffness * scale * e.X - gains.SwingDamping * wx);
-            ty = strength * (gains.SwingStiffness * scale * e.Y - gains.SwingDamping * wy);
-            tz = strength * (gains.TwistStiffness * scale * e.Z - gains.TwistDamping * wz);
+            if (damp == stiff)
+            {
+                // The whole law at one strength, in the form every pinned replay was recorded with.
+                tx = stiff * (gains.SwingStiffness * scale * e.X - gains.SwingDamping * wx);
+                ty = stiff * (gains.SwingStiffness * scale * e.Y - gains.SwingDamping * wy);
+                tz = stiff * (gains.TwistStiffness * scale * e.Z - gains.TwistDamping * wz);
+                return;
+            }
+
+            tx = stiff * gains.SwingStiffness * scale * e.X - damp * gains.SwingDamping * wx;
+            ty = stiff * gains.SwingStiffness * scale * e.Y - damp * gains.SwingDamping * wy;
+            tz = stiff * gains.TwistStiffness * scale * e.Z - damp * gains.TwistDamping * wz;
         }
     }
 }
