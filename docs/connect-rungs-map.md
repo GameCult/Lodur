@@ -196,7 +196,7 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    policy) behind the same interface. (`motion-pipeline:ruling:euphoria-body-layer-order`.)
 
 `Actor` runs layers 1-4 for one character in that order once per physics step, from caller-owned inputs into
-caller-owned outputs, and reports its events (flinch, will broke, withdrew) as flags.
+caller-owned outputs, and reports its events (flinch, will broke, goal changed) as flags.
 
 ## Invariants
 

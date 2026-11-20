@@ -65,7 +65,7 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 8. **Lodur today.** Perception senses named box volumes at points only (`Perception.cs:82-113`); regions are two
    hand points (`HumanoidRagdoll.cs:12-16`, 148-170); one reflex kind (`WithdrawalReflex.cs`); drive is pain,
    strain, resolve, `WillBroken` (`DriveState.cs`); behaviour blends two poses by leak and shake
-   (`HoldAgainstReflex.cs:56-80`); the body takes 12 strengths and 12 joint-space targets
+   (`PoseBehaviour.cs:87-115`); the body takes 12 strengths and 12 joint-space targets
    (`HumanoidRagdoll.cs:120-146`). No IK, no clips, no physiology, no grip, no part tree beyond the `Limb` and
    `Muscle` enums. Rung 3 adds emitters and arousal; rung 4 the goal flip and `PoseBehaviour`.
 9. **BDS today.** Headless and body pain box only (`src/BadDay.Ymir/BodyPainBox.cs`); the world is built per run
@@ -100,7 +100,7 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 | Reflexes: withdrawal (exists), startle on sensory and touch onsets, flinch-from-touch, brace on impact | 2 | withdrawal exists `WithdrawalReflex.cs`; rest new | `lodur-startle-attention`, `lodur-reflex-set` |
 | Physiology as drive state: per-part HP and injuries, body blood fraction, bleeding, pain sum, shock, consciousness, capacities scaling muscle strength, death | 3 | new | `lodur-physiology` |
 | Will economy: resolve (exists) times attention (new, startle drains it) is the budget every voluntary layer draws on; reflexes act against it | 3/4 | partial: suppression by resolve `WithdrawalReflex.cs:44` | `lodur-startle-attention`, `lodur-will-mix` |
-| Voluntary motor layers: hold pose (exists as `HoldAgainstReflex`), clip player, IK goals (reach, look, aim), grip; mixed by will | 4 | hold exists; rest new | `lodur-will-mix`, `lodur-ik-goals`, `lodur-clips` |
+| Voluntary motor layers: hold pose (exists as `PoseBehaviour`), clip player, IK goals (reach, look, aim), grip; mixed by will | 4 | hold exists; rest new | `lodur-will-mix`, `lodur-ik-goals`, `lodur-clips` |
 | Body interface: strengths + joint targets (exists) + IK goals with weights | 5 | partial `HumanoidRagdoll.Drive` | `lodur-ik-goals` |
 | Severing: physiology decides; binding removes the joint in Ymir; impairment states derived per part, mirror-symmetric | 3 decides, 5 executes | new | `lodur-sever-impair` |
 | Grip: hand holds an object by a breakable weld whose threshold follows grip strength; drop on pain, overload, unconsciousness; the tool frame is an IK end effector | 4/5 | new | `lodur-grip` |
@@ -138,7 +138,7 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
   from insults (part, kind, magnitude) the binding builds out of Ymir facts and the game's material table.
   **The joint break threshold is no longer an owner; it is a stress sensor** whose facts become Tear insults.
 - **What the body tries to do:** Lodur's will mix: voluntary layers weighted by available will, reflexes against
-  it (ruling `bds-sandbox-arenas-will-economy`). `HoldAgainstReflex`'s blend (`HoldAgainstReflex.cs:56-80`) is
+  it (ruling `bds-sandbox-arenas-will-economy`). `PoseBehaviour`'s blend (`PoseBehaviour.cs:87-115`) is
   no longer an owner; it becomes one voluntary layer (hold pose) inside the mix.
 - **Muscle strength ceiling:** physiology capacities times consciousness; the will mix may only scale down from
   it. Content gains are parameters, not owners.
@@ -166,7 +166,7 @@ command queue; arenas are levels; a player cut and a falling blade go through th
 a torn limb and a cut limb go through the same physiology severing decision; reload of a level replays the
 same commands as building it.
 
-**Deletion lines:** `HoldAgainstReflex.Blend` as the motor owner (in `lodur-will-mix`); hand-only `Region`
+**Deletion lines:** `PoseBehaviour.Blend` as the motor owner (in `lodur-will-mix`); hand-only `Region`
 enum and `ReadRegions` as perception's body model (in `lodur-touch`, replaced by parts); the per-run world in
 `BodyPainBox.Run` as BDS's only world (in `bds-sandbox-session`, scenario runs become sessions,
 follow-up `scenario-session-unify`).
@@ -221,7 +221,7 @@ follow-up `scenario-session-unify`).
    plus three loops, authored as pose keys (rung 4's `PoseBehaviour` generalised); Vili clips when its retarget to
    this ragdoll exists.
 7. `bds-will-visible`: what failing will looks like. Options: tremor and sag (strain shake exists,
-   `HoldAgainstReflex.cs:62`), slower and shorter reaches, aim wander; plus an on-screen will bar; plus vocal or
+   `PoseBehaviour.cs:89`), slower and shorter reaches, aim wander; plus an on-screen will bar; plus vocal or
    facial cues (presentation). Recommend tremor, sag, slower reach and aim wander from the will mix, plus a
    debug bar; voice later.
 
@@ -298,7 +298,7 @@ with the Lodur rungs (different repo); Lodur cuts serialise on `Actor.cs`; BDS w
 | 3 | `lodur-startle-attention` | Lodur | startle reflex on onsets; attention scales will | rung4-goal-flip | M |
 | 4 | `lodur-physiology` | Lodur | part tree content, HP, wounds, blood, pain, shock, consciousness, capacities, death | 3 | L (split core/binding if over budget) |
 | 5 | `lodur-touch` | Lodur | per-part touch from contact facts, external-joint pull; insults from material table | 1, 2, 4 | M |
-| 6 | `lodur-will-mix` | Lodur | voluntary layers weighted by will; HoldAgainstReflex demoted | 3 | M |
+| 6 | `lodur-will-mix` | Lodur | voluntary layers weighted by will; PoseBehaviour demoted | 3 | M |
 | 7 | `lodur-ik-goals` | Lodur | IK goals in body interface; two-bone arm/leg, look, aim | 6 | M |
 | 8 | `lodur-reflex-set` | Lodur | flinch-from-touch, brace | 5, 6 | M |
 | 9 | `lodur-sever-impair` | Lodur | severing via binding, impairment states | 2, 4, 5; Q `bds-dismember-trigger`, `bds-reattach` | M |

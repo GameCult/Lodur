@@ -48,7 +48,8 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    later shock on a clock that blood loss speeds and adrenaline that spikes on threat. Resolve reaching zero
    breaks the will, which releases every suppression. Static per-character values are this state with its
    dynamics frozen. (`motion-pipeline:ruling:euphoria-drive-is-dynamic-state`.)
-4. **The Brain.** The consumer's authored goals (a behaviour, a priority, a pull, conditions over the drive
+4. **The Brain.** The consumer's authored goals (a behaviour, a priority, a pull in [0, 1] that defaults to 0, no pull (the former objective pull
+   defaulted to 0.5), an optional minimum dwell, conditions over the drive
    state), selected after a deliberate latency: the eligible goal of highest priority is wanted, and the
    Actor commits it. Lodur has no flip rule of its own; every rule is Brain data
    (`lodur:ruling:npc-brain-authors-goals`). One behaviour, `PoseBehaviour`: a pose held or a loop of pose keys,
@@ -76,7 +77,7 @@ caller-owned outputs, and reports its events (flinch, will broke, goal changed) 
   through that world.
 - `reflex-gain-from-drive`: a reflex fires on its own shorter latency and overlays the running behaviour; it
   never waits for behaviour selection. Will acts on reflexes ahead of time, not after: drive state (resolve,
-  the pull of the objective) sets each reflex's gain, so a resolved character can hold its hand in the box.
+  the pull of the active goal) sets each reflex's gain, so a resolved character can hold its hand in the box.
   Suppression is never free: the stimulus still feeds pain, and holding a reflex down shows as visible strain
   until resolve breaks. Deliberate behaviour takes over a fired reflex only after its own, longer latency.
   (`motion-pipeline:ruling:lodur-reflexes-suppressible-by-will`.)
