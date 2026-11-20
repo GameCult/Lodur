@@ -62,8 +62,9 @@ namespace Lodur
             {
                 _dwell[g] = (long)Math.Round(brain.Goals[g].MinDwellSeconds / tickSeconds);
                 // Rounded to whole ticks once, like the dwell, so the onset is the same number of ticks whatever the tick length does to a product.
-                var onset = brain.Goals[g].InvoluntarySeconds;
-                _onset[g] = double.IsPositiveInfinity(onset) ? long.MaxValue : (long)Math.Round(onset / tickSeconds);
+                // A quotient past the long range (+infinity included) is involuntary throughout: the cast of an out-of-range double is not defined across runtimes.
+                var onsetTicks = brain.Goals[g].InvoluntarySeconds / tickSeconds;
+                _onset[g] = onsetTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(onsetTicks);
             }
 
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);

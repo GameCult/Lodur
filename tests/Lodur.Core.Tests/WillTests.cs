@@ -368,6 +368,7 @@ public sealed class WillTests
     [InlineData(1.0 / 120.0, 1.85, 222)]   // 222 x (1/120) is just under 1.85 in floating point
     [InlineData(1.0 / 60.0, 0.9, 54)]
     [InlineData(0.01, 0.5, 50)]
+    [InlineData(0.01, 0.29, 29)]            // 0.29 / 0.01 is 28.999999999999996: rounds to 29, floors to 28
     public void The_involuntary_onset_is_the_requested_seconds_in_whole_ticks_whatever_the_tick_length(double dt, double onset, long ticks)
     {
         var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Effort = 1.0, InvoluntarySeconds = onset, Behaviour = Pose } } };
@@ -385,6 +386,24 @@ public sealed class WillTests
 
         Assert.Equal(ticks, firstDrain);
         Assert.Equal(ticks, firstWeighted);
+    }
+
+    [Theory]
+    [InlineData(1e300)]
+    [InlineData(1e19)]
+    [InlineData(double.PositiveInfinity)]
+    public void An_onset_past_the_range_of_a_tick_count_is_involuntary_throughout_not_a_wrapped_negative(double onset)
+    {
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Effort = 1.0, InvoluntarySeconds = onset, Behaviour = Pose } } };
+        var actor = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters { ResolveRecovery = 0.0 }, brain);
+        float[] p = { 0f }, strengths = new float[2];
+        var targets = new Quat[2];
+        for (var i = 0; i < 500; i++)
+        {
+            actor.Tick(p, p, p, System.Array.Empty<BoxStimulus>(), strengths, targets);
+            Assert.Equal(1.0, actor.Drive.Resolve);
+            Assert.Equal(1f, strengths[0]);
+        }
     }
 
     [Fact]
