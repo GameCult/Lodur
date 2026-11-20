@@ -54,7 +54,11 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    Actor commits it. Lodur has no flip rule of its own; every rule is Brain data
    (`lodur:ruling:npc-brain-authors-goals`). One behaviour, `PoseBehaviour`: a pose held or a loop of pose keys,
    blended toward a flinch pose by the reflex leak and shaking with strain, emitting targets and per-muscle
-   strength into caller-owned arrays and nothing else. Considerations and the will mix extend it.
+   strength into caller-owned arrays and nothing else. Commitment is soft: a goal with a minimum dwell, counted
+   in ticks from the tick it took over, is left for a goal that ties or ranks below it only once the dwell has
+   passed, while a strictly higher-priority goal preempts during the dwell (after the deliberate latency); the
+   return trip from an entered goal is gated by that goal's own dwell, which is what bounds chatter at a threshold.
+   A built Brain owns copies of its data and reads back as read-only views. Considerations and the will mix extend it.
 5. **Body.** Follows targets with per-muscle strength in the game's physics world. v1 is GameCult's own
    PD-tracking active ragdoll on **Ymir**, GameCult's boundary around a pinned Box3D, read and driven through
    Ymir's structure-of-arrays world in place (`lodur:ruling:lodur-body-on-ymir`): `Lodur.Body.Ymir`. It owns
