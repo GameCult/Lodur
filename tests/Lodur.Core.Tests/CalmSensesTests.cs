@@ -83,6 +83,22 @@ public sealed class SensoryGainTests
         Assert.True(deaf.ChannelAfferent(Channel.Audio) > 0.55, "the channel sensitised while it was gated");
     }
 
+    [Fact]
+    public void Sense_refuses_a_gain_outside_zero_to_one_and_leaves_its_state_alone()
+    {
+        var p = Senses(new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0 });
+        p.Sense(Zero, Zero, Zero, NoBoxes, Loud, 1.0);
+        foreach (var bad in new[] { double.NaN, -0.01, 1.01, double.PositiveInfinity, double.NegativeInfinity })
+        {
+            var ex = Assert.Throws<ArgumentException>(() => p.Sense(Zero, Zero, Zero, NoBoxes, Loud, bad));
+            Assert.Contains("gain", ex.Message);
+        }
+
+        p.Sense(Zero, Zero, Zero, NoBoxes, Loud, 0.0);
+        p.Sense(Zero, Zero, Zero, NoBoxes, Loud, 1.0);
+        Assert.Equal(0.55, p.ChannelAfferent(Channel.Audio), 12);
+    }
+
     private static Brain GainGoal(double gain, string id = "g") => new()
     {
         Goals = new[] { new GoalSpec { Id = id, SensoryGain = gain, Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw } } },

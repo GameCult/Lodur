@@ -158,7 +158,8 @@ namespace Lodur
 
         /// <summary>
         /// Senses once per physics step. The spans are the caller's, one point per region. The sensory gain (default 1, the identity) multiplies the sense
-        /// channels' afferents as they leave the conduction delay; the nociceptive region afferents are never gated.
+        /// channels' afferents as they leave the conduction delay, so a change of gain reaches <see cref="Load"/> on the next call it is passed to; the nociceptive region
+        /// afferents are never gated. A gain outside [0, 1] (NaN and infinity included) is refused.
         /// </summary>
         public void Sense(ReadOnlySpan<float> x, ReadOnlySpan<float> y, ReadOnlySpan<float> z, ReadOnlySpan<BoxStimulus> sources,
             ReadOnlySpan<Emitter> emitters = default, double sensoryGain = 1.0)
@@ -166,6 +167,11 @@ namespace Lodur
             if (x.Length != _regions || y.Length != _regions || z.Length != _regions)
             {
                 throw new ArgumentException($"x, y and z need {_regions} entries, one per region.");
+            }
+
+            if (!(sensoryGain >= 0.0 && sensoryGain <= 1.0))
+            {
+                throw new ArgumentException("The sensory gain must be in [0, 1].", nameof(sensoryGain));
             }
 
             if (_senses != null)
