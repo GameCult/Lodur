@@ -363,4 +363,27 @@ public sealed class WillTests
     [MemberData(nameof(BadDrives))]
     public void A_drive_value_the_drive_cannot_run_on_is_refused_at_construction_before_any_tick(DriveParameters bad) =>
         Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), bad, PainBoxBrain.Make(0.5)));
+
+    [Theory]
+    [InlineData(1.0 / 120.0, 1.85, 222)]   // 222 x (1/120) is just under 1.85 in floating point
+    [InlineData(1.0 / 60.0, 0.9, 54)]
+    [InlineData(0.01, 0.5, 50)]
+    public void The_involuntary_onset_is_the_requested_seconds_in_whole_ticks_whatever_the_tick_length(double dt, double onset, long ticks)
+    {
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Effort = 1.0, InvoluntarySeconds = onset, Behaviour = Pose } } };
+        var actor = new Actor(dt, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters { ResolveRecovery = 0.0 }, brain);
+        float[] p = { 0f }, strengths = new float[2];
+        var targets = new Quat[2];
+        long firstDrain = -1, firstWeighted = -1;
+        for (long i = 0; i < ticks + 20; i++)
+        {
+            var before = actor.Drive.Resolve;
+            actor.Tick(p, p, p, System.Array.Empty<BoxStimulus>(), strengths, targets);
+            if (firstDrain < 0 && actor.Drive.Resolve < before) firstDrain = i;
+            if (firstWeighted < 0 && strengths[0] < 1f) firstWeighted = i;
+        }
+
+        Assert.Equal(ticks, firstDrain);
+        Assert.Equal(ticks, firstWeighted);
+    }
 }

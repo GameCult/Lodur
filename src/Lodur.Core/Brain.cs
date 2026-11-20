@@ -71,7 +71,7 @@ namespace Lodur
         public double Effort { get; init; }
 
         /// <summary>
-        /// How long after it takes over the goal runs without will, not negative, default 0 (voluntary from the first tick);
+        /// How long after it takes over the goal runs without will (rounded to whole ticks once, like the dwell), not negative, default 0 (voluntary from the first tick);
         /// +infinity is involuntary throughout. While involuntary the behaviour writes at full weight and pays no Effort;
         /// after it the goal is voluntary: sustained by <see cref="DriveState.Will"/> like every other voluntary layer.
         /// </summary>

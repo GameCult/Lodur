@@ -28,6 +28,7 @@ namespace Lodur
         private readonly Brain _brain;
         private readonly long _latency;
         private readonly long[] _dwell;
+        private readonly long[] _onset;
         private readonly Perception _perception;
         private readonly WithdrawalReflex[] _reflexes;
         private DriveState _drive = DriveState.Fresh;
@@ -51,9 +52,13 @@ namespace Lodur
             _goal = brain.Start;
             _latency = Math.Max(1, (long)Math.Round(brain.DeliberateLatencySeconds / tickSeconds));
             _dwell = new long[brain.Goals.Count];
+            _onset = new long[brain.Goals.Count];
             for (var g = 0; g < _dwell.Length; g++)
             {
                 _dwell[g] = (long)Math.Round(brain.Goals[g].MinDwellSeconds / tickSeconds);
+                // Rounded to whole ticks once, like the dwell, so the onset is the same number of ticks whatever the tick length does to a product.
+                var onset = brain.Goals[g].InvoluntarySeconds;
+                _onset[g] = double.IsPositiveInfinity(onset) ? long.MaxValue : (long)Math.Round(onset / tickSeconds);
             }
 
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);
@@ -123,7 +128,7 @@ namespace Lodur
 
             // Effort is paid only once the goal is voluntary: the onset (InvoluntarySeconds) runs without will, and without cost.
             var inForce = _brain.Goals[_goal];
-            var effort = (_tick - _goalSince) * _dt >= inForce.InvoluntarySeconds ? inForce.Effort : 0.0;
+            var effort = _tick - _goalSince >= _onset[_goal] ? inForce.Effort : 0.0;
             if (_drive.Step(_driveP, _dt, afferent, strainLoad, _perception.Load, inForce.Pull, effort))
             {
                 events |= TickEvents.WillBroke;
@@ -155,7 +160,7 @@ namespace Lodur
 
             // Every voluntary layer is held by will, in contest with the reflex; an involuntary one (the onset of a goal) is not.
             var secondsInGoal = (_tick - _goalSince) * _dt;
-            var weight = secondsInGoal >= _brain.Goals[_goal].InvoluntarySeconds ? Math.Pow(_drive.Will, _driveP.WillCurve) : 1.0;
+            var weight = _tick - _goalSince >= _onset[_goal] ? Math.Pow(_drive.Will, _driveP.WillCurve) : 1.0;
             _brain.Goals[_goal].Behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets);
             _tick++;
             return events;
