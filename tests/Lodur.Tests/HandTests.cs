@@ -150,44 +150,73 @@ public sealed class HandTests
             return (x + v.PositionX[i], y + v.PositionY[i], z + v.PositionZ[i]);
         }
 
-        public float Max(Box3DSoaView v)
+        /// <summary>The worst separation among the joints from index <paramref name="firstHand"/> on, and among those before it.</summary>
+        public (float AtOrAfter, float Before) MaxBy(Box3DSoaView v, int firstHand)
         {
-            var max = 0f;
-            foreach (var (a, b, la, lb) in _joints)
+            float after = 0f, before = 0f;
+            for (var k = 0; k < _joints.Length; k++)
             {
+                var (a, b, la, lb) = _joints[k];
                 var p = World(v, a, la); var q = World(v, b, lb);
-                max = MathF.Max(max, MathF.Sqrt((p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z)));
+                var d = MathF.Sqrt((p.X - q.X) * (p.X - q.X) + (p.Y - q.Y) * (p.Y - q.Y) + (p.Z - q.Z) * (p.Z - q.Z));
+                if (k >= firstHand) after = MathF.Max(after, d); else before = MathF.Max(before, d);
             }
-            return max;
+            return (after, before);
         }
     }
 
-    [Fact]
-    public void Hand_joints_hold_together_under_a_flail_as_well_as_the_body_joints_do()
+    /// <summary>
+    /// The slam flail's worst joint-anchor separations over seeds 1..20 and strike/wind-up half-periods of 15, 30 and 60 ticks,
+    /// 6 s each: [0] the hand joints (wrist, thumb, fingers), [1] the body joints. Runs are independent worlds, taken in parallel.
+    /// </summary>
+    private static (float Hand, float Body) FlailWorst(out int runs)
     {
-        using var s = new RagdollScenario(seed: 1);
-        var handJoints = new[] { Muscle.WristL, Muscle.WristR, Muscle.ThumbL, Muscle.ThumbR, Muscle.FingersL, Muscle.FingersR }.Select(m => s.Ragdoll.JointLane(m));
-        var sep = new JointSeparation(s.World, handJoints);
-        var worst = 0f;
-        for (var i = 0; i < 6 * 120; i++)
+        var cases = new List<(ulong Seed, int Half)>();
+        foreach (var half in new[] { 15, 30, 60 }) for (ulong seed = 1; seed <= 20; seed++) cases.Add((seed, half));
+        runs = cases.Count;
+        var results = new (float Hand, float Body)[cases.Count];
+        Parallel.For(0, cases.Count, k =>
         {
-            var strike = (i / 30) % 2 == 0;
-            foreach (var (sh, el) in new[] { (Muscle.ShoulderL, Muscle.ElbowL), (Muscle.ShoulderR, Muscle.ElbowR) })
+            var (seed, half) = cases[k];
+            using var s = new RagdollScenario(seed);
+            var all = Enumerable.Range(0, HumanoidRagdoll.MuscleCount).ToArray();
+            var sep = new JointSeparation(s.World, all.Select(m => s.Ragdoll.JointLane((Muscle)m)));
+            float hand = 0f, body = 0f;
+            for (var i = 0; i < 6 * 120; i++)
             {
-                s.Target[(int)sh] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? -1.5f : -0.5f);
-                s.Target[(int)el] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? 0f : -2.2f);
+                var strike = (i / half) % 2 == 0;
+                foreach (var (sh, el) in new[] { (Muscle.ShoulderL, Muscle.ElbowL), (Muscle.ShoulderR, Muscle.ElbowR) })
+                {
+                    s.Target[(int)sh] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? -1.5f : -0.5f);
+                    s.Target[(int)el] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? 0f : -2.2f);
+                }
+                s.Target[(int)Muscle.FingersL] = s.Target[(int)Muscle.FingersR] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? -1.5f : 0f);
+                s.Target[(int)Muscle.WristL] = s.Target[(int)Muscle.WristR] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? 0.8f : -0.8f);
+                s.Run(RagdollScenario.Dt);
+                var v = s.World.View;
+                for (var b = 0; b < v.Count; b++)
+                {
+                    Assert.True(float.IsFinite(v.PositionX[b] + v.PositionY[b] + v.PositionZ[b] + v.RotationW[b] + v.VelocityX[b] + v.AngularVelocityX[b]), $"seed {seed} half {half}: body {b} is finite at step {i}");
+                }
+                var (h, bo) = sep.MaxBy(v, (int)Muscle.WristL);
+                hand = MathF.Max(hand, h);
+                body = MathF.Max(body, bo);
             }
-            s.Target[(int)Muscle.FingersL] = s.Target[(int)Muscle.FingersR] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? -1.5f : 0f);
-            s.Target[(int)Muscle.WristL] = s.Target[(int)Muscle.WristR] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? 0.8f : -0.8f);
-            s.Run(RagdollScenario.Dt);
-            var v = s.World.View;
-            for (var b = 0; b < v.Count; b++)
-            {
-                Assert.True(float.IsFinite(v.PositionX[b] + v.PositionY[b] + v.PositionZ[b] + v.RotationW[b] + v.VelocityX[b] + v.AngularVelocityX[b]), $"body {b} is finite at step {i}");
-            }
-            worst = MathF.Max(worst, sep.Max(v));
-        }
-        Assert.True(worst <= 0.030f, $"a hand joint came apart by {worst * 1000f} mm");
+            results[k] = (hand, body);
+        });
+        return (results.Max(r => r.Hand), results.Max(r => r.Body));
+    }
+
+    [Fact]
+    public void Joints_hold_together_under_a_slam_flail_across_seeds_and_cadences_within_their_measured_bars()
+    {
+        // The bars are MEASURED, not targets (ruling flail-bar-honest-multiseed). Over these 60 runs the worst hand joint stretched
+        // 57.4 mm (thumb) and the worst body joint 37.4 mm (elbow); the bars sit just above, so a worse hand or body fails.
+        // A soft joint stretches by the slam's acceleration over its stiffness, whatever the gains; the real tightening is
+        // follow-up ymir-joint-softness-and-filter (joint softness and collision filtering in Ymir's SoA world).
+        var (hand, body) = FlailWorst(out _);
+        Assert.True(hand <= 0.060f, $"a hand joint came apart by {hand * 1000f} mm (bar 60)");
+        Assert.True(body <= 0.045f, $"a body joint came apart by {body * 1000f} mm (bar 45)");
     }
 
     /// <summary>Swing of a joint's rotation off its axis, radians (the twist about the joint z removed).</summary>
