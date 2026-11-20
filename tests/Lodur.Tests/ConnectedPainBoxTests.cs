@@ -12,13 +12,15 @@ namespace Lodur.Tests;
 internal sealed class ConnectedPainBox : IDisposable
 {
     public const double Dt = 1.0 / 120.0;
+    /// <summary>The stimulus box's half extent: 0.12 held the leak-free hand in the box until the break with the hand a forearm tip; the palm hangs 4 ticks early, so 0.125.</summary>
+    public const float BoxHalf = 0.125f;
     /// <summary>Where the right palm settles at the hold pose (the box and the shoulder-right strength-1 pose are fixed; measured seed 1 from 3 s).</summary>
     public static readonly (float X, float Y, float Z) Box = (-0.210f, 1.116f, 0.441f);
 
     public readonly Box3DSoaWorld World;
     public readonly HumanoidRagdoll Ragdoll;
     public readonly Actor Actor;
-    public readonly BoxStimulus[] Sources = { new BoxStimulus(Box.X, Box.Y, Box.Z, 0.12f, 0.12f, 0.12f) };
+    public readonly BoxStimulus[] Sources = { new BoxStimulus(Box.X, Box.Y, Box.Z, BoxHalf, BoxHalf, BoxHalf) };
     public readonly float[] X = new float[HumanoidRagdoll.RegionCount], Y = new float[HumanoidRagdoll.RegionCount], Z = new float[HumanoidRagdoll.RegionCount];
     public readonly float[] Strength = new float[HumanoidRagdoll.MuscleCount];
     public readonly Quat[] Target = new Quat[HumanoidRagdoll.MuscleCount];
@@ -197,9 +199,9 @@ public sealed class ConnectedPainBoxTests
     public void A_failing_will_sags_the_hold_even_with_no_leak_and_no_shake_while_a_strong_will_holds_still()
     {
         var plain = Run(seed: 1, new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 }, maxSeconds: 16.0);
-        // Early, resolve is high and the weight near 1: the hand stays within 2.3 cm of the hold point (seed 1 measured 0.8-2.0 cm to 8 s).
+        // Early, resolve is high and the weight near 1: the hand stays within 2.3 cm of the hold point (seed 1 measured 0.2-2.0 cm to 8 s).
         for (var i = 3 * Hz; i < 6 * Hz; i++) Assert.True(Dist(plain.Hand[i].Hand, Centre) <= 0.023f, $"drift {Dist(plain.Hand[i].Hand, Centre)} at tick {i}");
-        // Late, the will is nearly gone: the voluntary hold has gone slack and the arm sags well out of the box before the break (measured 0.14 m at 14.2 s).
+        // Late, the will is nearly gone: the voluntary hold has gone slack and the arm sags well out of the box before the break (measured 0.155 m at 14.3 s).
         Assert.True(Dist(plain.Hand[(int)plain.Broke - 60].Hand, Centre) > 0.1f);
     }
 
@@ -213,7 +215,8 @@ public sealed class ConnectedPainBoxTests
     public void Strain_shows_as_a_visible_shake_of_the_hand_which_the_shipped_amplitude_makes_and_zero_does_not()
     {
         // Seconds 8 to 13 of seed 1: strain is about 3, the will has not broken (it breaks at 14.75 s). Measured at the
-        // shipped StrainShake 0.03 / ShakeHz 3.5: 3.9-4.7 cm peak to peak in hand height per second; at 0, 0.3-0.7 cm.
+        // palm with the shipped StrainShake 0.08 / ShakeHz 3.5: 3.2-5.5 cm peak to peak in hand height per second; at 0, 0.6-1.2 cm.
+        // (The shake was 0.03 on the forearm-tip hand, 3.9-4.7 cm there; the hands' mass damps the arm and the default rose to keep the rule.)
         var shaking = Run(seed: 1, new HoldParameters(), maxSeconds: 16.0);
         var still = Run(seed: 1, new HoldParameters { StrainShake = 0.0 }, maxSeconds: 16.0);
         for (var s = 8; s <= 13; s++)
@@ -255,10 +258,10 @@ public sealed class ConnectedPainBoxTests
     [Fact]
     public void Seed_1_to_16_seconds_replays_the_world_the_break_and_the_deliberate_switch_recorded_at_the_will_mix()
     {
-        // Recorded at the will mix (voluntary strength = hold x Will^WillCurve + leak). Until then the bits were the pre-Brain base's
-        // (Lodur 5d0fec8, hand=e283e3615b6b2cbc); the break and switch ticks and the flinch count did not move, the arm's track did.
+        // Recorded at the ragdoll hands (palm region, hand-mass damping, StrainShake 0.08, box half 0.125); the line before was the will mix's
+        // (broke=1770 withdrew=1782 flinches=16 hand=a0fafe85c80e98f7 world=83155f2abf0e7e91); the break moved two ticks, the flinch count did not.
         var t = Run(seed: 1, maxSeconds: 16.0);
-        Assert.Equal("broke=1770 withdrew=1782 flinches=16 hand=a0fafe85c80e98f7 world=83155f2abf0e7e91",
+        Assert.Equal("broke=1772 withdrew=1784 flinches=16 hand=17416bc7c2d12853 world=9f710f8186aff900",
             $"broke={t.Broke} withdrew={t.Withdrew} flinches={t.Flinches.Count} hand={HandTrackHash(t):x16} world={t.Hash:x16}");
     }
 }

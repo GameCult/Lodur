@@ -38,7 +38,7 @@ public sealed class PoseBehaviourTests
 
         foreach (var (leak, strain, t) in new[] { (0.4, 0.0, 0.0), (0.1, 2.5, 0.07), (0.0, 3.0, 1.234), (50.0, 50.0, 0.1) })
         {
-            var w = Math.Min(Math.Max(leak * 0.3 + 0.03 * strain * Math.Sin(2.0 * Math.PI * 3.5 * t), 0.0), 1.0);
+            var w = Math.Min(Math.Max(leak * 0.3 + 0.08 * strain * Math.Sin(2.0 * Math.PI * 3.5 * t), 0.0), 1.0);
             (s, q) = Write(b, leak, strain, t, inGoal: 9.9);
             for (var m = 0; m < 2; m++) SameBits(Quat.Nlerp(Hold[m], Withdraw[m], (float)w), q[m]);
             Assert.All(s, x => Assert.InRange(x, 0f, 1f));

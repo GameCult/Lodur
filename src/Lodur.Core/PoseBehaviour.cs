@@ -12,8 +12,8 @@ namespace Lodur
         /// <summary>How far the reflex leak pulls the pose from its base toward the flinch pose, per unit of leak.</summary>
         public double FlinchGain { get; init; } = 0.3;
 
-        /// <summary>Strain shake amplitude (blend fraction) per unit of strain. Zero strain, no shake.</summary>
-        public double StrainShake { get; init; } = 0.03;
+        /// <summary>Strain shake amplitude (blend fraction) per unit of strain. Zero strain, no shake. Measured at the palm of the ragdoll with hands (hand mass damps the arm's response), where it makes the 3-7 cm shake in hand height the strain rule describes.</summary>
+        public double StrainShake { get; init; } = 0.08;
 
         /// <summary>Shake frequency. A few Hz: the arm's PD filters anything faster to nothing.</summary>
         public double ShakeHz { get; init; } = 3.5;
