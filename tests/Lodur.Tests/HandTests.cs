@@ -189,4 +189,74 @@ public sealed class HandTests
         }
         Assert.True(worst <= 0.030f, $"a hand joint came apart by {worst * 1000f} mm");
     }
+
+    /// <summary>Swing of a joint's rotation off its axis, radians (the twist about the joint z removed).</summary>
+    private static float Swing(RagdollScenario s, Muscle m)
+    {
+        var v = s.World.View;
+        var j = s.Ragdoll.JointLane(m);
+        var along = MathF.Sqrt(v.JointRotationW[j] * v.JointRotationW[j] + v.JointRotationZ[j] * v.JointRotationZ[j]);
+        return 2f * MathF.Acos(MathF.Min(1f, along));
+    }
+
+    /// <summary>How far the fingers are curled from straight (palm-frame), radians; curl is positive for both hands.</summary>
+    private static float Curl(RagdollScenario s, int side)
+    {
+        var v = s.World.View;
+        var palm = s.Ragdoll.BodyLane(Limb.PalmL + side);
+        var fingers = s.Ragdoll.BodyLane(Limb.FingersL + side);
+        var relative = new Quat(v.RotationX[palm], v.RotationY[palm], v.RotationZ[palm], v.RotationW[palm]).Conjugate()
+            * new Quat(v.RotationX[fingers], v.RotationY[fingers], v.RotationZ[fingers], v.RotationW[fingers]);
+        var sx = side == 0 ? 1f : -1f;
+        var angleAboutZ = 2f * MathF.Atan2(relative.Z, relative.W);
+        return -sx * angleAboutZ;
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void The_fingers_rest_relaxed_at_creation_and_stay_there_while_nothing_grips(int side)
+    {
+        using var s = new RagdollScenario(seed: 1);
+        Assert.Equal(0.35f, Curl(s, side), 0.01f); // ruling hand-rest-curl-relaxed
+        s.Run(3f);
+        Assert.Equal(0.35f, Curl(s, side), 0.05f);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void The_knuckle_curls_to_1_6_rad_from_straight_and_extends_0_35_rad_past_it_and_no_further(int side)
+    {
+        float Reach(float target)
+        {
+            using var s = new RagdollScenario(seed: 1);
+            s.Target[(int)Muscle.FingersL + side] = Quat.FromAxisAngle(0f, 0f, 1f, target);
+            s.Run(2f);
+            return Curl(s, side);
+        }
+
+        Assert.InRange(Reach(-3f), 1.5f, 1.72f);   // the limit is 1.6 from straight (a soft stop gives a little), whatever the creation curl
+        Assert.InRange(Reach(3f), -0.45f, -0.30f); // 0.35 past straight, a soft stop gives a little
+    }
+
+    [Theory]
+    [InlineData(Muscle.WristL, 1.0f)]
+    [InlineData(Muscle.WristR, 1.0f)]
+    [InlineData(Muscle.ThumbL, 0.7f)]
+    [InlineData(Muscle.ThumbR, 0.7f)]
+    public void A_hand_joint_swings_to_its_cone_and_no_further_whichever_way_it_is_told(Muscle joint, float cone)
+    {
+        var reached = 0f;
+        foreach (var (ax, ay) in new[] { (1f, 0f), (-1f, 0f), (0f, 1f), (0f, -1f) })
+        {
+            using var s = new RagdollScenario(seed: 1);
+            s.Target[(int)joint] = Quat.FromAxisAngle(ax, ay, 0f, 2.5f);
+            s.Run(2f);
+            var swing = Swing(s, joint);
+            Assert.True(swing < cone + 0.06f, $"{joint} swung {swing} past its cone {cone} toward ({ax}, {ay})");
+            reached = MathF.Max(reached, swing);
+        }
+        Assert.True(reached > cone - 0.15f, $"{joint} only swung {reached} of its cone {cone} in any direction");
+    }
 }
