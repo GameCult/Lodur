@@ -101,6 +101,21 @@ public sealed class EntryRampTests
     }
 
     [Fact]
+    public void The_ramp_length_is_rounded_to_whole_ticks_so_a_quotient_just_under_an_integer_gets_that_integer()
+    {
+        var rig = new Rig(StressThenCalm(0.29));   // 0.29 / 0.01 is 28.999999999999996 ticks, not 28
+        rig.UntilTakeover(1);
+        for (var k = 1; k <= 29; k++)
+        {
+            rig.Tick();
+            if (k < 29) Assert.True(rig.Actor.Drive.SensoryGain > 0.0, $"still ramping at tick {k}");
+        }
+
+        Assert.Equal(0.0, rig.Actor.Drive.SensoryGain);
+        Assert.Equal(0.0, rig.Actor.Drive.Arousal);
+    }
+
+    [Fact]
     public void A_goal_without_an_entry_arousal_ramps_only_the_gain_and_the_drive_keeps_arousal()
     {
         var rig = new Rig(StressThenCalm(2.0, gain: 0.0, arousal: null));
