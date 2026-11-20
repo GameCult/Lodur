@@ -116,7 +116,9 @@ the Synaptic Induction Chamber (`lodur:ruling:bds-pain-box-item`,
 - The StreamPixels overlay as a consumer before StreamPixels M1 ships.
 - Depending on RootMotion PuppetMaster (paid, not redistributable, and no balance control: research
   section 10.1).
-- Hand-tuned balance controllers of the SIMBICON family as the upright path.
+- A hand-tuned balance controller of the SIMBICON family as the upright path. What holds the body up is the PD
+  muscles plus a will-scaled assist (and later a learned tracker). Stepping strategies that only re-plan targets
+  (capture-point foot placement after a shove, stumble, brace, get up) are in scope as behaviours.
 
 ## Open
 
