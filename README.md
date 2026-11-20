@@ -34,8 +34,10 @@ time. Lodur is that layer.
 ## Shape (planned)
 
 - **Core** (C#, no engine references): perception, reflexes, a drive state of
-  pain, shock, adrenaline and resolve that evolves every tick, and behaviour
-  selection that turns the drive into targets plus muscle strength.
+  pain, shock, adrenaline and resolve that evolves every tick (the will breaks
+  at zero resolve and mends as it recovers, and can break again), and behaviour
+  selection that turns the drive into targets plus muscle strength, weighted by
+  the will available to each voluntary pose.
 - **Body** (per engine): follows those targets on the engine's own articulated
   physics. v1 is a PD-tracking active ragdoll on Ymir; v2 adds a small learned
   tracker for upright balance behind the same interface.

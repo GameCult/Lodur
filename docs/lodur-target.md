@@ -46,7 +46,10 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    afferent input, strain from suppressed reflexes, arousal from sensory load; resolve drained by all three and
    scaled by the active goal's pull, recovering only when pain and arousal are both low;
    later shock on a clock that blood loss speeds and adrenaline that spikes on threat. Resolve reaching zero
-   breaks the will, which releases every suppression. Static per-character values are this state with its
+   breaks the will, which releases every suppression; the break is an event that counts (`Breaks`) and recurs:
+   the will mends when resolve climbs back to `WillMendsAt`. `Will` is what is available to hold a reflex down
+   and to power a voluntary layer: resolve times `Attention`, capped by `Consciousness` (both slots that read 1
+   until startle and physiology fill them). Static per-character values are this state with its
    dynamics frozen. (`motion-pipeline:ruling:euphoria-drive-is-dynamic-state`.)
 4. **The Brain.** The consumer's authored goals (a behaviour, a priority, a pull in [0, 1] that defaults to 0, no pull (the former objective pull
    defaulted to 0.5), an optional minimum dwell, conditions over the drive
@@ -58,7 +61,14 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    in ticks from the tick it took over, is left for a goal that ties or ranks below it only once the dwell has
    passed, while a strictly higher-priority goal preempts during the dwell (after the deliberate latency); the
    return trip from an entered goal is gated by that goal's own dwell, which is what bounds chatter at a threshold.
-   A built Brain owns copies of its data and reads back as read-only views. Considerations and the will mix extend it.
+   A goal also carries an entry effect on the drive (`EntryResolve`: the tick it takes over, resolve is set, which
+   is how rage resets the will), an `Effort` (resolve drained per second to sustain it) and `InvoluntarySeconds`
+   (an onset that runs without will and without paying the effort; +infinity is involuntary throughout)
+   (`lodur:ruling:rage-involuntary-onset-then-voluntary`). The will mix: a voluntary goal writes each muscle at
+   `HoldStrength x min(1, Will^WillCurve + leak x FlinchGain)`, an involuntary one at `HoldStrength`, so a failing
+   will slackens the layer while a reflex that gets past it still moves the muscle
+   (`lodur:ruling:bds-sandbox-arenas-will-economy`).
+   A built Brain owns copies of its data and reads back as read-only views. Considerations extend it.
 5. **Body.** Follows targets with per-muscle strength in the game's physics world. v1 is GameCult's own
    PD-tracking active ragdoll on **Ymir**, GameCult's boundary around a pinned Box3D, read and driven through
    Ymir's structure-of-arrays world in place (`lodur:ruling:lodur-body-on-ymir`): `Lodur.Body.Ymir`. It owns
