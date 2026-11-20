@@ -401,6 +401,7 @@ public sealed class BrainTests
             if (i < decided + Latency)
             {
                 Assert.Equal(1f, r.Strengths[0]);
+                Assert.Equal((i + 1) * 0.01, r.Actor.SecondsInGoal, 9); // the goal in force keeps its own clock through the decision and the latency
                 Assert.Equal(0, (int)(e & TickEvents.GoalChanged));
             }
             else
@@ -433,22 +434,22 @@ public sealed class BrainTests
         Assert.Equal(Quat.Nlerp(keys[0][0], keys[1][0], 0.5f).Z, r.Targets[0].Z, 5); // half way to key 1 after half a key
     }
 
-    private static List<long> Hover(double dwell, double threshold)
+    private static List<(long Tick, int Goal)> Hover(double dwell, double threshold)
     {
         var rage = Goal("rage", 2.0, 1.0, new Condition(DriveQuantity.Arousal, ConditionOp.AtLeast, threshold)) with { MinDwellSeconds = dwell };
         var brain = new Brain { Goals = new[] { Goal("calm", 1.0, 1.0) with { MinDwellSeconds = dwell }, rage } };
         var rig = new SensoryRig(SensoryRig.One(0.55), brain: brain);
-        var changes = new List<long>();
+        var changes = new List<(long, int)>();
         for (long i = 0; i < 6000; i++)
         {
             rig.Emitters[0].Intensity = (i / 100) % 2 == 0 ? 0.55 : 0.0; // on 1 s, off 1 s: arousal saws around its middle
-            if ((rig.Tick() & TickEvents.GoalChanged) != 0) changes.Add(i);
+            if ((rig.Tick() & TickEvents.GoalChanged) != 0) changes.Add((i, rig.Actor.GoalIndex));
         }
         return changes;
     }
 
     [Fact]
-    public void A_condition_hovering_at_its_threshold_chatters_without_a_dwell_and_with_one_a_goal_is_left_at_most_once_per_window()
+    public void A_condition_hovering_at_its_threshold_chatters_without_a_dwell_and_with_one_the_entered_goal_is_not_left_for_a_lower_one_inside_its_window()
     {
         double lo = 1, hi = 0;
         var probe = new SensoryRig(SensoryRig.One(0.55), brain: new Brain { Goals = new[] { Goal("only", 0.0, 1.0) } });
@@ -464,15 +465,134 @@ public sealed class BrainTests
         Assert.True(free.Count >= 15, $"{free.Count} changes with no dwell: the scenario does not chatter");
 
         const double dwell = 3.0;
+        const long dwellTicks = 300;
         var held = Hover(dwell, mid);
-        Assert.True(held.Count >= 2 && held.Count < free.Count / 3, $"{held.Count} changes with a dwell of {dwell} s against {free.Count}");
+        Assert.True(held.Count >= 2 && held.Count * 2 <= free.Count, $"{held.Count} changes with a dwell of {dwell} s against {free.Count}");
+        var leaves = 0;
         for (var i = 1; i < held.Count; i++)
         {
-            Assert.True(held[i] - held[i - 1] >= (long)(dwell / 0.01) + Latency, $"changes at {held[i - 1]} and {held[i]} are closer than the dwell and latency");
+            if (held[i].Goal != 0) continue; // only the return trip (rage to the lower calm) is gated by rage's dwell
+            leaves++;
+            Assert.True(held[i].Tick - held[i - 1].Tick >= dwellTicks + Latency, $"rage taken at {held[i - 1].Tick} and left at {held[i].Tick}");
         }
-        Assert.True(held[0] >= (long)(dwell / 0.01), "the start goal is held for the dwell too");
+        Assert.True(leaves >= 2);
         Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(),
             new Brain { Goals = new[] { Goal("g", 0.0) with { MinDwellSeconds = -1.0 } } }));
+        foreach (var bad in new[] { double.PositiveInfinity, double.NaN })
+        {
+            Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(),
+                new Brain { Goals = new[] { Goal("g", 0.0) with { MinDwellSeconds = bad } } }));
+        }
+    }
+
+    /// <summary>
+    /// Goal 1 is the start goal, eligible while pain is below 0.3, with the dwell; goal 0 (no dwell) is the lower-priority
+    /// goal always eligible. Pain passes 0.3 early, so the decision to leave goal 1 is held to its dwell and lands exactly then.
+    /// </summary>
+    private static (long Dwell, long Changed, long PainLapsed) LeaveHeldGoal(double dwellSeconds, double priorityOfTarget = 1.0)
+    {
+        var brain = new Brain
+        {
+            Goals = new[]
+            {
+                Goal("target", priorityOfTarget, 0.5, Pain(ConditionOp.AtLeast, 0.3)),
+                Goal("held", 2.0, 0.5, Pain(ConditionOp.Below, 0.3)) with { MinDwellSeconds = dwellSeconds },
+            },
+            Start = 1,
+        };
+        var r = new PainBoxReplay(1, brain: brain);
+        long lapsed = -1, changed = -1;
+        for (long i = 0; i < 800 && changed < 0; i++)
+        {
+            if ((r.Tick() & TickEvents.GoalChanged) != 0) changed = i;
+            if (lapsed < 0 && r.Actor.Drive.Pain >= 0.3) lapsed = i;
+        }
+        return (0, changed, lapsed);
+    }
+
+    [Fact]
+    public void A_goal_not_outranked_is_left_exactly_a_dwell_after_it_took_over_the_decision_held_on_the_dwells_last_tick()
+    {
+        // 3.0 s is 300 ticks from tick 0 (the start goal is active from there): the decision is taken on tick 300 and lands 10 later.
+        var (_, changed, lapsed) = LeaveHeldGoal(3.0);
+        Assert.True(lapsed > 0 && lapsed < 290, $"pain lapsed the condition on tick {lapsed}");
+        Assert.Equal(300 + Latency, changed);
+        // The dwell is the held goal's own (goal 1), not goal 0's, which has none.
+        var free = LeaveHeldGoal(0.0);
+        Assert.Equal(free.PainLapsed + Latency, free.Changed);
+    }
+
+    [Fact]
+    public void A_dwell_is_rounded_to_the_nearest_tick_as_the_latency_is()
+    {
+        Assert.Equal(300 + Latency, LeaveHeldGoal(3.004).Changed); // 300.4 ticks: a ceiling would make it 301
+        Assert.Equal(301 + Latency, LeaveHeldGoal(3.006).Changed); // 300.6 ticks: a floor would make it 300
+    }
+
+    [Fact]
+    public void A_strictly_higher_priority_goal_preempts_during_the_dwell_after_the_latency_and_a_goal_that_ties_or_ranks_below_is_held()
+    {
+        // Same scene, but the goal it would move to outranks the held one: no wait for the dwell.
+        var (_, preempted, lapsed) = LeaveHeldGoal(3.0, priorityOfTarget: 3.0);
+        Assert.Equal(lapsed + Latency, preempted);
+        Assert.Equal(300 + Latency, LeaveHeldGoal(3.0, priorityOfTarget: 2.0).Changed); // a tie is not strictly higher
+        Assert.Equal(300 + Latency, LeaveHeldGoal(3.0, priorityOfTarget: 1.99).Changed);
+    }
+
+    [Fact]
+    public void The_dwell_of_an_entered_goal_counts_from_the_tick_it_took_over_not_from_the_decision()
+    {
+        // Held goal b is entered on pain at least 0.3 and its condition lapses at once (a band); its dwell of 2 s runs from the takeover.
+        var band = Goal("b", 2.0, 0.5, Pain(ConditionOp.AtLeast, 0.3), Pain(ConditionOp.Below, 0.305)) with { MinDwellSeconds = 2.0 };
+        var r = new PainBoxReplay(1, brain: new Brain { Goals = new[] { Goal("a", 1.0), band } });
+        long decided = -1, entered = -1, left = -1;
+        for (long i = 0; i < 800 && left < 0; i++)
+        {
+            var e = r.Tick();
+            if (decided < 0 && r.Actor.Drive.Pain >= 0.3) decided = i;
+            if ((e & TickEvents.GoalChanged) != 0) { if (entered < 0) entered = i; else left = i; }
+        }
+        Assert.Equal(decided + Latency, entered);
+        Assert.Equal(entered + 200 + Latency, left);
+    }
+
+    [Fact]
+    public void A_built_brains_getters_hand_out_read_only_views_and_writing_through_them_changes_nothing()
+    {
+        var keys = new[] { new[] { Quat.Identity, Quat.Identity } };
+        var brain = new Brain
+        {
+            Goals = new[]
+            {
+                Goal("a", 0.0),
+                Goal("b", 1.0, 0.5, Pain(ConditionOp.AtLeast, 0.3)) with
+                {
+                    Behaviour = new PoseBehaviour { Keys = keys, FlinchPose = PainBoxBrain.Withdraw },
+                },
+            },
+        };
+        static void Sealed<T>(IReadOnlyList<T> view, T poison)
+        {
+            Assert.False(view is T[]);
+            if (view is IList<T> list)
+            {
+                Assert.True(list.IsReadOnly);
+                Assert.Throws<NotSupportedException>(() => list[0] = poison);
+            }
+        }
+        Sealed(brain.Goals, Goal("poison", 9.0));
+        Sealed(brain.Goals[1].When, Pain(ConditionOp.AtLeast, double.NaN));
+        Sealed(brain.Goals[1].Behaviour.Keys, (IReadOnlyList<Quat>)new Quat[1]);
+        Sealed(brain.Goals[1].Behaviour.Keys[0], new Quat(7f, 7f, 7f, 7f));
+        Sealed(brain.Goals[1].Behaviour.FlinchPose, new Quat(7f, 7f, 7f, 7f));
+
+        var a = new PainBoxReplay(1, brain: brain);
+        var b = new PainBoxReplay(1, brain: new Brain { Goals = new[] { Goal("a", 0.0), Goal("b", 1.0, 0.5, Pain(ConditionOp.AtLeast, 0.3)) with { Behaviour = new PoseBehaviour { Keys = keys, FlinchPose = PainBoxBrain.Withdraw } } } });
+        for (var i = 0; i < 1000; i++)
+        {
+            Assert.Equal(b.Tick(), a.Tick());
+            Assert.Equal(b.Targets, a.Targets);
+        }
     }
 
     [Fact]

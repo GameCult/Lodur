@@ -125,11 +125,11 @@ namespace Lodur
             }
 
             // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is
-            // pending, nor before the goal in force has had its minimum dwell.
-            if (_pending < 0 && _tick - _goalSince >= _dwell[_goal])
+            // pending. Within the goal in force's minimum dwell only a strictly higher-priority goal is decided on.
+            if (_pending < 0)
             {
                 var wanted = _brain.Select(_drive, _goal);
-                if (wanted != _goal)
+                if (wanted != _goal && (_tick - _goalSince >= _dwell[_goal] || _brain.Goals[wanted].Priority > _brain.Goals[_goal].Priority))
                 {
                     _pending = wanted;
                     _switchTick = _tick + _latency;

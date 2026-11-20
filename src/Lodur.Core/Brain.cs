@@ -50,16 +50,45 @@ namespace Lodur
         public double Pull { get; init; }
 
         /// <summary>
-        /// A goal cannot be left until it has been active this long, counted in ticks from the tick it took over;
-        /// 0 (the default) never holds a goal. It keeps a condition hovering at its threshold from making the Brain
-        /// chatter: a switch away is decided only once the dwell has passed, then takes the deliberate latency.
+        /// Commitment, soft: until this goal has been active this long (rounded to whole ticks like the latency, counted
+        /// from the tick it took over), a goal that does not strictly outrank it cannot be decided on; a strictly
+        /// higher-priority goal preempts at once, after the deliberate latency. 0 (the default) never holds a goal. It keeps
+        /// a condition hovering at its threshold from making the Brain chatter: the return trip from an entered goal is
+        /// gated by that goal's own dwell. The dwell holds the decision to leave; a decision already in flight commits.
         /// </summary>
         public double MinDwellSeconds { get; init; }
 
         private Condition[] _when = Array.Empty<Condition>();
+        private IReadOnlyList<Condition> _whenView = Array.AsReadOnly(Array.Empty<Condition>());
 
-        /// <summary>All must hold for the goal to be eligible; none means always eligible. Copied when set.</summary>
-        public Condition[] When { get => _when; init => _when = (Condition[])value.Clone(); }
+        /// <summary>All must hold for the goal to be eligible; none means always eligible. Copied when set; read back as a read-only view.</summary>
+        public IReadOnlyList<Condition> When
+        {
+            get => _whenView;
+            init
+            {
+                _when = new Condition[value.Count];
+                for (var c = 0; c < _when.Length; c++)
+                {
+                    _when[c] = value[c];
+                }
+
+                _whenView = Array.AsReadOnly(_when);
+            }
+        }
+
+        internal bool Eligible(in DriveState drive)
+        {
+            for (var c = 0; c < _when.Length; c++)
+            {
+                if (!_when[c].Holds(drive))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
 
         public PoseBehaviour Behaviour { get; init; } = new PoseBehaviour();
     }
@@ -72,7 +101,7 @@ namespace Lodur
     {
         private IReadOnlyList<GoalSpec> _goals = Array.Empty<GoalSpec>();
 
-        /// <summary>The goals, copied when set: later changes to the caller's list or arrays do not reach a Brain.</summary>
+        /// <summary>The goals, copied when set: later changes to the caller's list or arrays do not reach a Brain, and the getter is a read-only view.</summary>
         public IReadOnlyList<GoalSpec> Goals
         {
             get => _goals;
@@ -102,13 +131,7 @@ namespace Lodur
             for (var i = 0; i < Goals.Count; i++)
             {
                 var goal = Goals[i];
-                var eligible = true;
-                for (var c = 0; c < goal.When.Length && eligible; c++)
-                {
-                    eligible = goal.When[c].Holds(drive);
-                }
-
-                if (!eligible)
+                if (!goal.Eligible(drive))
                 {
                     continue;
                 }
@@ -150,7 +173,7 @@ namespace Lodur
 
                 if (!(goal.MinDwellSeconds >= 0.0 && double.IsFinite(goal.MinDwellSeconds)))
                 {
-                    throw new ArgumentException($"Goal {goal.Id}: MinDwellSeconds must be finite and not negative.");
+                    throw new ArgumentException($"Goal {goal.Id}: MinDwellSeconds must be finite (not infinite) and not negative.");
                 }
 
                 foreach (var c in goal.When)

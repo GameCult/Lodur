@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Lodur
 {
@@ -30,54 +31,77 @@ namespace Lodur
     {
         private Quat[][] _keys = Array.Empty<Quat[]>();
         private Quat[] _flinch = Array.Empty<Quat>();
+        private IReadOnlyList<IReadOnlyList<Quat>> _keysView = Array.AsReadOnly(Array.Empty<IReadOnlyList<Quat>>());
+        private IReadOnlyList<Quat> _flinchView = Array.AsReadOnly(Array.Empty<Quat>());
 
-        /// <summary>k keys of one rotation per muscle each. Copied when set.</summary>
-        public Quat[][] Keys
+        /// <summary>k keys of one rotation per muscle each. Copied when set; read back as a read-only view.</summary>
+        public IReadOnlyList<IReadOnlyList<Quat>> Keys
         {
-            get => _keys;
+            get => _keysView;
             init
             {
-                var copy = new Quat[value.Length][];
+                var copy = new Quat[value.Count][];
+                var views = new IReadOnlyList<Quat>[copy.Length];
                 for (var k = 0; k < copy.Length; k++)
                 {
-                    copy[k] = (Quat[])value[k].Clone();
+                    copy[k] = new Quat[value[k].Count];
+                    for (var m = 0; m < copy[k].Length; m++)
+                    {
+                        copy[k][m] = value[k][m];
+                    }
+
+                    views[k] = Array.AsReadOnly(copy[k]);
                 }
 
                 _keys = copy;
+                _keysView = Array.AsReadOnly(views);
             }
         }
 
         /// <summary>Seconds from one key to the next when there is more than one key.</summary>
         public double SecondsPerKey { get; init; } = 1.0;
 
-        /// <summary>The pose the leak and the shake pull toward, one rotation per muscle. Copied when set.</summary>
-        public Quat[] FlinchPose { get => _flinch; init => _flinch = (Quat[])value.Clone(); }
+        /// <summary>The pose the leak and the shake pull toward, one rotation per muscle. Copied when set; read back as a read-only view.</summary>
+        public IReadOnlyList<Quat> FlinchPose
+        {
+            get => _flinchView;
+            init
+            {
+                _flinch = new Quat[value.Count];
+                for (var m = 0; m < _flinch.Length; m++)
+                {
+                    _flinch[m] = value[m];
+                }
+
+                _flinchView = Array.AsReadOnly(_flinch);
+            }
+        }
 
         public HoldParameters Hold { get; init; } = new HoldParameters();
 
-        public int MuscleCount => Keys.Length == 0 ? 0 : Keys[0].Length;
+        public int MuscleCount => _keys.Length == 0 ? 0 : _keys[0].Length;
 
         internal void Validate(string goal)
         {
-            if (Keys.Length == 0 || Keys[0].Length == 0)
+            if (_keys.Length == 0 || _keys[0].Length == 0)
             {
                 throw new ArgumentException($"Goal {goal}: a pose behaviour needs at least one key of at least one muscle.");
             }
 
-            foreach (var key in Keys)
+            foreach (var key in _keys)
             {
-                if (key.Length != Keys[0].Length)
+                if (key.Length != _keys[0].Length)
                 {
                     throw new ArgumentException($"Goal {goal}: every key needs one rotation per muscle.");
                 }
             }
 
-            if (FlinchPose.Length != Keys[0].Length)
+            if (_flinch.Length != _keys[0].Length)
             {
                 throw new ArgumentException($"Goal {goal}: the flinch pose needs one rotation per muscle.");
             }
 
-            if (Keys.Length > 1 && !(SecondsPerKey > 0.0 && double.IsFinite(SecondsPerKey)))
+            if (_keys.Length > 1 && !(SecondsPerKey > 0.0 && double.IsFinite(SecondsPerKey)))
             {
                 throw new ArgumentException($"Goal {goal}: SecondsPerKey must be positive and finite.");
             }
@@ -99,7 +123,7 @@ namespace Lodur
             }
 
             var w = (float)Blend(leak, strain, seconds);
-            var k = Keys.Length;
+            var k = _keys.Length;
             var from = 0;
             var to = 0;
             var phase = 0f;
@@ -114,14 +138,14 @@ namespace Lodur
 
             for (var m = 0; m < count; m++)
             {
-                var a = Keys[from][m];
+                var a = _keys[from][m];
                 if (phase > 0f)
                 {
-                    a = Quat.Nlerp(Keys[from][m], Keys[to][m], phase);
+                    a = Quat.Nlerp(_keys[from][m], _keys[to][m], phase);
                 }
 
                 strengths[m] = Hold.HoldStrength;
-                targets[m] = Quat.Nlerp(a, FlinchPose[m], w);
+                targets[m] = Quat.Nlerp(a, _flinch[m], w);
             }
         }
     }
