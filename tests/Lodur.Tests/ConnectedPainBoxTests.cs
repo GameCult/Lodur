@@ -195,4 +195,29 @@ public sealed class ConnectedPainBoxTests
         Assert.Equal(a.Hash, b.Hash);
         Assert.NotEqual(a.Hash, Run(seed: 2).Hash);
     }
+
+    private static ulong HandTrackHash(Timeline t)
+    {
+        var h = 14695981039346656037ul;
+        foreach (var (tick, hand, inBox) in t.Hand)
+        {
+            foreach (var f in new[] { hand.X, hand.Y, hand.Z })
+            {
+                h ^= (uint)BitConverter.SingleToInt32Bits(f);
+                h *= 1099511628211ul;
+            }
+            h ^= inBox ? 1ul : 0ul;
+            h *= 1099511628211ul;
+        }
+        return h;
+    }
+
+    [Fact]
+    public void Seed_1_to_16_seconds_replays_the_world_the_break_and_the_deliberate_switch_recorded_at_the_pre_brain_base()
+    {
+        // Recorded at Lodur 5d0fec8, before the Brain: the pain box authored as a Brain must drive the body with the same bits.
+        var t = Run(seed: 1, maxSeconds: 16.0);
+        Assert.Equal("broke=1770 withdrew=1782 flinches=16 hand=e283e3615b6b2cbc world=cd1902f3dd65af64",
+            $"broke={t.Broke} withdrew={t.Withdrew} flinches={t.Flinches.Count} hand={HandTrackHash(t):x16} world={t.Hash:x16}");
+    }
 }
