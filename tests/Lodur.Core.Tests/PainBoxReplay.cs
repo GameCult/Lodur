@@ -39,7 +39,7 @@ internal static class PainBoxBrain
             new GoalSpec
             {
                 Id = "release", Priority = 1.0, Pull = pull,
-                When = new[] { new Condition(DriveQuantity.WillBroken, ConditionOp.AtLeast, 1.0) },
+                When = new[] { new Condition(DriveQuantity.Breaks, ConditionOp.AtLeast, 1.0) },
                 Behaviour = new PoseBehaviour
                 {
                     Keys = new[] { Withdraw }, FlinchPose = Withdraw,

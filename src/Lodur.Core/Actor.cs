@@ -7,9 +7,9 @@ namespace Lodur
     public enum TickEvents
     {
         None = 0,
-        /// <summary>A reflex leaked past the suppression the will still held. After the will breaks nothing is suppressed, so there is no flinch.</summary>
+        /// <summary>A reflex leaked past the suppression the will still held. With no will nothing is suppressed, so there is no flinch.</summary>
         Flinch = 1,
-        /// <summary>Resolve reached zero this tick.</summary>
+        /// <summary>Resolve reached zero this tick: the will broke (again, if it had mended).</summary>
         WillBroke = 2,
         /// <summary>The Brain's chosen goal took over, its deliberate latency after the choice.</summary>
         GoalChanged = 4,
@@ -43,6 +43,11 @@ namespace Lodur
             NerveParameters? senses = null, int senseRegion = 0)
         {
             brain.Validate();
+            if (!(drive.WillMendsAt > 0.0 && drive.WillMendsAt <= 1.0))
+            {
+                throw new ArgumentException("WillMendsAt must be in (0, 1].");
+            }
+
             _dt = tickSeconds;
             _driveP = drive;
             _brain = brain;
@@ -100,8 +105,8 @@ namespace Lodur
             ReadOnlySpan<Emitter> emitters = default)
         {
             var events = TickEvents.None;
-            // A flinch is the leak of a suppressed reflex; once the will has broken nothing is suppressed, so none is reported.
-            var holding = !_drive.WillBroken;
+            // A flinch is the leak of a suppressed reflex; with no will nothing is suppressed, so none is reported.
+            var holding = _drive.Will > 0.0;
 
             _perception.Sense(regionX, regionY, regionZ, sources, emitters);
 

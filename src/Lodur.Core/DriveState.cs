@@ -27,13 +27,17 @@ namespace Lodur
 
         /// <summary>Resolve recovers only while arousal is below this, as well as pain being low.</summary>
         public double ResolveRecoversBelowArousal { get; init; } = 0.1;
+
+        /// <summary>Once the will has broken it mends when resolve climbs back to this, in (0, 1]; it can then break again.</summary>
+        public double WillMendsAt { get; init; } = 0.25;
     }
 
     /// <summary>
     /// Layer 3: per-character state that evolves every tick. Pain rises with afferent input, strain with the
     /// reflex held down, arousal with sensory load; resolve drains under all three and recovers when pain and
-    /// arousal are both low. Resolve reaching zero breaks
-    /// the will, and a broken will never mends. Only the owning <see cref="Actor"/> steps it.
+    /// arousal are both low. Resolve reaching zero breaks the will (counted in <see cref="Breaks"/>); the broken will
+    /// mends when resolve climbs back to <see cref="DriveParameters.WillMendsAt"/> and can break again. Resolve keeps
+    /// evolving through a break. Only the owning <see cref="Actor"/> steps it.
     /// </summary>
     public struct DriveState
     {
@@ -43,27 +47,47 @@ namespace Lodur
         /// <summary>Sensory load carried over time, 0..1; it rises under load and decays when quiet.</summary>
         public double Arousal { get; private set; }
         public double Resolve { get; private set; }
+
+        /// <summary>True from a break until the will mends: broken now, not "has ever broken" (see <see cref="Breaks"/>).</summary>
         public bool WillBroken { get; private set; }
+
+        /// <summary>How many times the will has broken.</summary>
+        public int Breaks { get; private set; }
+
+        /// <summary>The fraction of resolve that attention lets through, 0..1. A slot: nothing lowers it yet (lodur-startle-attention fills it).</summary>
+        public double Attention => 1.0;
+
+        /// <summary>The ceiling on the will that wakefulness sets, 0..1. A slot: nothing lowers it yet (lodur-physiology fills it).</summary>
+        public double Consciousness => 1.0;
+
+        /// <summary>The will that is available to hold reflexes down and to power voluntary behaviour: resolve through attention, capped by consciousness.</summary>
+        public double Will => Math.Min(Resolve * Attention, Consciousness);
 
         internal static DriveState Fresh => new DriveState { Resolve = 1.0 };
 
-        /// <summary>Steps one tick; returns true on the tick the will breaks. <paramref name="pull"/> is the active goal's: it scales resolve drain by (1 - pull).</summary>
+        /// <summary>Steps one tick; returns true on the tick the will breaks (each break, not only the first). <paramref name="pull"/> is the active goal's: it scales resolve drain by (1 - pull).</summary>
         internal bool Step(DriveParameters p, double dt, double afferent, double strainLoad, double load, double pull)
         {
             Arousal = Math.Min(Math.Max(Arousal + dt * (p.ArousalRise * load * (1.0 - Arousal) - p.ArousalDecay * Arousal), 0.0), 1.0);
             Pain = Math.Min(Math.Max(Pain + dt * (p.PainRise * afferent * (1.0 - Pain) - p.PainDecay * Pain), 0.0), 1.0);
             Strain = Math.Max(0.0, Strain + dt * (strainLoad - p.StrainRecover * Strain));
-            if (WillBroken)
-            {
-                return false;
-            }
-
             var drain = (p.ResolveDrainPain * Pain + p.ResolveDrainStrain * Strain + p.ResolveDrainArousal * Arousal) * (1.0 - pull) * p.DrainTrait;
             var recovery = Pain < p.ResolveRecoversBelowPain && Arousal < p.ResolveRecoversBelowArousal ? p.ResolveRecovery * (1.0 - Resolve) : 0.0;
             Resolve = Math.Min(Math.Max(Resolve + dt * (recovery - drain), 0.0), 1.0);
+            if (WillBroken)
+            {
+                if (Resolve >= p.WillMendsAt)
+                {
+                    WillBroken = false;
+                }
+
+                return false;
+            }
+
             if (Resolve <= 0.0)
             {
                 WillBroken = true;
+                Breaks++;
                 return true;
             }
 

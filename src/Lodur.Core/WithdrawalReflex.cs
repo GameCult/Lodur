@@ -38,7 +38,7 @@ namespace Lodur
         /// <summary>Steps once; returns true on a flinch (leak over the threshold, outside the refractory window).</summary>
         public bool Step(double afferent, in DriveState drive)
         {
-            var suppression = drive.WillBroken ? 0.0 : _p.MaxSuppression * drive.Resolve;
+            var suppression = _p.MaxSuppression * drive.Will;
             Leak = afferent * (1.0 - suppression);
             StrainLoad = afferent * suppression;
             var flinch = Leak > _p.FlinchLeakThreshold && _tick - _lastFlinch >= _refractory;

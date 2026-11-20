@@ -292,6 +292,7 @@ public sealed class BrainTests
         DriveQuantity.Strain => d.Strain,
         DriveQuantity.Arousal => d.Arousal,
         DriveQuantity.Resolve => d.Resolve,
+        DriveQuantity.Breaks => d.Breaks,
         _ => d.WillBroken ? 1.0 : 0.0,
     };
 
@@ -305,7 +306,7 @@ public sealed class BrainTests
     /// quantity itself first crossed, and no other quantity read the same way may cross on that tick (or the scenario
     /// could not tell a misread from the right read).
     /// </summary>
-    private static void GateFollowsOnly(Func<Brain, (Func<TickEvents> Tick, Func<DriveState> Drive)> rig, DriveQuantity q, ConditionOp op, double threshold, long ticks)
+    private static void GateFollowsOnly(Func<Brain, (Func<TickEvents> Tick, Func<DriveState> Drive)> rig, DriveQuantity q, ConditionOp op, double threshold, long ticks, DriveQuantity? sameTickOk = null)
     {
         var (tick, drive) = rig(Gated(new Condition(q, op, threshold)));
         bool Crossed(DriveState d, DriveQuantity of) => op == ConditionOp.AtLeast ? Read(d, of) >= threshold : Read(d, of) < threshold;
@@ -324,7 +325,7 @@ public sealed class BrainTests
         Assert.Equal(own + Latency, changed);
         foreach (var of in Enum.GetValues<DriveQuantity>())
         {
-            if (of != q) Assert.False(firstOf.TryGetValue(of, out var other) && other == own, $"{of} crosses on the same tick as {q}: the scenario cannot tell them apart");
+            if (of != q && of != sameTickOk) Assert.False(firstOf.TryGetValue(of, out var other) && other == own, $"{of} crosses on the same tick as {q}: the scenario cannot tell them apart");
         }
     }
 
@@ -342,7 +343,8 @@ public sealed class BrainTests
     [InlineData(DriveQuantity.Resolve, ConditionOp.Below, 0.9)]
     [InlineData(DriveQuantity.WillBroken, ConditionOp.AtLeast, 1.0)]
     public void Each_drive_quantity_a_condition_reads_is_that_quantity_in_the_pain_box(DriveQuantity q, ConditionOp op, double threshold) =>
-        GateFollowsOnly(PainRig, q, op, threshold, 1700);
+        // The first break moves Breaks and WillBroken on one tick; WillTests reads Breaks at its second break, where they part.
+        GateFollowsOnly(PainRig, q, op, threshold, 1700, DriveQuantity.Breaks);
 
     [Fact]
     public void Arousal_a_condition_reads_is_arousal_where_pain_strain_and_resolve_do_not_move_with_it()

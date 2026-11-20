@@ -10,8 +10,10 @@ namespace Lodur
         Strain,
         Arousal,
         Resolve,
-        /// <summary>1 once the will has broken, else 0.</summary>
+        /// <summary>1 while the will is broken now (it mends), else 0.</summary>
         WillBroken,
+        /// <summary>How many times the will has broken: the one-way latch, for a goal that must hold after a mend.</summary>
+        Breaks,
     }
 
     public enum ConditionOp
@@ -31,6 +33,7 @@ namespace Lodur
                 DriveQuantity.Strain => drive.Strain,
                 DriveQuantity.Arousal => drive.Arousal,
                 DriveQuantity.Resolve => drive.Resolve,
+                DriveQuantity.Breaks => (double)drive.Breaks,
                 _ => drive.WillBroken ? 1.0 : 0.0,
             };
             return Op == ConditionOp.AtLeast ? v >= Threshold : v < Threshold;
