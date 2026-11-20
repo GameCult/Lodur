@@ -82,6 +82,13 @@ namespace Lodur
         /// <summary>A snapshot of the drive; nothing but <see cref="Tick"/> writes it.</summary>
         public DriveState Drive => _drive;
 
+        /// <summary>Sets the drive's Attention and Consciousness slots; a seam for the tests until lodur-startle-attention and lodur-physiology drive them.</summary>
+        internal void SetWillSlots(double attention, double consciousness)
+        {
+            _drive.Attention = attention;
+            _drive.Consciousness = consciousness;
+        }
+
         public Brain Brain => _brain;
 
         /// <summary>The index in <see cref="Brain"/>'s goals of the goal in force; it changes only on the tick that reports <see cref="TickEvents.GoalChanged"/>.</summary>

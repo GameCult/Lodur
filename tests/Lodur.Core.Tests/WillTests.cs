@@ -397,4 +397,100 @@ public sealed class WillTests
         var calm = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), brain with { Start = 0 });
         Assert.Equal(1.0, calm.Drive.Resolve);
     }
+
+    // The slots read 1 in the core today; these tests lower them through the internal seam and watch every consumer of Will move.
+
+    private static Actor Hold(double attention, double consciousness, DriveParameters? drive = null)
+    {
+        var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = Hold07 } } } };
+        var actor = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), drive ?? new DriveParameters(), brain);
+        actor.SetWillSlots(attention, consciousness);
+        return actor;
+    }
+
+    private static readonly float[] NoPoint = { 0f };
+
+    private static TickEvents Step(Actor a, double boxIntensity, float[] strengths, Quat[] targets)
+    {
+        var box = new[] { new BoxStimulus(0f, 0f, 0f, 1f, 1f, 1f) { Intensity = boxIntensity } };
+        return a.Tick(NoPoint, NoPoint, NoPoint, box, strengths, targets);
+    }
+
+    [Theory]
+    [InlineData(1.0, 1.0)]
+    [InlineData(0.5, 1.0)]
+    [InlineData(1.0, 0.3)]
+    [InlineData(0.5, 0.3)]
+    [InlineData(0.5, 0.9)]
+    [InlineData(0.0, 1.0)]
+    public void Will_is_resolve_times_attention_capped_by_consciousness(double attention, double consciousness)
+    {
+        var a = Hold(attention, consciousness);
+        var s = new float[2];
+        var q = new Quat[2];
+        for (var i = 0; i < 300; i++)
+        {
+            Step(a, 0.6, s, q);
+            var d = a.Drive;
+            Assert.Equal(Math.Min(d.Resolve * attention, consciousness), d.Will);
+        }
+    }
+
+    [Fact]
+    public void Reflex_suppression_reads_Will_so_a_lowered_slot_releases_it_though_resolve_is_full()
+    {
+        // A held reflex accrues strain; with attention gone nothing is held, whatever resolve says.
+        double StrainAfter(double attention, double consciousness)
+        {
+            var a = Hold(attention, consciousness);
+            var s = new float[2];
+            var q = new Quat[2];
+            for (var i = 0; i < 100; i++) Step(a, 0.8, s, q);
+            Assert.True(a.Drive.Resolve > 0.9);
+            return a.Drive.Strain;
+        }
+
+        var full = StrainAfter(1.0, 1.0);
+        Assert.True(full > 0.1);
+        Assert.Equal(0.0, StrainAfter(0.0, 1.0));
+        Assert.Equal(0.0, StrainAfter(1.0, 0.0));
+        var half = StrainAfter(0.5, 1.0);
+        Assert.True(half > 0.0 && half < full);
+        var capped = StrainAfter(1.0, 0.5);
+        Assert.True(capped > 0.0 && capped < full);
+    }
+
+    [Fact]
+    public void The_flinch_gate_reads_Will_so_no_flinch_is_reported_when_there_is_no_will_to_leak_from()
+    {
+        int Flinches(double attention)
+        {
+            var a = Hold(attention, 1.0);
+            var s = new float[2];
+            var q = new Quat[2];
+            var n = 0;
+            for (var i = 0; i < 400; i++) if ((Step(a, 0.9, s, q) & TickEvents.Flinch) != 0) n++;
+            Assert.True(a.Drive.Resolve > 0.5);
+            return n;
+        }
+
+        Assert.True(Flinches(0.3) > 0);
+        Assert.Equal(0, Flinches(0.0));
+    }
+
+    [Theory]
+    [InlineData(0.5, 1.0)]
+    [InlineData(1.0, 0.2)]
+    [InlineData(0.5, 0.4)]
+    public void The_voluntary_weight_reads_Will_so_a_lowered_slot_slackens_the_hold(double attention, double consciousness)
+    {
+        var a = Hold(attention, consciousness, new DriveParameters { WillCurve = 0.5 });
+        var s = new float[2];
+        var q = new Quat[2];
+        for (var i = 0; i < 20; i++)
+        {
+            Step(a, 0.0, s, q);   // no stimulus, no leak
+            Assert.Equal(0.7f * (float)Math.Sqrt(Math.Min(a.Drive.Resolve * attention, consciousness)), s[0]);
+        }
+    }
 }

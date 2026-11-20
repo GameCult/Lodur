@@ -90,16 +90,16 @@ namespace Lodur
         /// <summary>How many times the will has broken.</summary>
         public int Breaks { get; private set; }
 
-        /// <summary>The fraction of resolve that attention lets through, 0..1. A slot: nothing lowers it yet (lodur-startle-attention fills it).</summary>
-        public double Attention => 1.0;
+        /// <summary>The fraction of resolve that attention lets through, 0..1. A slot, 1 until lodur-startle-attention fills it.</summary>
+        public double Attention { get; internal set; }
 
-        /// <summary>The ceiling on the will that wakefulness sets, 0..1. A slot: nothing lowers it yet (lodur-physiology fills it).</summary>
-        public double Consciousness => 1.0;
+        /// <summary>The ceiling on the will that wakefulness sets, 0..1. A slot, 1 until lodur-physiology fills it.</summary>
+        public double Consciousness { get; internal set; }
 
         /// <summary>The will that is available to hold reflexes down and to power voluntary behaviour: resolve through attention, capped by consciousness.</summary>
         public double Will => Math.Min(Resolve * Attention, Consciousness);
 
-        internal static DriveState Fresh => new DriveState { Resolve = 1.0 };
+        internal static DriveState Fresh => new DriveState { Resolve = 1.0, Attention = 1.0, Consciousness = 1.0 };
 
         /// <summary>A goal's entry effect: sets resolve, then the mend check runs (a break the entry lifts past <see cref="DriveParameters.WillMendsAt"/> is mended). It is not a break and counts none.</summary>
         internal void Enter(DriveParameters p, double resolve)
