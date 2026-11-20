@@ -386,4 +386,15 @@ public sealed class WillTests
         Assert.Equal(ticks, firstDrain);
         Assert.Equal(ticks, firstWeighted);
     }
+
+    [Fact]
+    public void A_puppet_that_starts_in_a_goal_with_an_entry_resolve_begins_at_it()
+    {
+        var brain = new Brain { Start = 1, Goals = new[] { new GoalSpec { Id = "calm", Behaviour = Pose }, new GoalSpec { Id = "rage", EntryResolve = 0.6, Behaviour = Pose } } };
+        var actor = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), brain);
+        Assert.Equal(0.6, actor.Drive.Resolve);
+
+        var calm = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), brain with { Start = 0 });
+        Assert.Equal(1.0, calm.Drive.Resolve);
+    }
 }

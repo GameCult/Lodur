@@ -50,6 +50,11 @@ namespace Lodur
             _driveP = drive;
             _brain = brain;
             _goal = brain.Start;
+            // The Start goal takes over at construction: its entry effect applies like any other goal's.
+            if (brain.Goals[brain.Start].EntryResolve is double startEntry)
+            {
+                _drive.Enter(drive, startEntry);
+            }
             _latency = Math.Max(1, (long)Math.Round(brain.DeliberateLatencySeconds / tickSeconds));
             _dwell = new long[brain.Goals.Count];
             _onset = new long[brain.Goals.Count];

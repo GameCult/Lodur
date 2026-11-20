@@ -62,7 +62,7 @@ namespace Lodur
         public double MinDwellSeconds { get; init; }
 
         /// <summary>
-        /// The resolve the character has the tick this goal takes over, in [0, 1]; null leaves resolve as it is. Rage is what
+        /// The resolve the character has the tick this goal takes over (for the Start goal, at construction), in [0, 1]; null leaves resolve as it is. Rage is what
         /// the will breaking leads to, and it resets the will (lodur:ruling:rage-involuntary-onset-then-voluntary).
         /// </summary>
         public double? EntryResolve { get; init; }
