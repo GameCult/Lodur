@@ -11,12 +11,12 @@ namespace Lodur
         Flinch = 1,
         /// <summary>Resolve reached zero this tick.</summary>
         WillBroke = 2,
-        /// <summary>Deliberate behaviour took over, the withdrawal latency after the will broke.</summary>
-        Withdrew = 4,
+        /// <summary>The Brain's chosen goal took over, its deliberate latency after the choice.</summary>
+        GoalChanged = 4,
     }
 
     /// <summary>
-    /// One character's nervous state and the per-tick order: perception, reflex, drive, behaviour. The caller
+    /// One character's nervous state and the per-tick order: perception, reflex, drive, the Brain's goal, behaviour. The caller
     /// supplies one point per body region, the game's stimulus sources, and the spans the behaviour writes its
     /// strengths and targets into; the Actor writes nothing else of the caller's and never touches physics.
     /// Everything is allocated in the constructor, and the same inputs give the same outputs.
@@ -25,32 +25,34 @@ namespace Lodur
     {
         private readonly double _dt;
         private readonly DriveParameters _driveP;
-        private readonly long _withdrawLatency;
+        private readonly Brain _brain;
+        private readonly long _latency;
         private readonly Perception _perception;
         private readonly WithdrawalReflex[] _reflexes;
-        private readonly HoldAgainstReflex _behaviour;
         private DriveState _drive = DriveState.Fresh;
         private long _tick;
-        private long _withdrawTick = -1;
-        private bool _withdrew;
+        private int _goal;
+        private int _pending = -1;
+        private long _switchTick;
+        private long _goalSince;
 
         public Actor(
             double tickSeconds, int regionCount,
-            NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, HoldParameters hold,
-            ReadOnlySpan<Quat> holdPose, ReadOnlySpan<Quat> withdrawPose,
+            NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, Brain brain,
             NerveParameters? senses = null, int senseRegion = 0)
         {
+            brain.Validate();
             _dt = tickSeconds;
             _driveP = drive;
-            _withdrawLatency = Math.Max(1, (long)Math.Round(withdrawal.LatencySeconds / tickSeconds));
+            _brain = brain;
+            _goal = brain.Start;
+            _latency = Math.Max(1, (long)Math.Round(brain.DeliberateLatencySeconds / tickSeconds));
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);
             _reflexes = new WithdrawalReflex[regionCount];
             for (var r = 0; r < regionCount; r++)
             {
                 _reflexes[r] = new WithdrawalReflex(withdrawal, tickSeconds);
             }
-
-            _behaviour = new HoldAgainstReflex(hold, holdPose, withdrawPose);
         }
 
         public int RegionCount => _reflexes.Length;
@@ -61,8 +63,13 @@ namespace Lodur
         /// <summary>A snapshot of the drive; nothing but <see cref="Tick"/> writes it.</summary>
         public DriveState Drive => _drive;
 
-        /// <summary>Hold until the will breaks, Withdraw from then on.</summary>
-        public Goal Goal => _drive.WillBroken ? Goal.Withdraw : Goal.Hold;
+        public Brain Brain => _brain;
+
+        /// <summary>The index in <see cref="Brain"/>'s goals of the goal in force; it changes only on the tick that reports <see cref="TickEvents.GoalChanged"/>.</summary>
+        public int GoalIndex => _goal;
+
+        /// <summary>How long the goal in force will have been in force at the next tick; 0 on the tick it took over.</summary>
+        public double SecondsInGoal => (_tick - _goalSince) * _dt;
 
         public double Stimulus(int region) => _perception.Stimulus(region);
 
@@ -105,19 +112,31 @@ namespace Lodur
                 }
             }
 
-            if (_drive.Step(_driveP, _dt, afferent, strainLoad, _perception.Load))
+            if (_drive.Step(_driveP, _dt, afferent, strainLoad, _perception.Load, _brain.Goals[_goal].Pull))
             {
                 events |= TickEvents.WillBroke;
-                _withdrawTick = _tick + _withdrawLatency;
             }
 
-            if (_tick == _withdrawTick)
+            // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is pending.
+            if (_pending < 0)
             {
-                events |= TickEvents.Withdrew;
-                _withdrew = true;
+                var wanted = _brain.Select(_drive, _goal);
+                if (wanted != _goal)
+                {
+                    _pending = wanted;
+                    _switchTick = _tick + _latency;
+                }
             }
 
-            _behaviour.Write(_withdrew ? Goal.Withdraw : Goal.Hold, leak, _drive.Strain, _tick * _dt, strengths, targets);
+            if (_pending >= 0 && _tick == _switchTick)
+            {
+                _goal = _pending;
+                _pending = -1;
+                _goalSince = _tick;
+                events |= TickEvents.GoalChanged;
+            }
+
+            _brain.Goals[_goal].Behaviour.Write(leak, _drive.Strain, _tick * _dt, (_tick - _goalSince) * _dt, strengths, targets);
             _tick++;
             return events;
         }

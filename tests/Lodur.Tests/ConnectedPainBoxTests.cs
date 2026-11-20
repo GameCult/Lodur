@@ -43,8 +43,31 @@ internal sealed class ConnectedPainBox : IDisposable
         _rng = new SplitMix64(seed);
         var gain = 1.0 + 0.2 * _rng.NextSigned();
         var drain = 1.0 + 0.2 * _rng.NextSigned();
+        // The pain box as a Brain: hold against the reflex until the will breaks, then release into the withdraw pose.
+        var tunables = hold ?? new HoldParameters();
+        var brain = new Brain
+        {
+            Goals = new[]
+            {
+                new GoalSpec
+                {
+                    Id = "objective", Priority = 0.0, Pull = 0.5,
+                    Behaviour = new PoseBehaviour { Keys = new[] { holdPose }, FlinchPose = withdrawPose, Hold = tunables },
+                },
+                new GoalSpec
+                {
+                    Id = "release", Priority = 1.0, Pull = 0.5,
+                    When = new[] { new Condition(DriveQuantity.WillBroken, ConditionOp.AtLeast, 1.0) },
+                    Behaviour = new PoseBehaviour
+                    {
+                        Keys = new[] { withdrawPose }, FlinchPose = withdrawPose,
+                        Hold = tunables with { FlinchGain = 0.0, StrainShake = 0.0 },
+                    },
+                },
+            },
+        };
         Actor = new Actor(Dt, HumanoidRagdoll.RegionCount, new NerveParameters { Gain = gain }, new WithdrawalParameters(),
-            new DriveParameters { DrainTrait = drain }, hold ?? new HoldParameters(), holdPose, withdrawPose);
+            new DriveParameters { DrainTrait = drain }, brain);
     }
 
     public Box3DSoaView View => World.View;
@@ -118,7 +141,7 @@ public sealed class ConnectedPainBoxTests
             var e = s.Tick();
             if ((e & TickEvents.Flinch) != 0) t.Flinches.Add(i);
             if ((e & TickEvents.WillBroke) != 0) broke = i;
-            if ((e & TickEvents.Withdrew) != 0) withdrew = i;
+            if ((e & TickEvents.GoalChanged) != 0) withdrew = i;
             t.Hand.Add((i, s.Hand, s.HandInBox));
         }
         // Keep running a little so the broken will has time to pull the arm out.

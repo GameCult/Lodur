@@ -48,10 +48,10 @@ public sealed class GoldenParityTests
                 ticks++;
                 if ((e & TickEvents.Flinch) != 0) flinches++;
                 if ((e & TickEvents.WillBroke) != 0) broke = i;
-                if ((e & TickEvents.Withdrew) != 0) withdrew = i;
+                if ((e & TickEvents.GoalChanged) != 0) withdrew = i;
                 var d = replay.Actor.Drive;
                 Double(replay.Actor.Stimulus(0)); Double(d.Pain); Double(d.Strain); Double(d.Resolve);
-                Byte((byte)(replay.Actor.Goal == Goal.Hold ? 0 : 1));
+                Byte((byte)(replay.Actor.Drive.WillBroken ? 1 : 0));
             }
 
             var ms = (long)Math.Round(withdrew >= 0 ? withdrew * 10.0 : max * 10.0);

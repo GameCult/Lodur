@@ -5,7 +5,7 @@ namespace Lodur.Core.Tests;
 public sealed class ActorTests
 {
     [Fact]
-    public void Parity_seed_1_breaks_at_14730_ms_withdraws_at_14830_ms_with_16_flinches()
+    public void Parity_seed_1_breaks_at_14730_ms_switches_goal_at_14830_ms_with_16_flinches()
     {
         var (broke, withdrew, flinches) = new PainBoxReplay(1).Run(120.0);
         Assert.Equal(1473, broke);
@@ -57,7 +57,7 @@ public sealed class ActorTests
     }
 
     [Fact]
-    public void A_broken_will_releases_suppression_goal_withdraws_for_good_and_deliberate_withdrawal_follows_its_latency()
+    public void A_broken_will_releases_suppression_and_the_deliberate_goal_switch_follows_its_latency()
     {
         var r = new PainBoxReplay(1);
         long broke = -1, withdrew = -1;
@@ -65,7 +65,6 @@ public sealed class ActorTests
         for (long i = 0; i < 1600; i++)
         {
             var e = r.Tick();
-            Assert.Equal(broke < 0 && (e & TickEvents.WillBroke) == 0 ? Goal.Hold : Goal.Withdraw, r.Actor.Goal);
             if (broke >= 0)
             {
                 // Nothing is held down any more: strain only decays, and a broken will stays broken.
@@ -73,12 +72,13 @@ public sealed class ActorTests
                 Assert.True(r.Actor.Drive.Strain < strain);
             }
             if ((e & TickEvents.WillBroke) != 0) broke = i;
-            if ((e & TickEvents.Withdrew) != 0) withdrew = i;
+            if ((e & TickEvents.GoalChanged) != 0) withdrew = i;
+            Assert.Equal(withdrew >= 0 ? 1 : 0, r.Actor.GoalIndex); // 0 until GoalChanged, 1 from it
             strain = r.Actor.Drive.Strain;
             if (withdrew >= 0) break;
         }
         Assert.Equal(broke + 10, withdrew); // round(0.1 s / 10 ms)
-        // From Withdrew the behaviour is the withdraw pose, whatever the leak.
+        // From GoalChanged the behaviour is the release behaviour's: the withdraw pose whatever the leak.
         Assert.Equal(PainBoxReplay.Withdraw[0].X, r.Targets[0].X, 5);
         Assert.Equal(PainBoxReplay.Withdraw[1].Z, r.Targets[1].Z, 5);
         Assert.Equal(PainBoxReplay.Withdraw[0].W, r.Targets[0].W, 5);
@@ -116,7 +116,7 @@ public sealed class ActorTests
                 var e = r.Tick();
                 if (broke) Assert.Equal(0, (int)(e & TickEvents.Flinch));
                 broke |= (e & TickEvents.WillBroke) != 0;
-                if ((e & TickEvents.Withdrew) != 0) break;
+                if ((e & TickEvents.GoalChanged) != 0) break;
             }
             sawLeakAfterBreak += broke ? 1 : 0;
         }
@@ -178,7 +178,7 @@ public sealed class ActorTests
             Assert.Equal(x.Actor.Drive.WillBroken, y.Actor.Drive.WillBroken);
             Assert.Equal(x.Actor.Afferent(0), y.Actor.Afferent(0));
             Assert.Equal(x.Actor.Stimulus(0), y.Actor.Stimulus(0));
-            Assert.Equal(x.Actor.Goal, y.Actor.Goal);
+            Assert.Equal(x.Actor.GoalIndex, y.Actor.GoalIndex);
             Assert.Equal(x.Actor.TickCount, y.Actor.TickCount);
             Assert.Equal(x.Strengths, y.Strengths);
             Assert.Equal(x.Targets, y.Targets);

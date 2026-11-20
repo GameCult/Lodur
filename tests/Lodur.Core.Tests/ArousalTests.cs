@@ -14,12 +14,11 @@ internal sealed class SensoryRig
     private readonly float[] _p = { 0f };
 
     /// <param name="heard">False builds the Actor without senses, so the emitters have no one to reach.</param>
-    public SensoryRig(Emitter[] emitters, double pull = 0.5, double drainTrait = 1.0, DriveParameters? drive = null, bool heard = true)
+    public SensoryRig(Emitter[] emitters, double pull = 0.5, double drainTrait = 1.0, DriveParameters? drive = null, bool heard = true, Brain? brain = null)
     {
         Emitters = emitters;
         Actor = new Actor(Dt, 1, new NerveParameters(), new WithdrawalParameters(),
-            (drive ?? new DriveParameters()) with { ObjectivePull = pull, DrainTrait = drainTrait }, new HoldParameters(),
-            PainBoxReplay.Hold, PainBoxReplay.Withdraw,
+            (drive ?? new DriveParameters()) with { DrainTrait = drainTrait }, brain ?? PainBoxBrain.Make(pull),
             heard ? new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0 } : null, 0);
     }
 

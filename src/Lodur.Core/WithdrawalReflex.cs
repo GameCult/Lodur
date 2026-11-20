@@ -2,16 +2,13 @@ using System;
 
 namespace Lodur
 {
-    /// <summary>The withdrawal reflex's tunables, and the latency of the deliberate withdrawal that takes over from it.</summary>
+    /// <summary>The withdrawal reflex's tunables.</summary>
     public sealed record WithdrawalParameters
     {
         /// <summary>How much of the reflex a fully resolved will can hold down (0..1).</summary>
         public double MaxSuppression { get; init; } = 0.95;
         public double FlinchLeakThreshold { get; init; } = 0.3;
         public double FlinchRefractorySeconds { get; init; } = 0.5;
-
-        /// <summary>How long after the will breaks deliberate behaviour withdraws.</summary>
-        public double LatencySeconds { get; init; } = 0.1;
     }
 
     /// <summary>

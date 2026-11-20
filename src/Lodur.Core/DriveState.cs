@@ -13,9 +13,6 @@ namespace Lodur
         public double ResolveRecovery { get; init; } = 0.02;
         public double ResolveRecoversBelowPain { get; init; } = 0.1;
 
-        /// <summary>How hard the objective pulls, 0..1. It scales resolve drain by (1 - pull); it is not a second resolve bar.</summary>
-        public double ObjectivePull { get; init; } = 0.5;
-
         /// <summary>Per-character multiplier on resolve drain (the consumer draws its trait spread).</summary>
         public double DrainTrait { get; init; } = 1.0;
 
@@ -25,7 +22,7 @@ namespace Lodur
         /// <summary>How fast arousal falls back once the load stops.</summary>
         public double ArousalDecay { get; init; } = 0.1;
 
-        /// <summary>Resolve drained per second at full arousal, before the objective's pull and the drain trait scale it.</summary>
+        /// <summary>Resolve drained per second at full arousal, before the active goal's pull and the drain trait scale it.</summary>
         public double ResolveDrainArousal { get; init; } = 0.1;
 
         /// <summary>Resolve recovers only while arousal is below this, as well as pain being low.</summary>
@@ -50,8 +47,8 @@ namespace Lodur
 
         internal static DriveState Fresh => new DriveState { Resolve = 1.0 };
 
-        /// <summary>Steps one tick; returns true on the tick the will breaks.</summary>
-        internal bool Step(DriveParameters p, double dt, double afferent, double strainLoad, double load)
+        /// <summary>Steps one tick; returns true on the tick the will breaks. <paramref name="pull"/> is the active goal's: it scales resolve drain by (1 - pull).</summary>
+        internal bool Step(DriveParameters p, double dt, double afferent, double strainLoad, double load, double pull)
         {
             Arousal = Math.Min(Math.Max(Arousal + dt * (p.ArousalRise * load * (1.0 - Arousal) - p.ArousalDecay * Arousal), 0.0), 1.0);
             Pain = Math.Min(Math.Max(Pain + dt * (p.PainRise * afferent * (1.0 - Pain) - p.PainDecay * Pain), 0.0), 1.0);
@@ -61,7 +58,7 @@ namespace Lodur
                 return false;
             }
 
-            var drain = (p.ResolveDrainPain * Pain + p.ResolveDrainStrain * Strain + p.ResolveDrainArousal * Arousal) * (1.0 - p.ObjectivePull) * p.DrainTrait;
+            var drain = (p.ResolveDrainPain * Pain + p.ResolveDrainStrain * Strain + p.ResolveDrainArousal * Arousal) * (1.0 - pull) * p.DrainTrait;
             var recovery = Pain < p.ResolveRecoversBelowPain && Arousal < p.ResolveRecoversBelowArousal ? p.ResolveRecovery * (1.0 - Resolve) : 0.0;
             Resolve = Math.Min(Math.Max(Resolve + dt * (recovery - drain), 0.0), 1.0);
             if (Resolve <= 0.0)
