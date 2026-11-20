@@ -285,4 +285,228 @@ public sealed class BrainTests
         Assert.Equal(b1.Targets, b2.Targets);
         Assert.Contains(ea, e => (e & TickEvents.GoalChanged) != 0);
     }
+
+    private static double Read(DriveState d, DriveQuantity q) => q switch
+    {
+        DriveQuantity.Pain => d.Pain,
+        DriveQuantity.Strain => d.Strain,
+        DriveQuantity.Arousal => d.Arousal,
+        DriveQuantity.Resolve => d.Resolve,
+        _ => d.WillBroken ? 1.0 : 0.0,
+    };
+
+    private static Brain Gated(Condition when, double dwell = 0.0, double pull = 0.5) => new()
+    {
+        Goals = new[] { Goal("calm", 0.0, pull), Goal("gated", 1.0, pull, when) with { MinDwellSeconds = dwell } },
+    };
+
+    /// <summary>
+    /// Runs a rig whose Brain has one goal gated on the condition; the switch must land the latency after the tick the
+    /// quantity itself first crossed, and no other quantity read the same way may cross on that tick (or the scenario
+    /// could not tell a misread from the right read).
+    /// </summary>
+    private static void GateFollowsOnly(Func<Brain, (Func<TickEvents> Tick, Func<DriveState> Drive)> rig, DriveQuantity q, ConditionOp op, double threshold, long ticks)
+    {
+        var (tick, drive) = rig(Gated(new Condition(q, op, threshold)));
+        bool Crossed(DriveState d, DriveQuantity of) => op == ConditionOp.AtLeast ? Read(d, of) >= threshold : Read(d, of) < threshold;
+        var firstOf = new Dictionary<DriveQuantity, long>();
+        long changed = -1;
+        for (long i = 0; i < ticks; i++)
+        {
+            var e = tick();
+            if ((e & TickEvents.GoalChanged) != 0 && changed < 0) changed = i;
+            foreach (var of in Enum.GetValues<DriveQuantity>())
+            {
+                if (!firstOf.ContainsKey(of) && Crossed(drive(), of)) firstOf[of] = i;
+            }
+        }
+        Assert.True(firstOf.TryGetValue(q, out var own), $"{q} never crossed {threshold}");
+        Assert.Equal(own + Latency, changed);
+        foreach (var of in Enum.GetValues<DriveQuantity>())
+        {
+            if (of != q) Assert.False(firstOf.TryGetValue(of, out var other) && other == own, $"{of} crosses on the same tick as {q}: the scenario cannot tell them apart");
+        }
+    }
+
+    private static (Func<TickEvents>, Func<DriveState>) PainRig(Brain b) { var r = new PainBoxReplay(1, brain: b); return (() => r.Tick(), () => r.Actor.Drive); }
+
+    private static (Func<TickEvents>, Func<DriveState>) SenseRig(Brain b)
+    {
+        var r = new SensoryRig(SensoryRig.One(0.55), brain: b);
+        return (() => r.Tick(), () => r.Actor.Drive);
+    }
+
+    [Theory]
+    [InlineData(DriveQuantity.Pain, ConditionOp.AtLeast, 0.5)]
+    [InlineData(DriveQuantity.Strain, ConditionOp.AtLeast, 1.0)]
+    [InlineData(DriveQuantity.Resolve, ConditionOp.Below, 0.9)]
+    [InlineData(DriveQuantity.WillBroken, ConditionOp.AtLeast, 1.0)]
+    public void Each_drive_quantity_a_condition_reads_is_that_quantity_in_the_pain_box(DriveQuantity q, ConditionOp op, double threshold) =>
+        GateFollowsOnly(PainRig, q, op, threshold, 1700);
+
+    [Fact]
+    public void Arousal_a_condition_reads_is_arousal_where_pain_strain_and_resolve_do_not_move_with_it()
+    {
+        GateFollowsOnly(SenseRig, DriveQuantity.Arousal, ConditionOp.AtLeast, 0.5, 3000);
+    }
+
+    [Fact]
+    public void Below_is_strict_and_at_least_is_inclusive_at_the_threshold()
+    {
+        var zero = default(DriveState); // pain exactly 0
+        Assert.True(new Condition(DriveQuantity.Pain, ConditionOp.AtLeast, 0.0).Holds(zero));
+        Assert.False(new Condition(DriveQuantity.Pain, ConditionOp.Below, 0.0).Holds(zero));
+        Assert.True(new Condition(DriveQuantity.Pain, ConditionOp.Below, 1e-300).Holds(zero));
+        Assert.False(new Condition(DriveQuantity.Pain, ConditionOp.AtLeast, 1e-300).Holds(zero));
+        Assert.False(new Condition(DriveQuantity.WillBroken, ConditionOp.Below, 0.0).Holds(zero));   // unbroken reads 0
+        Assert.True(new Condition(DriveQuantity.WillBroken, ConditionOp.Below, 1.0).Holds(zero));
+    }
+
+    private static long ChangeTickAfterPain(double latencySeconds)
+    {
+        var brain = Gated(Pain(ConditionOp.AtLeast, 0.3)) with { DeliberateLatencySeconds = latencySeconds };
+        var run = Go(new PainBoxReplay(1, brain: brain), 600, d => d.Pain >= 0.3);
+        Assert.Single(run.Changes);
+        return run.Changes[0] - run.Held[0];
+    }
+
+    [Fact]
+    public void The_deliberate_latency_is_rounded_to_ticks_never_less_than_one_and_a_negative_latency_is_refused()
+    {
+        Assert.Equal(1, ChangeTickAfterPain(0.0));    // a switch never lands on the tick it was decided
+        Assert.Equal(1, ChangeTickAfterPain(0.001));
+        Assert.Equal(1, ChangeTickAfterPain(0.014));
+        Assert.Equal(2, ChangeTickAfterPain(0.016));
+        Assert.Equal(10, ChangeTickAfterPain(0.1));
+        var g = Goal("g", 0.0);
+        Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(),
+            new Brain { Goals = new[] { g }, DeliberateLatencySeconds = -0.01 }));
+    }
+
+    [Fact]
+    public void The_pending_goals_behaviour_is_not_written_during_the_latency_only_from_the_tick_it_takes_over()
+    {
+        var loud = Goal("b", 1.0, 0.5, Pain(ConditionOp.AtLeast, 0.3)) with
+        {
+            Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = new HoldParameters { HoldStrength = 0.25f } },
+        };
+        var r = new PainBoxReplay(1, brain: new Brain { Goals = new[] { Goal("a", 0.0), loud } });
+        long decided = -1;
+        var landed = false;
+        for (long i = 0; i < 600 && !landed; i++)
+        {
+            var e = r.Tick();
+            if (decided < 0 && r.Actor.Drive.Pain >= 0.3) decided = i;
+            if (decided < 0) continue;
+            if (i < decided + Latency)
+            {
+                Assert.Equal(1f, r.Strengths[0]);
+                Assert.Equal(0, (int)(e & TickEvents.GoalChanged));
+            }
+            else
+            {
+                Assert.Equal(TickEvents.GoalChanged, e & TickEvents.GoalChanged);
+                Assert.Equal(0.25f, r.Strengths[0]);
+                landed = true;
+            }
+        }
+        Assert.True(landed);
+    }
+
+    [Fact]
+    public void A_behaviours_phase_restarts_from_the_time_in_the_goal_not_the_clock()
+    {
+        var keys = Enumerable.Range(0, 4).Select(k => new[] { Quat.FromAxisAngle(0f, 0f, 1f, 0.3f * k), Quat.Identity }).ToArray();
+        var loop = Goal("loop", 1.0, 0.5, Pain(ConditionOp.AtLeast, 0.3)) with
+        {
+            Behaviour = new PoseBehaviour { Keys = keys, SecondsPerKey = 0.1, FlinchPose = keys[0], Hold = new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 } },
+        };
+        var r = new PainBoxReplay(1, brain: new Brain { Goals = new[] { Goal("a", 0.0), loop } });
+        long changed = -1;
+        for (long i = 0; i < 600 && changed < 0; i++)
+        {
+            if ((r.Tick() & TickEvents.GoalChanged) != 0) changed = i;
+        }
+        Assert.True(changed > 0 && changed % 40 != 0, $"changed at {changed}: the loop is 40 ticks, a clock-driven phase would be hidden");
+        Assert.Equal(Quat.Nlerp(keys[0][0], keys[0][0], 0f).Z, r.Targets[0].Z);     // key 0 exactly, the tick it takes over
+        for (var k = 0; k < 5; k++) r.Tick();
+        Assert.Equal(Quat.Nlerp(keys[0][0], keys[1][0], 0.5f).Z, r.Targets[0].Z, 5); // half way to key 1 after half a key
+    }
+
+    private static List<long> Hover(double dwell, double threshold)
+    {
+        var rage = Goal("rage", 2.0, 1.0, new Condition(DriveQuantity.Arousal, ConditionOp.AtLeast, threshold)) with { MinDwellSeconds = dwell };
+        var brain = new Brain { Goals = new[] { Goal("calm", 1.0, 1.0) with { MinDwellSeconds = dwell }, rage } };
+        var rig = new SensoryRig(SensoryRig.One(0.55), brain: brain);
+        var changes = new List<long>();
+        for (long i = 0; i < 6000; i++)
+        {
+            rig.Emitters[0].Intensity = (i / 100) % 2 == 0 ? 0.55 : 0.0; // on 1 s, off 1 s: arousal saws around its middle
+            if ((rig.Tick() & TickEvents.GoalChanged) != 0) changes.Add(i);
+        }
+        return changes;
+    }
+
+    [Fact]
+    public void A_condition_hovering_at_its_threshold_chatters_without_a_dwell_and_with_one_a_goal_is_left_at_most_once_per_window()
+    {
+        double lo = 1, hi = 0;
+        var probe = new SensoryRig(SensoryRig.One(0.55), brain: new Brain { Goals = new[] { Goal("only", 0.0, 1.0) } });
+        for (long i = 0; i < 6000; i++)
+        {
+            probe.Emitters[0].Intensity = (i / 100) % 2 == 0 ? 0.55 : 0.0;
+            probe.Tick();
+            if (i >= 3000) { lo = Math.Min(lo, probe.Actor.Drive.Arousal); hi = Math.Max(hi, probe.Actor.Drive.Arousal); }
+        }
+        var mid = 0.5 * (lo + hi);
+
+        var free = Hover(0.0, mid);
+        Assert.True(free.Count >= 15, $"{free.Count} changes with no dwell: the scenario does not chatter");
+
+        const double dwell = 3.0;
+        var held = Hover(dwell, mid);
+        Assert.True(held.Count >= 2 && held.Count < free.Count / 3, $"{held.Count} changes with a dwell of {dwell} s against {free.Count}");
+        for (var i = 1; i < held.Count; i++)
+        {
+            Assert.True(held[i] - held[i - 1] >= (long)(dwell / 0.01) + Latency, $"changes at {held[i - 1]} and {held[i]} are closer than the dwell and latency");
+        }
+        Assert.True(held[0] >= (long)(dwell / 0.01), "the start goal is held for the dwell too");
+        Assert.Throws<ArgumentException>(() => new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(),
+            new Brain { Goals = new[] { Goal("g", 0.0) with { MinDwellSeconds = -1.0 } } }));
+    }
+
+    [Fact]
+    public void A_validated_brain_does_not_follow_later_changes_to_the_lists_and_arrays_it_was_built_from()
+    {
+        Brain Build(out List<GoalSpec> goals, out Condition[] when, out Quat[][] keys, out Quat[] flinch)
+        {
+            when = new[] { Pain(ConditionOp.AtLeast, 0.3) };
+            keys = new[] { (Quat[])PainBoxBrain.Hold.Clone() };
+            flinch = (Quat[])PainBoxBrain.Withdraw.Clone();
+            goals = new List<GoalSpec>
+            {
+                Goal("a", 0.0),
+                Goal("b", 1.0, 0.5) with { When = when, Behaviour = new PoseBehaviour { Keys = keys, FlinchPose = flinch } },
+            };
+            return new Brain { Goals = goals };
+        }
+
+        var brain = Build(out var goals, out var when, out var keys, out var flinch);
+        var twin = Build(out _, out _, out _, out _);
+        goals.Clear();
+        when[0] = Pain(ConditionOp.AtLeast, double.NaN);
+        keys[0][0] = new Quat(9f, 9f, 9f, 9f);
+        keys[0] = new Quat[1];
+        flinch[0] = new Quat(5f, 5f, 5f, 5f);
+
+        var a = new PainBoxReplay(1, brain: brain);
+        var b = new PainBoxReplay(1, brain: twin);
+        for (var i = 0; i < 1500; i++)
+        {
+            Assert.Equal(b.Tick(), a.Tick());
+            Assert.Equal(b.Targets, a.Targets);
+        }
+        Assert.Equal(2, brain.Goals.Count);
+        Assert.Equal(1, a.Actor.GoalIndex);
+    }
 }

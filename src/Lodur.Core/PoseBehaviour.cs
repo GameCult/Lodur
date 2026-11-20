@@ -28,14 +28,30 @@ namespace Lodur
     /// </summary>
     public sealed record PoseBehaviour
     {
-        /// <summary>k keys of one rotation per muscle each.</summary>
-        public Quat[][] Keys { get; init; } = Array.Empty<Quat[]>();
+        private Quat[][] _keys = Array.Empty<Quat[]>();
+        private Quat[] _flinch = Array.Empty<Quat>();
+
+        /// <summary>k keys of one rotation per muscle each. Copied when set.</summary>
+        public Quat[][] Keys
+        {
+            get => _keys;
+            init
+            {
+                var copy = new Quat[value.Length][];
+                for (var k = 0; k < copy.Length; k++)
+                {
+                    copy[k] = (Quat[])value[k].Clone();
+                }
+
+                _keys = copy;
+            }
+        }
 
         /// <summary>Seconds from one key to the next when there is more than one key.</summary>
         public double SecondsPerKey { get; init; } = 1.0;
 
-        /// <summary>The pose the leak and the shake pull toward, one rotation per muscle.</summary>
-        public Quat[] FlinchPose { get; init; } = Array.Empty<Quat>();
+        /// <summary>The pose the leak and the shake pull toward, one rotation per muscle. Copied when set.</summary>
+        public Quat[] FlinchPose { get => _flinch; init => _flinch = (Quat[])value.Clone(); }
 
         public HoldParameters Hold { get; init; } = new HoldParameters();
 

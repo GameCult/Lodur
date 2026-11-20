@@ -27,6 +27,7 @@ namespace Lodur
         private readonly DriveParameters _driveP;
         private readonly Brain _brain;
         private readonly long _latency;
+        private readonly long[] _dwell;
         private readonly Perception _perception;
         private readonly WithdrawalReflex[] _reflexes;
         private DriveState _drive = DriveState.Fresh;
@@ -47,6 +48,12 @@ namespace Lodur
             _brain = brain;
             _goal = brain.Start;
             _latency = Math.Max(1, (long)Math.Round(brain.DeliberateLatencySeconds / tickSeconds));
+            _dwell = new long[brain.Goals.Count];
+            for (var g = 0; g < _dwell.Length; g++)
+            {
+                _dwell[g] = (long)Math.Round(brain.Goals[g].MinDwellSeconds / tickSeconds);
+            }
+
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);
             _reflexes = new WithdrawalReflex[regionCount];
             for (var r = 0; r < regionCount; r++)
@@ -117,8 +124,9 @@ namespace Lodur
                 events |= TickEvents.WillBroke;
             }
 
-            // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is pending.
-            if (_pending < 0)
+            // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is
+            // pending, nor before the goal in force has had its minimum dwell.
+            if (_pending < 0 && _tick - _goalSince >= _dwell[_goal])
             {
                 var wanted = _brain.Select(_drive, _goal);
                 if (wanted != _goal)

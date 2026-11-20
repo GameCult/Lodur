@@ -46,11 +46,20 @@ namespace Lodur
         /// <summary>The eligible goal of the highest priority is wanted.</summary>
         public double Priority { get; init; }
 
-        /// <summary>How hard the goal pulls, in [0, 1]: resolve drain is scaled by (1 - pull) while it is active. It is not a second resolve bar.</summary>
+        /// <summary>How hard the goal pulls, in [0, 1], default 0 (no pull): resolve drain is scaled by (1 - pull) while it is active. It is not a second resolve bar.</summary>
         public double Pull { get; init; }
 
-        /// <summary>All must hold for the goal to be eligible; none means always eligible.</summary>
-        public Condition[] When { get; init; } = Array.Empty<Condition>();
+        /// <summary>
+        /// A goal cannot be left until it has been active this long, counted in ticks from the tick it took over;
+        /// 0 (the default) never holds a goal. It keeps a condition hovering at its threshold from making the Brain
+        /// chatter: a switch away is decided only once the dwell has passed, then takes the deliberate latency.
+        /// </summary>
+        public double MinDwellSeconds { get; init; }
+
+        private Condition[] _when = Array.Empty<Condition>();
+
+        /// <summary>All must hold for the goal to be eligible; none means always eligible. Copied when set.</summary>
+        public Condition[] When { get => _when; init => _when = (Condition[])value.Clone(); }
 
         public PoseBehaviour Behaviour { get; init; } = new PoseBehaviour();
     }
@@ -61,7 +70,23 @@ namespace Lodur
     /// </summary>
     public sealed record Brain
     {
-        public IReadOnlyList<GoalSpec> Goals { get; init; } = Array.Empty<GoalSpec>();
+        private IReadOnlyList<GoalSpec> _goals = Array.Empty<GoalSpec>();
+
+        /// <summary>The goals, copied when set: later changes to the caller's list or arrays do not reach a Brain.</summary>
+        public IReadOnlyList<GoalSpec> Goals
+        {
+            get => _goals;
+            init
+            {
+                var copy = new GoalSpec[value.Count];
+                for (var i = 0; i < copy.Length; i++)
+                {
+                    copy[i] = value[i];
+                }
+
+                _goals = Array.AsReadOnly(copy);
+            }
+        }
 
         /// <summary>The index of the goal a character begins in.</summary>
         public int Start { get; init; }
@@ -121,6 +146,11 @@ namespace Lodur
                 if (!double.IsFinite(goal.Priority) || !(goal.Pull >= 0.0 && goal.Pull <= 1.0))
                 {
                     throw new ArgumentException($"Goal {goal.Id}: priority must be finite and pull in [0, 1].");
+                }
+
+                if (!(goal.MinDwellSeconds >= 0.0 && double.IsFinite(goal.MinDwellSeconds)))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: MinDwellSeconds must be finite and not negative.");
                 }
 
                 foreach (var c in goal.When)
