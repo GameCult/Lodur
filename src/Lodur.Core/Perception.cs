@@ -144,18 +144,24 @@ namespace Lodur
         /// <summary>The afferent signal arriving this tick: what the nerve took in a conduction delay ago.</summary>
         public double Afferent(int region) => _afferent[region];
 
-        /// <summary>The sensory signals combined: 1 - the product over channels of (1 - afferent, capped at 1). Zero with no senses or no emitters.</summary>
+        /// <summary>The sensory signals combined: 1 - the product over channels of (1 - afferent, capped at 1), the afferents being the gated ones (see <see cref="ChannelAfferent"/>). Zero with no senses or no emitters.</summary>
         public double Load { get; private set; }
 
         /// <summary>The largest intensity of the channel's emitters at the sense region's point this tick.</summary>
         public double ChannelStimulus(Channel channel) => _senseStimulus[(int)channel];
 
-        /// <summary>The channel's afferent arriving this tick, after threshold, sensitisation and conduction delay.</summary>
+        /// <summary>
+        /// The channel's afferent arriving this tick, after threshold, sensitisation and conduction delay, times the sensory gain
+        /// <see cref="Sense"/> was given (lodur:ruling:stress-bar-shows-arousal-calm-silences). <see cref="ChannelStimulus"/> stays the world's.
+        /// </summary>
         public double ChannelAfferent(Channel channel) => _senseAfferent[(int)channel];
 
-        /// <summary>Senses once per physics step. The spans are the caller's, one point per region.</summary>
+        /// <summary>
+        /// Senses once per physics step. The spans are the caller's, one point per region. The sensory gain (default 1, the identity) multiplies the sense
+        /// channels' afferents as they leave the conduction delay; the nociceptive region afferents are never gated.
+        /// </summary>
         public void Sense(ReadOnlySpan<float> x, ReadOnlySpan<float> y, ReadOnlySpan<float> z, ReadOnlySpan<BoxStimulus> sources,
-            ReadOnlySpan<Emitter> emitters = default)
+            ReadOnlySpan<Emitter> emitters = default, double sensoryGain = 1.0)
         {
             if (x.Length != _regions || y.Length != _regions || z.Length != _regions)
             {
@@ -199,13 +205,13 @@ namespace Lodur
 
             if (_senses != null)
             {
-                SenseEmitters(x[_senseRegion], y[_senseRegion], z[_senseRegion], emitters);
+                SenseEmitters(x[_senseRegion], y[_senseRegion], z[_senseRegion], emitters, sensoryGain);
             }
 
             _tick++;
         }
 
-        private void SenseEmitters(float x, float y, float z, ReadOnlySpan<Emitter> emitters)
+        private void SenseEmitters(float x, float y, float z, ReadOnlySpan<Emitter> emitters, double gain)
         {
             var senses = _senses!;
             var slot = (int)(_tick % _senseSlots);
@@ -228,7 +234,8 @@ namespace Lodur
                 sens = Math.Min(Math.Max(sens, 1.0), senses.SensitisationCap);
                 _senseSens[c] = sens;
                 var ring = c * _senseSlots + slot;
-                _senseAfferent[c] = _senseRing[ring]; // written one conduction delay ago
+                // Written one conduction delay ago; the gate sits after the ring, so sensitisation still follows the world.
+                _senseAfferent[c] = _senseRing[ring] * gain;
                 _senseRing[ring] = above * sens * senses.Gain;
                 quiet *= 1.0 - Math.Min(1.0, _senseAfferent[c]);
             }

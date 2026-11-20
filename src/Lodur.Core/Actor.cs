@@ -50,6 +50,7 @@ namespace Lodur
             _driveP = drive;
             _brain = brain;
             _goal = brain.Start;
+            _drive.SensoryGain = brain.Goals[brain.Start].SensoryGain;
             // The Start goal takes over at construction: its entry effect applies like any other goal's.
             if (brain.Goals[brain.Start].EntryResolve is double startEntry)
             {
@@ -123,7 +124,7 @@ namespace Lodur
             // A flinch is the leak of a suppressed reflex; with no will nothing is suppressed, so none is reported.
             var holding = _drive.Will > 0.0;
 
-            _perception.Sense(regionX, regionY, regionZ, sources, emitters);
+            _perception.Sense(regionX, regionY, regionZ, sources, emitters, _drive.SensoryGain);
 
             double afferent = 0.0, strainLoad = 0.0, leak = 0.0;
             for (var r = 0; r < _reflexes.Length; r++)
@@ -165,6 +166,7 @@ namespace Lodur
                 _pending = -1;
                 _goalSince = _tick;
                 events |= TickEvents.GoalChanged;
+                _drive.SensoryGain = _brain.Goals[_goal].SensoryGain;
                 if (_brain.Goals[_goal].EntryResolve is double entry)
                 {
                     _drive.Enter(_driveP, entry);

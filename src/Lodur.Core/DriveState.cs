@@ -99,7 +99,10 @@ namespace Lodur
         /// <summary>The will that is available to hold reflexes down and to power voluntary behaviour: resolve through attention, capped by consciousness.</summary>
         public double Will => Math.Min(Resolve * Attention, Consciousness);
 
-        internal static DriveState Fresh => new DriveState { Resolve = 1.0, Attention = 1.0, Consciousness = 1.0 };
+        /// <summary>The gain on the sense channels in force, 0..1: the goal in force's <see cref="GoalSpec.SensoryGain"/> as the Actor has reached it. Written only by the Actor.</summary>
+        public double SensoryGain { get; internal set; }
+
+        internal static DriveState Fresh => new DriveState { Resolve = 1.0, Attention = 1.0, Consciousness = 1.0, SensoryGain = 1.0 };
 
         /// <summary>A goal's entry effect: sets resolve, then the mend check runs (a break the entry lifts past <see cref="DriveParameters.WillMendsAt"/> is mended). It is not a break and counts none.</summary>
         internal void Enter(DriveParameters p, double resolve)

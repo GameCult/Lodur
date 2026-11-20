@@ -71,6 +71,13 @@ namespace Lodur
         public double Effort { get; init; }
 
         /// <summary>
+        /// The gain on the sense channels (not the nociceptive region afferents) while this goal is in force, in [0, 1], default 1; 0 is deaf and blind to the
+        /// world's stimuli, which keep sounding (lodur:ruling:stress-bar-shows-arousal-calm-silences). Applied like <see cref="EntryResolve"/>: at the tick the goal
+        /// takes over, and at construction for the Start goal.
+        /// </summary>
+        public double SensoryGain { get; init; } = 1.0;
+
+        /// <summary>
         /// How long after it takes over the goal runs without will (rounded to whole ticks once, like the dwell), not negative, default 0 (voluntary from the first tick);
         /// +infinity is involuntary throughout. While involuntary the behaviour writes at full weight and pays no Effort;
         /// after it the goal is voluntary: sustained by <see cref="DriveState.Will"/> like every other voluntary layer.
@@ -198,6 +205,11 @@ namespace Lodur
                 if (goal.EntryResolve is double entry && !(entry >= 0.0 && entry <= 1.0))
                 {
                     throw new ArgumentException($"Goal {goal.Id}: EntryResolve must be in [0, 1].");
+                }
+
+                if (!(goal.SensoryGain >= 0.0 && goal.SensoryGain <= 1.0))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: SensoryGain must be in [0, 1].");
                 }
 
                 if (!(goal.Effort >= 0.0 && double.IsFinite(goal.Effort)))
