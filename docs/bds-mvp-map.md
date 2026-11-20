@@ -2,7 +2,7 @@
 
 Imagination pass `bds-mvp-map`, nibu-imagination, session nibu-self-2026-11-17, 2026-11-20.
 Serves `lodur:ruling:bds-mvp-scope` and `lodur:ruling:bds-sandbox-arenas-will-economy`, under target
-`lodur:target:r3`. Draft for Self to commit as `Lodur/docs/bds-mvp-map.md`; the target r4 text below goes to
+`lodur:target:r3`. Committed as `Lodur/docs/bds-mvp-map.md`; the bases, probes and body facts below are as of the pass (Modeling refreshed the state columns and the cut table on 2026-11-20, see "Landed since the pass"); the target r4 text below went to
 `docs/lodur-target.md` when Self admits r4.
 
 ## Bases
@@ -15,6 +15,29 @@ Serves `lodur:ruling:bds-mvp-scope` and `lodur:ruling:bds-sandbox-arenas-will-ec
 | Godot client | none | a parallel Imagination maps `client-ready-sim`, `godot-client-v1`; not admitted at 5566 |
 
 In-flight specs this map sequences around (no report unless noted): `rung3-sensory-load` (merged), `rung3-office-stress`, `rung4-goal-flip`, `rung4-office-flip`.
+
+## Landed since the pass (Modeling, 2026-11-20; mains: Ymir `5104b17`, Lodur `f9e302e`, BDS `bd01101`)
+
+Body facts 1 and 8-10 below describe the bases, not today. What the cuts changed; the owners' inputs, outputs, derived
+state and forbidden writers are in `docs/lodur-target.md` ("Who writes what, per tick") and BDS's README ("Who owns
+what"); rulings and specs are cited by id, not restated.
+
+- **Ymir** (ABI 8): contact and hit facts with materials, exact per-step contact impulse, grab anchor, motor joint,
+  point impulse, ray, joint handles with generations, tombstoned joint lanes, and joint origin lanes (the joint
+  frame's origin in the world, on body A). Not landed: thresholds, overload facts, removal of bodies and joints
+  (`ymir-break-and-remove`, still refused by the API).
+- **Lodur**: the drive's will breaks and mends as a recurring event (`Breaks`, `WillMendsAt`); `Will` = min(resolve x
+  attention, consciousness) is derived; every voluntary pose is written at `Will^WillCurve` (the will mix), an
+  involuntary goal onset at full weight; goals carry `EntryResolve`, `Effort`, `InvoluntarySeconds`, and `SensoryGain`,
+  `EntryArousal`, `EntrySeconds` (the Actor ramps gain and arousal over the entry, Perception gates the sense channels
+  with the gain and refuses one outside [0, 1]). Startle (the Attention writer) and physiology (the Consciousness
+  writer) are not built.
+- **BDS**: the chamber and the office are scenarios on one stepping session each; the office arc is snap, rage, calm
+  (the stress column is arousal), and each scenario's release goal is declared by id. The Godot client draws the
+  body run as one skinned SDF puppet: `PuppetField` meshes, `PuppetModel` owns bind, signature and rebuild,
+  `PuppetSkin` skins every frame and derives the surface, `Puppet` owns the Godot mesh and the build counter, the
+  shader only draws the bevel, `RenderCheck` is the windowed oracle. Not landed: a sandbox session, commands,
+  levels, runtime bodies.
 
 ## Body facts (probes)
 
@@ -81,11 +104,11 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 
 | System | State | Cut |
 |---|---|---|
-| Contact facts: begin/end/hit per step with stable ids, lanes, point, normal, approach speed, material ids; per-body contact force lane | new; planar session precedent `ymir_box3d.c:694-830` | `ymir-contact-facts` |
-| Material id per body (u64, the game's), carried on hit facts | new; Box3D `userMaterialId` on hits (types.h:1131-1161) | `ymir-contact-facts` |
-| Raycast (closest hit: lane, stable id, point, normal, fraction) for picking and hitscan | new | `ymir-grab-anchor` |
-| Grab anchor: shapeless kinematic body moved by target transform; motor joint (linear/angular spring, max force) | new; probe 6 | `ymir-grab-anchor` |
-| Point impulse command | new; probe 7 | `ymir-grab-anchor` |
+| Contact facts: begin/end/hit per step with stable ids, lanes, point, normal, approach speed, material ids; per-body contact force lane | landed (ABI 5-7; `docs/soa-world.md`: facts per step, exact per-step contact impulse per body and per hit); planar session precedent `ymir_box3d.c:694-830` | `ymir-contact-facts` |
+| Material id per body (u64, the game's), carried on hit facts | landed (the body's `material_id`, on the hit facts) | `ymir-contact-facts` |
+| Raycast (closest hit: lane, stable id, point, normal, fraction) for picking and hitscan | landed (ABI 5) | `ymir-grab-anchor` |
+| Grab anchor: shapeless kinematic body moved by target transform; motor joint (linear/angular spring, max force) | landed (ABI 5-6: grab release, joint handles with generations; probe 6) | `ymir-grab-anchor` |
+| Point impulse command | landed (ABI 5; probe 7) | `ymir-grab-anchor` |
 | Joint stress: per-joint force/torque thresholds (create and set), overload facts with measured force/torque | new; probe 5 | `ymir-break-and-remove` |
 | Runtime removal of bodies and joints; tombstoned lanes; reuse after a step; removal facts (incl. joints that die with a body); end-touch attribution for dead shapes | new; probe 4 | `ymir-break-and-remove` |
 | Placeable joint kinds for building (motor-driven revolute, prismatic, distance/rope, spring) | new | follow-up `ymir-joint-kinds` |
@@ -97,10 +120,10 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 |---|---|---|---|
 | Part tree: the body plan as content (parts, parent, side, max HP, coverage, vital flags, muscles, Ymir lane binding) | 3 data + 5 binding | new; today `Limb`/`Muscle` enums | `lodur-physiology` |
 | Touch perception per part: pressure (contact force), impact (hit speed, material), external-joint pull (grab, strap) | 1 (+5 reads Ymir) | new | `lodur-touch` |
-| Reflexes: withdrawal (exists), startle on sensory and touch onsets, flinch-from-touch, brace on impact | 2 | withdrawal exists `WithdrawalReflex.cs`; rest new | `lodur-startle-attention`, `lodur-reflex-set` |
+| Reflexes: withdrawal (exists), startle on sensory and touch onsets, flinch-from-touch, brace on impact | 2 | withdrawal exists `WithdrawalReflex.cs` and reads `Will`; rest new | `lodur-startle-attention`, `lodur-reflex-set` |
 | Physiology as drive state: per-part HP and injuries, body blood fraction, bleeding, pain sum, shock, consciousness, capacities scaling muscle strength, death | 3 | new | `lodur-physiology` |
-| Will economy: resolve (exists) times attention (new, startle drains it) is the budget every voluntary layer draws on; reflexes act against it | 3/4 | partial: suppression by resolve `WithdrawalReflex.cs:44` | `lodur-startle-attention`, `lodur-will-mix` |
-| Voluntary motor layers: hold pose (exists as `PoseBehaviour`), clip player, IK goals (reach, look, aim), grip; mixed by will | 4 | hold exists; rest new | `lodur-will-mix`, `lodur-ik-goals`, `lodur-clips` |
+| Will economy: resolve (exists) times attention (new, startle drains it) is the budget every voluntary layer draws on; reflexes act against it | 3/4 | landed except attention: `Will` = min(resolve x attention, consciousness) in `DriveState`, read by the reflex and the will mix; the Attention and Consciousness slots read 1 until startle and physiology write them | `lodur-startle-attention` (open), `lodur-will-mix` (landed `afb8df3`) |
+| Voluntary motor layers: hold pose (exists as `PoseBehaviour`), clip player, IK goals (reach, look, aim), grip; mixed by will | 4 | hold exists, weighted by `Will^WillCurve` (`PoseBehaviour.Write`; an involuntary goal onset writes at weight 1); rest new | `lodur-will-mix`, `lodur-ik-goals`, `lodur-clips` |
 | Body interface: strengths + joint targets (exists) + IK goals with weights | 5 | partial `HumanoidRagdoll.Drive` | `lodur-ik-goals` |
 | Severing: physiology decides; binding removes the joint in Ymir; impairment states derived per part, mirror-symmetric | 3 decides, 5 executes | new | `lodur-sever-impair` |
 | Grip: hand holds an object by a breakable weld whose threshold follows grip strength; drop on pain, overload, unconsciousness; the tool frame is an IK end effector | 4/5 | new | `lodur-grip` |
@@ -120,7 +143,7 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 
 | System | State | Cut |
 |---|---|---|
-| Render bodies from Ymir lanes by stable id | new, mapped elsewhere | `godot-client-v1` (parallel pass) |
+| Render bodies from Ymir lanes by stable id | landed: `BodyRenderer` draws static boxes and `Puppet` the dynamic bodies as one skinned SDF mesh (BDS README, "Who owns what") | `godot-client-v1` |
 | Bodies added and removed at runtime from Ymir lifecycle facts | new | follow-up `godot-runtime-bodies` |
 | Input to commands: ray pick, grab drag, poke, cut, place, wire | new | follow-up `godot-interaction` |
 | Blood visuals from BDS gore events (particles at wounds, decals at hits, stump caps) | new | follow-up `godot-blood` |
@@ -166,7 +189,7 @@ command queue; arenas are levels; a player cut and a falling blade go through th
 a torn limb and a cut limb go through the same physiology severing decision; reload of a level replays the
 same commands as building it.
 
-**Deletion lines:** `PoseBehaviour.Blend` as the motor owner (in `lodur-will-mix`); hand-only `Region`
+**Deletion lines:** `PoseBehaviour.Blend` as the motor owner (in `lodur-will-mix`, landed: `Blend` now only mixes the hold layer's flinch pose, the strength is the will mix); hand-only `Region`
 enum and `ReadRegions` as perception's body model (in `lodur-touch`, replaced by parts); the per-run world in
 `BodyPainBox.Run` as BDS's only world (in `bds-sandbox-session`, scenario runs become sessions,
 follow-up `scenario-session-unify`).
@@ -190,7 +213,7 @@ follow-up `scenario-session-unify`).
 | Held object (grip) | (actor, hand side) → object stable id | grip begins on behaviour or level content → weld joint with threshold = grip strength → released by behaviour, reflex, unconsciousness or overload | Lodur grip state; Ymir weld executes | level may author "starts holding X" (content) |
 | Level / arena | content id | authored with player tools, saved, loaded by replaying commands | BDS | CultCache |
 | Contact / hit / overload / removal fact | (step, ordinal) | one step | Ymir | no |
-| Attention | (actor) scalar | 1.0; startle drops it, recovers in under a second | Lodur drive | no |
+| Attention | (actor) scalar | 1.0, and nothing writes it yet but the test seam `Actor.SetWillSlots`; startle will drop it, recovering in under a second | Lodur drive | no |
 
 ## Questions for the operator and Deru (one batch; admitted as `question`s)
 
@@ -225,7 +248,7 @@ follow-up `scenario-session-unify`).
    facial cues (presentation). Recommend tremor, sag, slower reach and aim wander from the will mix, plus a
    debug bar; voice later.
 
-## Target r4 (proposed text for Self)
+## Target r4 (landed: `5d0fec8` and r5 `58c2201`; `docs/lodur-target.md` is now the text)
 
 Keep r3's invariants and add:
 
@@ -281,7 +304,7 @@ leg is a behaviour keyed on the state, not a re-learned controller).
   joints, as the duplicator's paste does. No source reached says how those games' shipped levels were built;
   the ruling's "arenas with the player's tools" is ours.
 - **Startle moves up.** The new ruling makes distraction a will drain, so `lodur:follow_up:startle-reflex`
-  becomes cut `lodur-startle-attention`, right after rung 4.
+  becomes cut `lodur-startle-attention`. It did not land right after rung 4: `lodur-will-mix` landed first (it needs only the `Will` slots, which read 1), so startle now depends on it.
 
 ## Cut order
 
@@ -290,20 +313,20 @@ with the Lodur rungs (different repo); Lodur cuts serialise on `Actor.cs`; BDS w
 
 | # | Cut | Repo | One line | Depends on | Size |
 |---|---|---|---|---|---|
-| 1 | `ymir-contact-facts` | Ymir | contact/hit facts, contact-force lane, material ids | ymir-shape-lanes (parallel client pass, ABI 3) | M |
-| 1' | `ymir-grab-anchor` | Ymir | kinematic anchor, motor joint, impulse, raycast | ymir-shape-lanes (sibling of 1) | S-M |
-| 2 | `ymir-break-and-remove` | Ymir | thresholds, overload facts, remove body/joint, tombstones, removal facts | 1 | M |
-| - | `rung3-sensory-load` Soul, `rung4-goal-flip`, `rung3-office-stress`, `rung4-office-flip` | Lodur/BDS | in flight | as admitted | - |
-| - | `client-ready-sim`, `godot-client-v1` | BDS/Godot | parallel pass | its own | - |
-| 3 | `lodur-startle-attention` | Lodur | startle reflex on onsets; attention scales will | rung4-goal-flip | M |
-| 4 | `lodur-physiology` | Lodur | part tree content, HP, wounds, blood, pain, shock, consciousness, capacities, death | 3 | L (split core/binding if over budget) |
+| 1 | `ymir-contact-facts` | Ymir | contact/hit facts, contact-force lane, material ids | ymir-shape-lanes (parallel client pass, ABI 3) | M | landed |
+| 1' | `ymir-grab-anchor` | Ymir | kinematic anchor, motor joint, impulse, raycast | ymir-shape-lanes (sibling of 1) | S-M | landed |
+| 2 | `ymir-break-and-remove` | Ymir | thresholds, overload facts, remove body/joint, tombstones, removal facts | 1 | M | open |
+| - | `rung3-sensory-load` Soul, `rung4-goal-flip`, `rung3-office-stress`, `rung4-office-flip` | Lodur/BDS | landed (rung 3 `a048827`, rung 4 the Brain `c26c15c`; the office arc and the chamber release in BDS) | as admitted | - |
+| - | `client-ready-sim`, `godot-client-v1` | BDS/Godot | landed (`BodyPainBoxSession`; the Godot client at `client/`) | its own | - |
+| 3 | `lodur-will-mix` | Lodur | voluntary layers weighted by will; PoseBehaviour demoted | rung4-goal-flip | M, landed (`afb8df3`, with the recurring break `74883f8`; goal entry effects `c93bdb7`) |
+| 4 | `lodur-physiology` | Lodur | part tree content, HP, wounds, blood, pain, shock, consciousness, capacities, death | 3 (landed) | L (split core/binding if over budget) |
 | 5 | `lodur-touch` | Lodur | per-part touch from contact facts, external-joint pull; insults from material table | 1, 2, 4 | M |
-| 6 | `lodur-will-mix` | Lodur | voluntary layers weighted by will; PoseBehaviour demoted | 3 | M |
-| 7 | `lodur-ik-goals` | Lodur | IK goals in body interface; two-bone arm/leg, look, aim | 6 | M |
-| 8 | `lodur-reflex-set` | Lodur | flinch-from-touch, brace | 5, 6 | M |
+| 6 | `lodur-startle-attention` | Lodur | startle reflex on onsets; attention scales will | 3 (it writes the Attention slot the will mix already reads) | M, open |
+| 7 | `lodur-ik-goals` | Lodur | IK goals in body interface; two-bone arm/leg, look, aim | 3 | M |
+| 8 | `lodur-reflex-set` | Lodur | flinch-from-touch, brace | 3, 5 | M |
 | 9 | `lodur-sever-impair` | Lodur | severing via binding, impairment states | 2, 4, 5; Q `bds-dismember-trigger`, `bds-reattach` | M |
-| 10 | `lodur-clips` | Lodur | pose-key clips as a voluntary layer | 6; Q `bds-mvp-clips` | S |
-| 11 | `lodur-assist-pin` | Lodur | upright assist as a voluntary layer | 6; Q `bds-upright` | S |
+| 10 | `lodur-clips` | Lodur | pose-key clips as a voluntary layer | 3; Q `bds-mvp-clips` | S |
+| 11 | `lodur-assist-pin` | Lodur | upright assist as a voluntary layer | 3; Q `bds-upright` | S |
 | 12 | `lodur-grip` | Lodur | grip weld, drop rules, tool frame for aim | 2, 7 | M |
 | 13 | `bds-sandbox-session` | BDS | session + command queue, grab/poke/cut | client-ready-sim, 1' | M |
 | 14 | `bds-damage-content` + `bds-gore-content` | BDS | materials to insults; gore data | 5, 9; Q `bds-gore-look`, `bds-death` | M |
@@ -312,7 +335,7 @@ with the Lodur rungs (different repo); Lodur cuts serialise on `Actor.cs`; BDS w
 | 17 | `bds-guns` | BDS | gun content aimed by IK | 7, 12, 1' | M |
 
 Rough total: about 26 cuts, roughly 70-90 agent-hours; with Ymir and BDS/Godot running beside the Lodur chain,
-the critical path is the Lodur chain 3 → 4 → 5 → 9 (and 6 → 7 → 12), about 30 agent-hours after rung 4 lands.
+the critical path is the Lodur chain 3 → 4 → 5 → 9 (and 3 → 7 → 12; startle, 6, is off it), about 30 agent-hours after rung 4 lands.
 The playable MVP (grab, poke, cut, bleed, sever, reflexes, will) is cuts 1-9, 13-15.
 
 Admitted 2026-11-20 (pass `bds-mvp-map`): specs `lodur:cut_spec:cut-ymir-contact-facts.r2`,

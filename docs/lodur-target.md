@@ -65,7 +65,7 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    is how rage resets the will), an `Effort` (resolve drained per second to sustain it) and `InvoluntarySeconds`
    (an onset that runs without will and without paying the effort; +infinity is involuntary throughout)
    (`lodur:ruling:rage-involuntary-onset-then-voluntary`). The will mix: a voluntary goal writes each muscle at
-   `HoldStrength x min(1, Will^WillCurve + leak x FlinchGain)`, an involuntary one at `HoldStrength`, so a failing
+   `HoldStrength x min(1, Will^WillCurve + leak x FlinchGain)` (the Actor passes `Will^WillCurve` as the weight), an involuntary one at `HoldStrength`, so a failing
    will slackens the layer while a reflex that gets past it still moves the muscle
    (`lodur:ruling:bds-sandbox-arenas-will-economy`).
    A goal can also carry a sensory gain and an arousal target (`SensoryGain`, `EntryArousal`), reached linearly over `EntrySeconds`
@@ -86,6 +86,24 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
 
 `Actor` runs layers 1-4 for one character in that order once per physics step, from caller-owned inputs into
 caller-owned outputs, and reports its events (flinch, will broke, goal changed) as flags.
+
+### Who writes what, per tick
+
+One order inside `Actor.Tick`: Perception senses (with the sensory gain in force) → each reflex steps on its
+afferent (gain from the previous tick's drive) → the drive steps (pain, strain, arousal, resolve, the break and
+the mend; the goal's effort is paid here) → the Brain decides (a decision is pending for the deliberate latency)
+and a due decision commits (entry resolve is set) → the entry ramp assigns gain and arousal → the goal's
+behaviour writes strengths and targets at the will's weight. The tick that commits a goal already writes under it.
+
+| Owner | Inputs | Outputs | Derived state | Forbidden writers |
+|---|---|---|---|---|
+| `Perception` | region points, the game's stimulus sources and emitters, the sensory gain passed in | per-region stimulus and afferent, per-channel stimulus and afferent, `Load` | sensitisation, the conduction rings; the channel afferents are gated, the stimuli are not | the drive or a goal writing an afferent; a gain outside [0, 1] (`Sense` refuses it, NaN and infinity included); gating a region (nociceptive) afferent |
+| Reflex (`WithdrawalReflex`) | its region's afferent and the drive's `Will` (the pull acts through resolve's drain, not here) | leak, strain load, flinch | none beyond its latency ring | the Brain or the behaviour setting a reflex gain |
+| Drive (`DriveState`) | afferent sum, strain load, `Load`, the goal's pull and effort | pain, strain, arousal, resolve, `Breaks`, `Will` (= min(resolve x attention, consciousness)), the break and mend events | `Will` is derived and never stored; the break recurs (it mends at `WillMendsAt`) | the Brain, a session or the body writing resolve, arousal or `Will`; the one sanctioned jumps are `Enter` (a goal's entry resolve) and the Actor's entry ramp (arousal) |
+| Attention, Consciousness slots | nothing yet: both read 1 (startle and physiology are the writers to come) | the two factors of `Will` | none | anything but the startle reflex (`lodur-startle-attention`) and physiology; the Actor's test seam `SetWillSlots` is internal |
+| Brain (`Brain`, `GoalSpec`) | the drive state it reads through conditions | the wanted goal; each goal's pull, priority, dwell, entry effects (`EntryResolve`, `EntryArousal`, `SensoryGain`, `EntrySeconds`), `Effort`, `InvoluntarySeconds` and behaviour | none: it is data, copied at build and read back read-only | a flip rule anywhere else (`lodur:ruling:npc-brain-authors-goals`) |
+| `Actor` | all of the above, one tick | the committed goal; `DriveState.SensoryGain`; arousal during a goal's `EntrySeconds`; the events | the pending decision and its tick, the dwell, the ramp's start values, the onset in whole ticks | a consumer setting the goal or the gain from outside |
+| Behaviour (`PoseBehaviour`) | the weight (the will's `Will^WillCurve` once the goal's involuntary onset is over, else 1), the leak, strain, time | strengths and targets into caller arrays: `HoldStrength x min(1, weight + leak x FlinchGain)` | none | writing a joint or a force (`body-one-interface`); any strength not under the will mix |
 
 ## Invariants
 
