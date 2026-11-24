@@ -94,7 +94,7 @@ public sealed class QuadrupedPlanTests
         Assert.Throws<ArgumentException>(() => quad.Drive(new float[3], quadTarget));
     }
 
-    private const float SenseTolerance = 3.6e-4f; // geometric mean of the shipped worst (one float ulp at 3, 2.4e-7) and the weakest mutant (0.54)
+    private const float SenseTolerance = 3.5e-4f; // geometric mean of the shipped worst (one float ulp at 3, 2.4e-7) and the weakest mutant (0.5)
 
     [Fact]
     public void A_sense_point_reads_its_parts_position_plus_the_parts_rotation_applied_to_its_offset()
