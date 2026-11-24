@@ -114,6 +114,42 @@ public sealed class BodyPlanTests
     }
 
     [Fact]
+    public void Rule5_a_box_depth_that_is_not_positive_is_refused()
+    {
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Size = (0.1f, 0.1f, 0f) } }, new[] { Joint("J", 0, 1) }), "size its shape uses");
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Size = (0.1f, 0.1f, -0.1f) } }, new[] { Joint("J", 0, 1) }), "size its shape uses");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public void Rule5_a_non_finite_rotation_component_is_refused(int component)
+    {
+        var q = new[] { 0f, 0f, 0f, 1f };
+        q[component] = float.NaN;
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Rotation = new Quat(q[0], q[1], q[2], q[3]) } }, new[] { Joint("J", 0, 1) }), "non-finite");
+        q[component] = float.PositiveInfinity;
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Rotation = new Quat(q[0], q[1], q[2], q[3]) } }, new[] { Joint("J", 0, 1) }), "non-finite");
+    }
+
+    [Fact]
+    public void Rule5_a_field_the_shape_cannot_carry_is_refused()
+    {
+        var turned = Quat.FromAxisAngle(0f, 0f, 1f, 0.5f);
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Shape = PartShape.Sphere, Size = (0.1f, 0f, 0f), Rotation = turned } }, new[] { Joint("J", 0, 1) }), "sphere carries no rotation");
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { RollingResistance = 0.1f } }, new[] { Joint("J", 0, 1) }), "box carries no rolling resistance");
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Shape = PartShape.Capsule, Size = (0.1f, 0.2f, 0.3f) } }, new[] { Joint("J", 0, 1) }), "does not use is not zero");
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Shape = PartShape.Sphere, Size = (0.1f, 0.2f, 0f) } }, new[] { Joint("J", 0, 1) }), "does not use is not zero");
+        Refuses(() => Plan(new[] { Box("A"), Box("B") with { Shape = PartShape.Sphere, Size = (0.1f, 0f, 0.3f) } }, new[] { Joint("J", 0, 1) }), "does not use is not zero");
+        // what each shape does carry is accepted
+        var ok = Plan(new[] { Box("A") with { Rotation = turned }, Box("B") with { Shape = PartShape.Capsule, Size = (0.1f, 0.2f, 0f), Rotation = turned, RollingResistance = 0.1f },
+            Box("C") with { Shape = PartShape.Sphere, Size = (0.1f, 0f, 0f), RollingResistance = 0.1f } }, new[] { Joint("J", 0, 1), Joint("K", 0, 2) });
+        Assert.Equal(3, ok.Parts.Count);
+    }
+
+    [Fact]
     public void Rule5_a_density_that_is_not_positive_is_refused()
     {
         Refuses(() => Plan(new[] { Box("A"), Box("B") with { Density = 0f } }, new[] { Joint("J", 0, 1) }), "density");

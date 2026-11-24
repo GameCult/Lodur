@@ -86,11 +86,11 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
    spin -5.0 rad/s: an off-centre poke turns the part, which the force lanes (centre of mass only, soa.c:593-626)
    cannot do.
 8. **Lodur today.** Perception senses named box volumes at points only (`Perception.cs:82-113`); regions are two
-   hand points (`HumanoidRagdoll.cs:12-16`, 148-170); one reflex kind (`WithdrawalReflex.cs`); drive is pain,
+   sense points read by `Ragdoll.ReadSensePoints`; one reflex kind (`WithdrawalReflex.cs`); drive is pain,
    strain, resolve, `WillBroken` (`DriveState.cs`); behaviour blends two poses by leak and shake
    (`PoseBehaviour.cs:87-115`); the body takes 12 strengths and 12 joint-space targets
-   (`HumanoidRagdoll.cs:120-146`). No IK, no clips, no physiology, no grip, no part tree beyond the `Limb` and
-   `Muscle` enums. Rung 3 adds emitters and arousal; rung 4 the goal flip and `PoseBehaviour`.
+   (`Ragdoll.Drive`). No IK, no clips, no physiology, no grip; the part tree is `BodyPlan` (parts, joints that are the tree,
+   sense points), without HP, coverage or vital flags. Rung 3 adds emitters and arousal; rung 4 the goal flip and `PoseBehaviour`.
 9. **BDS today.** Headless and body pain box only (`src/BadDay.Ymir/BodyPainBox.cs`); the world is built per run
    with capacity 15 (58); the puppet is welded to a stool because the PD ragdoll cannot balance for 15 s (59-62).
    No session type survives beyond a run, no commands, no level content.
@@ -118,13 +118,13 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 
 | System | Layer | State | Cut |
 |---|---|---|---|
-| Part tree: the body plan as content (parts, parent, side, max HP, coverage, vital flags, muscles, Ymir lane binding) | 3 data + 5 binding | new; today `Limb`/`Muscle` enums | `lodur-physiology` |
+| Part tree: the body plan as content (parts, parent, side, max HP, coverage, vital flags, muscles, Ymir lane binding) | 3 data + 5 binding | `BodyPlan` holds parts, joints as the tree and sense points; HP, coverage and vital flags are new | `lodur-physiology` |
 | Touch perception per part: pressure (contact force), impact (hit speed, material), external-joint pull (grab, strap) | 1 (+5 reads Ymir) | new | `lodur-touch` |
 | Reflexes: withdrawal (exists), startle on sensory and touch onsets, flinch-from-touch, brace on impact | 2 | withdrawal exists `WithdrawalReflex.cs` and reads `Will`; rest new | `lodur-startle-attention`, `lodur-reflex-set` |
 | Physiology as drive state: per-part HP and injuries, body blood fraction, bleeding, pain sum, shock, consciousness, capacities scaling muscle strength, death | 3 | new | `lodur-physiology` |
 | Will economy: resolve (exists) times attention (new, startle drains it) is the budget every voluntary layer draws on; reflexes act against it | 3/4 | landed except attention: `Will` = min(resolve x attention, consciousness) in `DriveState`, read by the reflex and the will mix; the Attention and Consciousness slots read 1 until startle and physiology write them | `lodur-startle-attention` (open), `lodur-will-mix` (landed `afb8df3`) |
 | Voluntary motor layers: hold pose (exists as `PoseBehaviour`), clip player, IK goals (reach, look, aim), grip; mixed by will | 4 | hold exists, weighted by `Will^WillCurve` (`PoseBehaviour.Write`; an involuntary goal onset writes at weight 1); rest new | `lodur-will-mix`, `lodur-ik-goals`, `lodur-clips` |
-| Body interface: strengths + joint targets (exists) + IK goals with weights | 5 | partial `HumanoidRagdoll.Drive` | `lodur-ik-goals` |
+| Body interface: strengths + joint targets (exists) + IK goals with weights | 5 | partial `Ragdoll.Drive` | `lodur-ik-goals` |
 | Severing: physiology decides; binding removes the joint in Ymir; impairment states derived per part, mirror-symmetric | 3 decides, 5 executes | new | `lodur-sever-impair` |
 | Grip: hand holds an object by a breakable weld whose threshold follows grip strength; drop on pain, overload, unconsciousness; the tool frame is an IK end effector | 4/5 | new | `lodur-grip` |
 
@@ -274,8 +274,8 @@ leg is a behaviour keyed on the state, not a re-learned controller).
 
 - **Facts, not callbacks.** Ymir fills fixed-capacity fact buffers per step and the caller reads spans, like
   lanes; no managed callback crosses the ABI, overflow is counted, never silent (bounded-tick).
-- **Tombstones, not compaction.** Lodur and the client cache lane indices (`HumanoidRagdoll._bodyLane`,
-  `HumanoidRagdoll.cs:44`). Swap-remove, as the planar session does (`ymir_box3d.c:1435-1436`), would move a
+- **Tombstones, not compaction.** Lodur and the client cache lane indices (`Ragdoll._bodyLane`,
+  `Ragdoll.cs:16`). Swap-remove, as the planar session does (`ymir_box3d.c:1435-1436`), would move a
   live body's lane under them. A removed lane keeps its last state and a `Removed` kind; reuse waits for a
   completed step so end facts still name the old id.
 - **Grab is felt.** A motor joint is not a contact, so a grab produces no contact fact. The binding treats every

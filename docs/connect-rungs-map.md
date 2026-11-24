@@ -36,7 +36,7 @@ All probes in detached worktrees `F:\aeth-wt\connect\{Ymir,Lodur,BadDaySimulator
 3. **The SoA world is internal.** `Box3DSoaWorld`, `Box3DSoaView` and the kind enums are `internal`, visible to
    `Ymir.Core`, `Ymir.Box3D.Soa.Tests`, `Lodur.Body.Ymir` and `Lodur.Tests` by `InternalsVisibleTo`
    (`src/Ymir.Box3D/Properties/AssemblyInfo.cs:3-6`, commit 0227636 "until Ymir.Core has a public surface").
-   `HumanoidRagdoll`, `Muscle` and `Limb` are `internal` in Lodur.Body.Ymir. **Bad Day Simulator cannot name the
+   `Ragdoll` (Lodur.Body.Ymir) builds a `BodyPlan` into a caller-owned `Box3DSoaWorld`. **Bad Day Simulator cannot name the
    world today**, so it cannot own its one physics world without a Ymir change.
 4. **A pelvis weld to a static body holds the ragdoll upright for 20 s.** `AddJoint(Weld, staticBox, pelvis)`
    is accepted (native refuses only out-of-range or equal indices). Full-strength ragdoll, pelvis welded to a
@@ -77,7 +77,7 @@ so `content-is-cultcache` is not engaged yet (follow-up `lodur:follow_up:drive-p
 |---|---|---|---|
 | Nerve, reflex and drive parameters (`NerveParameters`, `WithdrawalParameters`, `DriveParameters`) | Nothing persistent: C# records with defaults in Lodur.Core; a per-actor instance is a value | Built once when the consumer creates an actor (per-seed traits folded in as `Gain`, `DrainTrait`), immutable for the actor's life | Lodur owns the schema and defaults; the consumer (BDS scenario) owns per-actor values and the trait draw |
 | Actor (nervous state: afferent rings, drive state, goal) | The consumer's handle; no id inside Lodur | Created with the scenario, ticked once per physics step, never persisted, dies with the scenario | Lodur.Core alone writes it; nothing else writes drive state |
-| Puppet definition (the 19-body humanoid: shapes, joints, gains, regions) | Code in Lodur.Body.Ymir; world stable ids `firstStableId..+18` passed by the caller | Built into the caller's world once; no removal (Ymir has none) | Lodur.Body.Ymir owns geometry and gains; BDS owns placement and stable-id allocation |
+| Puppet definition (the 19-body humanoid: shapes, joints, gains, regions) | `BodyPlan` data in Lodur.Core (`BodyPlans.Humanoid`), built by `Ragdoll` in Lodur.Body.Ymir; world stable ids `firstStableId..+18` passed by the caller | Built into the caller's world once; no removal (Ymir has none) | `BodyPlan` owns geometry, joints and gains, `Ragdoll` builds them; BDS owns placement and stable-id allocation |
 | Stimulus source (the pain box) | BDS object, scenario-local; not a world body | Placed by the scenario; intensity written every tick from its schedule (ramp, noise, disable time) | BDS writes intensity and on/off; Lodur perception only reads it and decides containment and transduction |
 | Restraint (stool weld) | BDS scene object: one static box + one weld joint in the world | Created with the scenario | BDS (a game object acting on the body through the world, like a grab; not a layer above Lodur) |
 | Scenario run | (seed, parameters) | One run, headless or on the body | BDS; the timeline is output, not content |

@@ -93,4 +93,28 @@ public sealed class QuadrupedPlanTests
         Assert.Throws<ArgumentException>(() => quad.ReadSensePoints(new float[3], new float[3], new float[3]));
         Assert.Throws<ArgumentException>(() => quad.Drive(new float[3], quadTarget));
     }
+
+    private const float SenseTolerance = 3.6e-4f; // geometric mean of the shipped worst (one float ulp at 3, 2.4e-7) and the weakest mutant (0.54)
+
+    [Fact]
+    public void A_sense_point_reads_its_parts_position_plus_the_parts_rotation_applied_to_its_offset()
+    {
+        // Root turned 90 degrees about z: the offset (0.5, 0.2, 0.1) lands at (-0.2, 0.5, 0.1) from the part, not at (0.5, 0.2, 0.1) and not at 0.
+        var turned = Quat.FromAxisAngle(0f, 0f, 1f, MathF.PI / 2f);
+        var parts = new[]
+        {
+            new PartDef("Root", Side.Center, PartShape.Box, (0.2f, 0.1f, 0.1f), (0f, 1f, 0f), turned, 1000f, 0.8f, 0f),
+            new PartDef("Tip", Side.Center, PartShape.Sphere, (0.05f, 0f, 0f), (0f, 1.5f, 0f), Quat.Identity, 1000f, 0.8f, 0f),
+        };
+        var joints = new[] { new JointDef("J", Side.Center, JointKind.Spherical, 0, 1, (0f, 1.2f, 0f), (0f, 1f, 0f), -1f, 1f, 0.5f, new MuscleGains(1f, 1f, 1f, 1f)) };
+        var plan = new BodyPlan(parts, joints, new[] { new SensePointDef("Probe", Side.Center, 0, (0.5f, 0.2f, 0.1f)) });
+        var (bodies, jointCount) = Ragdoll.Needs(plan);
+        using var world = new Box3DSoaWorld(capacity: bodies, jointCapacity: jointCount);
+        var ragdoll = Ragdoll.Build(world, plan, (3f, 0f), firstStableId: 1);
+
+        var x = new float[1]; var y = new float[1]; var z = new float[1];
+        ragdoll.ReadSensePoints(x, y, z);
+        var error = MathF.Max(MathF.Abs(x[0] - 2.8f), MathF.Max(MathF.Abs(y[0] - 1.5f), MathF.Abs(z[0] - 0.1f)));
+        Assert.True(error < SenseTolerance, $"sense point ({x[0]}, {y[0]}, {z[0]}) is {error} from (2.8, 1.5, 0.1)");
+    }
 }

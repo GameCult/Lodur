@@ -86,7 +86,7 @@ namespace Lodur
                 }
             }
 
-            // 3. Part 0 is the root and the child of no joint; every other part is the child of exactly one joint.
+            // 3. Part 0 is the root (rule 2 already leaves it no joint to be the child of); every other part is the child of exactly one joint.
             if (Parts.Count == 0) throw new ArgumentException("a body plan needs a root part.");
             var parentOf = new int[Parts.Count];
             var attached = new int[Parts.Count];
@@ -97,12 +97,11 @@ namespace Lodur
                 attached[d.Child]++;
             }
 
-            for (var p = 0; p < attached.Length; p++)
+            for (var p = 1; p < attached.Length; p++)
             {
-                var want = p == 0 ? 0 : 1;
-                if (attached[p] != want)
+                if (attached[p] != 1)
                 {
-                    throw new ArgumentException($"part '{Parts[p].Label}' {Parts[p].Side} is the child of {attached[p]} joints, needs {want}.");
+                    throw new ArgumentException($"part '{Parts[p].Label}' {Parts[p].Side} is the child of {attached[p]} joints, needs 1.");
                 }
             }
 
@@ -123,6 +122,17 @@ namespace Lodur
                 var sized = p.Shape == PartShape.Box ? sz.X > 0f && sz.Y > 0f && sz.Z > 0f
                     : p.Shape == PartShape.Capsule ? sz.X > 0f && sz.Y > 0f : sz.X > 0f;
                 if (!sized) throw new ArgumentException($"part '{p.Label}' {p.Side}: a size its shape uses is not positive.");
+
+                // A binding has no destination for what the shape cannot carry (sphere rotation, box rolling resistance, size components
+                // beyond the shape's own), so the plan may not say it.
+                var spare = p.Shape == PartShape.Box ? 0f : p.Shape == PartShape.Capsule ? sz.Z : Math.Abs(sz.Y) + Math.Abs(sz.Z);
+                if (spare != 0f) throw new ArgumentException($"part '{p.Label}' {p.Side}: a size its shape does not use is not zero.");
+                if (p.Shape == PartShape.Sphere && (r.X != 0f || r.Y != 0f || r.Z != 0f || r.W != 1f))
+                {
+                    throw new ArgumentException($"part '{p.Label}' {p.Side}: a sphere carries no rotation.");
+                }
+
+                if (p.Shape == PartShape.Box && p.RollingResistance != 0f) throw new ArgumentException($"part '{p.Label}' {p.Side}: a box carries no rolling resistance.");
                 if (!(p.Density > 0f)) throw new ArgumentException($"part '{p.Label}' {p.Side}: density is not positive.");
             }
 
