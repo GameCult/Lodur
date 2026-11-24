@@ -6,7 +6,8 @@ namespace Lodur.Tests;
 
 public sealed class HandTests
 {
-    private static readonly Limb[] HandBodies = { Limb.PalmL, Limb.PalmR, Limb.ThumbL, Limb.ThumbR, Limb.FingersL, Limb.FingersR };
+    private static int[] HandBodies(RagdollScenario s) =>
+        new[] { "Palm", "Thumb", "Fingers" }.SelectMany(l => new[] { s.Plan.PartIndex(l, Side.Left), s.Plan.PartIndex(l, Side.Right) }).ToArray();
 
     /// <summary>FNV-1a 64 over the creation lanes of the 13 base bodies (world lanes 1..13) and the 12 base joints.</summary>
     private static ulong BaseCreationHash(Box3DSoaWorld world)
@@ -31,8 +32,11 @@ public sealed class HandTests
         return h;
     }
 
-    /// <summary>Recorded at Lodur dedf391 (no hands); equal there and with the hands appended.</summary>
-    private const ulong BaseHash = 0xccf5cedb0df1b2e8ul;
+    /// <summary>
+    /// Re-recorded at the BodyPlan cut: the Limb lane now carries plan part ordinals (it carried the old Limb enum values, which differ
+    /// from LowerArmL on). With the Limb term left out the function gives 0x65216f91ffc63d24 on both Lodur d7a626b and this cut.
+    /// </summary>
+    private const ulong BaseHash = 0xbbcc7aff6c088398ul;
 
     [Fact]
     public void Hands_are_appended_after_the_base_bodies_and_joints_and_leave_them_as_they_were()
@@ -44,23 +48,23 @@ public sealed class HandTests
         Assert.Equal(18, v.JointCount);
         Assert.Equal(BaseHash, BaseCreationHash(s.World));
         Assert.Equal(new ulong[] { 113, 114, 115, 116, 117, 118 }, Enumerable.Range(14, 6).Select(i => v.StableId[i]).ToArray());
-        Assert.All(HandBodies, l => Assert.InRange(r.BodyLane(l), 14, 19));
-        foreach (var m in new[] { Muscle.WristL, Muscle.WristR, Muscle.ThumbL, Muscle.ThumbR, Muscle.FingersL, Muscle.FingersR }) Assert.InRange(r.JointLane(m), 12, 17);
-        foreach (var side in new[] { 0, 1 })
+        Assert.All(HandBodies(s), l => Assert.InRange(r.BodyLane(l), 14, 19));
+        foreach (var m in new[] { "Wrist", "Thumb", "Fingers" }.SelectMany(l => new[] { s.Plan.JointIndex(l, Side.Left), s.Plan.JointIndex(l, Side.Right) })) Assert.InRange(r.JointLane(m), 12, 17);
+        foreach (var side in new[] { Side.Left, Side.Right })
         {
-            var palm = r.BodyLane(Limb.PalmL + side);
-            var thumb = r.BodyLane(Limb.ThumbL + side);
-            var fingers = r.BodyLane(Limb.FingersL + side);
-            Assert.Equal(r.BodyLane(Limb.LowerArmL + side), v.Parent[palm]);
+            var palm = r.BodyLane(s.Plan.PartIndex("Palm", side));
+            var thumb = r.BodyLane(s.Plan.PartIndex("Thumb", side));
+            var fingers = r.BodyLane(s.Plan.PartIndex("Fingers", side));
+            Assert.Equal(r.BodyLane(s.Plan.PartIndex("LowerArm", side)), v.Parent[palm]);
             Assert.Equal(palm, v.Parent[thumb]);
             Assert.Equal(palm, v.Parent[fingers]);
             Assert.Equal(((uint)Box3DSoaKind.Box, (uint)Box3DSoaKind.Capsule, (uint)Box3DSoaKind.Box), (v.Kind[palm], v.Kind[thumb], v.Kind[fingers]));
             Assert.Equal((0.014f, 0.045f, 0.040f), (v.Size0[palm], v.Size1[palm], v.Size2[palm]));
             Assert.Equal((0.011f, 0.03f), (v.Size0[thumb], v.Size1[thumb]));
             Assert.Equal((0.011f, 0.0425f, 0.038f), (v.Size0[fingers], v.Size1[fingers], v.Size2[fingers]));
-            Assert.Equal((r.BodyLane(Limb.LowerArmL + side), palm), (v.JointBodyA[r.JointLane(Muscle.WristL + side)], v.JointBodyB[r.JointLane(Muscle.WristL + side)]));
-            Assert.Equal((palm, thumb), (v.JointBodyA[r.JointLane(Muscle.ThumbL + side)], v.JointBodyB[r.JointLane(Muscle.ThumbL + side)]));
-            Assert.Equal((palm, fingers), (v.JointBodyA[r.JointLane(Muscle.FingersL + side)], v.JointBodyB[r.JointLane(Muscle.FingersL + side)]));
+            Assert.Equal((r.BodyLane(s.Plan.PartIndex("LowerArm", side)), palm), (v.JointBodyA[r.JointLane(s.Plan.JointIndex("Wrist", side))], v.JointBodyB[r.JointLane(s.Plan.JointIndex("Wrist", side))]));
+            Assert.Equal((palm, thumb), (v.JointBodyA[r.JointLane(s.Plan.JointIndex("Thumb", side))], v.JointBodyB[r.JointLane(s.Plan.JointIndex("Thumb", side))]));
+            Assert.Equal((palm, fingers), (v.JointBodyA[r.JointLane(s.Plan.JointIndex("Fingers", side))], v.JointBodyB[r.JointLane(s.Plan.JointIndex("Fingers", side))]));
         }
     }
 
@@ -70,18 +74,18 @@ public sealed class HandTests
         using var s = new RagdollScenario(seed: 2);
         Array.Clear(s.Strength);
         s.Run(1.0f); // falling: the palms are nowhere near the creation pose
-        var x = new float[HumanoidRagdoll.RegionCount]; var y = new float[HumanoidRagdoll.RegionCount]; var z = new float[HumanoidRagdoll.RegionCount];
-        s.Ragdoll.ReadRegions(x, y, z);
+        var x = new float[3]; var y = new float[3]; var z = new float[3];
+        s.Ragdoll.ReadSensePoints(x, y, z);
         var v = s.World.View;
-        foreach (var (region, limb) in new[] { (Region.HandL, Limb.PalmL), (Region.HandR, Limb.PalmR) })
+        foreach (var (region, limb) in new[] { (s.Plan.SenseIndex("Hand", Side.Left), s.Plan.PartIndex("Palm", Side.Left)), (s.Plan.SenseIndex("Hand", Side.Right), s.Plan.PartIndex("Palm", Side.Right)) })
         {
             var i = s.Ragdoll.BodyLane(limb);
-            Assert.Equal((v.PositionX[i], v.PositionY[i], v.PositionZ[i]), (x[(int)region], y[(int)region], z[(int)region]));
+            Assert.Equal((v.PositionX[i], v.PositionY[i], v.PositionZ[i]), (x[region], y[region], z[region]));
         }
     }
 
     /// <summary>Runs <paramref name="runSeconds"/>, then one more second step by step; the fastest the limbs turn and move in that second.</summary>
-    private static (float Angular, float Linear) LastSecond(RagdollScenario s, float runSeconds, IEnumerable<Limb> limbs)
+    private static (float Angular, float Linear) LastSecond(RagdollScenario s, float runSeconds, IEnumerable<int> limbs)
     {
         s.Run(runSeconds);
         float ang = 0f, lin = 0f;
@@ -106,7 +110,7 @@ public sealed class HandTests
     public void Hands_rest_standing_palm_thumb_and_fingers_alike(ulong seed)
     {
         using var s = new RagdollScenario(seed);
-        var (ang, _) = LastSecond(s, 5f, HandBodies);
+        var (ang, _) = LastSecond(s, 5f, HandBodies(s));
         Assert.True(ang < 0.05f, $"seed {seed}: a hand body (thumbs included: a free thumb twist spins) still turns at {ang} rad/s in the last second of 6");
     }
 
@@ -117,7 +121,7 @@ public sealed class HandTests
         {
             using var s = new RagdollScenario(seed);
             Array.Clear(s.Strength);
-            var (ang, lin) = LastSecond(s, 7f, HandBodies);
+            var (ang, lin) = LastSecond(s, 7f, HandBodies(s));
             Assert.True(ang < 1f && lin < 0.1f, $"seed {seed}: a limp hand still moves at {lin} m/s, {ang} rad/s in the last second of 8");
         }
     }
@@ -179,26 +183,26 @@ public sealed class HandTests
         {
             var (seed, half) = cases[k];
             using var s = new RagdollScenario(seed);
-            var all = Enumerable.Range(0, HumanoidRagdoll.MuscleCount).ToArray();
-            var sep = new JointSeparation(s.World, all.Select(m => s.Ragdoll.JointLane((Muscle)m)));
+            var all = Enumerable.Range(0, s.Plan.Joints.Count).ToArray();
+            var sep = new JointSeparation(s.World, all.Select(m => s.Ragdoll.JointLane(m)));
             float hand = 0f, body = 0f;
             for (var i = 0; i < 6 * 120; i++)
             {
                 var strike = (i / half) % 2 == 0;
-                foreach (var (sh, el) in new[] { (Muscle.ShoulderL, Muscle.ElbowL), (Muscle.ShoulderR, Muscle.ElbowR) })
+                foreach (var (sh, el) in new[] { (s.Plan.JointIndex("Shoulder", Side.Left), s.Plan.JointIndex("Elbow", Side.Left)), (s.Plan.JointIndex("Shoulder", Side.Right), s.Plan.JointIndex("Elbow", Side.Right)) })
                 {
-                    s.Target[(int)sh] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? -1.5f : -0.5f);
-                    s.Target[(int)el] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? 0f : -2.2f);
+                    s.Target[sh] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? -1.5f : -0.5f);
+                    s.Target[el] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? 0f : -2.2f);
                 }
-                s.Target[(int)Muscle.FingersL] = s.Target[(int)Muscle.FingersR] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? -1.5f : 0f);
-                s.Target[(int)Muscle.WristL] = s.Target[(int)Muscle.WristR] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? 0.8f : -0.8f);
+                s.Target[s.Plan.JointIndex("Fingers", Side.Left)] = s.Target[s.Plan.JointIndex("Fingers", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, strike ? -1.5f : 0f);
+                s.Target[s.Plan.JointIndex("Wrist", Side.Left)] = s.Target[s.Plan.JointIndex("Wrist", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, strike ? 0.8f : -0.8f);
                 s.Run(RagdollScenario.Dt);
                 var v = s.World.View;
                 for (var b = 0; b < v.Count; b++)
                 {
                     Assert.True(float.IsFinite(v.PositionX[b] + v.PositionY[b] + v.PositionZ[b] + v.RotationW[b] + v.VelocityX[b] + v.AngularVelocityX[b]), $"seed {seed} half {half}: body {b} is finite at step {i}");
                 }
-                var (h, bo) = sep.MaxBy(v, (int)Muscle.WristL);
+                var (h, bo) = sep.MaxBy(v, s.Plan.JointIndex("Wrist", Side.Left));
                 hand = MathF.Max(hand, h);
                 body = MathF.Max(body, bo);
             }
@@ -220,7 +224,7 @@ public sealed class HandTests
     }
 
     /// <summary>Swing of a joint's rotation off its axis, radians (the twist about the joint z removed).</summary>
-    private static float Swing(RagdollScenario s, Muscle m)
+    private static float Swing(RagdollScenario s, int m)
     {
         var v = s.World.View;
         var j = s.Ragdoll.JointLane(m);
@@ -229,22 +233,22 @@ public sealed class HandTests
     }
 
     /// <summary>How far the fingers are curled from straight (palm-frame), radians; curl is positive for both hands.</summary>
-    private static float Curl(RagdollScenario s, int side)
+    private static float Curl(RagdollScenario s, Side side)
     {
         var v = s.World.View;
-        var palm = s.Ragdoll.BodyLane(Limb.PalmL + side);
-        var fingers = s.Ragdoll.BodyLane(Limb.FingersL + side);
+        var palm = s.Ragdoll.BodyLane(s.Plan.PartIndex("Palm", side));
+        var fingers = s.Ragdoll.BodyLane(s.Plan.PartIndex("Fingers", side));
         var relative = new Quat(v.RotationX[palm], v.RotationY[palm], v.RotationZ[palm], v.RotationW[palm]).Conjugate()
             * new Quat(v.RotationX[fingers], v.RotationY[fingers], v.RotationZ[fingers], v.RotationW[fingers]);
-        var sx = side == 0 ? 1f : -1f;
+        var sx = side == Side.Left ? 1f : -1f;
         var angleAboutZ = 2f * MathF.Atan2(relative.Z, relative.W);
         return -sx * angleAboutZ;
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public void The_fingers_rest_relaxed_at_creation_and_stay_there_while_nothing_grips(int side)
+    [InlineData(Side.Left)]
+    [InlineData(Side.Right)]
+    public void The_fingers_rest_relaxed_at_creation_and_stay_there_while_nothing_grips(Side side)
     {
         using var s = new RagdollScenario(seed: 1);
         Assert.Equal(0.35f, Curl(s, side), 0.01f); // ruling hand-rest-curl-relaxed
@@ -253,14 +257,14 @@ public sealed class HandTests
     }
 
     [Theory]
-    [InlineData(0)]
-    [InlineData(1)]
-    public void The_knuckle_curls_to_1_6_rad_from_straight_and_extends_0_35_rad_past_it_and_no_further(int side)
+    [InlineData(Side.Left)]
+    [InlineData(Side.Right)]
+    public void The_knuckle_curls_to_1_6_rad_from_straight_and_extends_0_35_rad_past_it_and_no_further(Side side)
     {
         float Reach(float target)
         {
             using var s = new RagdollScenario(seed: 1);
-            s.Target[(int)Muscle.FingersL + side] = Quat.FromAxisAngle(0f, 0f, 1f, target);
+            s.Target[s.Plan.JointIndex("Fingers", side)] = Quat.FromAxisAngle(0f, 0f, 1f, target);
             s.Run(2f);
             return Curl(s, side);
         }
@@ -270,22 +274,23 @@ public sealed class HandTests
     }
 
     [Theory]
-    [InlineData(Muscle.WristL, 1.0f)]
-    [InlineData(Muscle.WristR, 1.0f)]
-    [InlineData(Muscle.ThumbL, 0.7f)]
-    [InlineData(Muscle.ThumbR, 0.7f)]
-    public void A_hand_joint_swings_to_its_cone_and_no_further_whichever_way_it_is_told(Muscle joint, float cone)
+    [InlineData("Wrist", Side.Left, 1.0f)]
+    [InlineData("Wrist", Side.Right, 1.0f)]
+    [InlineData("Thumb", Side.Left, 0.7f)]
+    [InlineData("Thumb", Side.Right, 0.7f)]
+    public void A_hand_joint_swings_to_its_cone_and_no_further_whichever_way_it_is_told(string label, Side side, float cone)
     {
         var reached = 0f;
         foreach (var (ax, ay) in new[] { (1f, 0f), (-1f, 0f), (0f, 1f), (0f, -1f) })
         {
             using var s = new RagdollScenario(seed: 1);
-            s.Target[(int)joint] = Quat.FromAxisAngle(ax, ay, 0f, 2.5f);
+            var joint = s.Plan.JointIndex(label, side);
+            s.Target[joint] = Quat.FromAxisAngle(ax, ay, 0f, 2.5f);
             s.Run(2f);
             var swing = Swing(s, joint);
-            Assert.True(swing < cone + 0.06f, $"{joint} swung {swing} past its cone {cone} toward ({ax}, {ay})");
+            Assert.True(swing < cone + 0.06f, $"{label} {side} swung {swing} past its cone {cone} toward ({ax}, {ay})");
             reached = MathF.Max(reached, swing);
         }
-        Assert.True(reached > cone - 0.15f, $"{joint} only swung {reached} of its cone {cone} in any direction");
+        Assert.True(reached > cone - 0.15f, $"{label} {side} only swung {reached} of its cone {cone} in any direction");
     }
 }

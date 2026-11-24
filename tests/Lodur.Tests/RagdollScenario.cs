@@ -9,17 +9,20 @@ internal sealed class RagdollScenario : IDisposable
 {
     public const float Dt = 1f / 120f;
     public readonly Box3DSoaWorld World;
-    public readonly HumanoidRagdoll Ragdoll;
-    public readonly float[] Strength = new float[HumanoidRagdoll.MuscleCount];
-    public readonly Quat[] Target = new Quat[HumanoidRagdoll.MuscleCount];
+    public readonly BodyPlan Plan = BodyPlans.Humanoid();
+    public readonly Ragdoll Ragdoll;
+    public readonly float[] Strength;
+    public readonly Quat[] Target;
     private int _steps;
 
     public RagdollScenario(ulong seed)
     {
-        var (bodies, joints) = HumanoidRagdoll.Needs;
+        var (bodies, joints) = Ragdoll.Needs(Plan);
+        Strength = new float[Plan.Joints.Count];
+        Target = new Quat[Plan.Joints.Count];
         World = new Box3DSoaWorld(capacity: bodies + 1, jointCapacity: joints);
         World.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
-        Ragdoll = HumanoidRagdoll.Build(World, (0f, 0f), firstStableId: 100);
+        Ragdoll = Ragdoll.Build(World, Plan, (0f, 0f), firstStableId: 100);
         Array.Fill(Target, Quat.Identity);
         Array.Fill(Strength, 1f);
         Shove(seed);
@@ -30,7 +33,7 @@ internal sealed class RagdollScenario : IDisposable
     {
         var rng = new SplitMix64(seed);
         var v = World.View;
-        foreach (var limb in new[] { Limb.Pelvis, Limb.Torso })
+        foreach (var limb in new[] { Plan.PartIndex("Pelvis"), Plan.PartIndex("Torso") })
         {
             var i = Ragdoll.BodyLane(limb);
             v.TorqueX[i] = 30f * rng.NextSigned();
@@ -50,14 +53,14 @@ internal sealed class RagdollScenario : IDisposable
         }
     }
 
-    public float HeadHeight => World.View.PositionY[Ragdoll.BodyLane(Limb.Head)];
-    public float PelvisHeight => World.View.PositionY[Ragdoll.BodyLane(Limb.Pelvis)];
+    public float HeadHeight => World.View.PositionY[Ragdoll.BodyLane(Plan.PartIndex("Head"))];
+    public float PelvisHeight => World.View.PositionY[Ragdoll.BodyLane(Plan.PartIndex("Pelvis"))];
 
     /// <summary>Linear and angular speed of one limb's body.</summary>
-    public (float Linear, float Angular) Speeds(Limb limb)
+    public (float Linear, float Angular) Speeds(int part)
     {
         var v = World.View;
-        var i = Ragdoll.BodyLane(limb);
+        var i = Ragdoll.BodyLane(part);
         return (MathF.Sqrt(v.VelocityX[i] * v.VelocityX[i] + v.VelocityY[i] * v.VelocityY[i] + v.VelocityZ[i] * v.VelocityZ[i]),
                 MathF.Sqrt(v.AngularVelocityX[i] * v.AngularVelocityX[i] + v.AngularVelocityY[i] * v.AngularVelocityY[i] + v.AngularVelocityZ[i] * v.AngularVelocityZ[i]));
     }

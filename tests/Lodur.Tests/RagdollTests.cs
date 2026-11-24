@@ -25,10 +25,10 @@ public sealed class RagdollTests
     /// <summary>The trunk is at rest; extremities may still rock a little (a head resting on an arm chatters at a few rad/s for seconds).</summary>
     private static void AssertResting(RagdollScenario s, string label)
     {
-        foreach (var limb in new[] { Limb.Pelvis, Limb.Torso })
+        foreach (var (limb, name) in new[] { (s.Plan.PartIndex("Pelvis"), "Pelvis"), (s.Plan.PartIndex("Torso"), "Torso") })
         {
             var (linear, angular) = s.Speeds(limb);
-            Assert.True(linear < 0.05f && angular < 0.2f, $"{label}: {limb} at {linear} m/s, {angular} rad/s");
+            Assert.True(linear < 0.05f && angular < 0.2f, $"{label}: {name} at {linear} m/s, {angular} rad/s");
         }
         var (maxLinear, maxAngular) = s.MaxSpeeds();
         Assert.True(maxLinear < 0.6f && maxAngular < 6f, $"{label}: an extremity still moves at {maxLinear} m/s, {maxAngular} rad/s");
@@ -74,12 +74,12 @@ public sealed class RagdollTests
         {
             using var s = new RagdollScenario(seed: 1);
             // Both knees are told to flex 0.5 rad about their hinge (the joint frame's z axis).
-            s.Target[(int)Muscle.KneeL] = Quat.FromAxisAngle(0f, 0f, 1f, 0.5f);
-            s.Target[(int)Muscle.KneeR] = Quat.FromAxisAngle(0f, 0f, 1f, 0.5f);
-            s.Strength[(int)Muscle.KneeL] = leftStrength; // a caller-owned element, written in place
+            s.Target[s.Plan.JointIndex("Knee", Side.Left)] = Quat.FromAxisAngle(0f, 0f, 1f, 0.5f);
+            s.Target[s.Plan.JointIndex("Knee", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, 0.5f);
+            s.Strength[s.Plan.JointIndex("Knee", Side.Left)] = leftStrength; // a caller-owned element, written in place
             s.Run(0.5f);
             var v = s.World.View;
-            return (v.JointAngle[s.Ragdoll.JointLane(Muscle.KneeL)], v.JointAngle[s.Ragdoll.JointLane(Muscle.KneeR)]);
+            return (v.JointAngle[s.Ragdoll.JointLane(s.Plan.JointIndex("Knee", Side.Left))], v.JointAngle[s.Ragdoll.JointLane(s.Plan.JointIndex("Knee", Side.Right))]);
         }
 
         var (strongL, strongR) = Knees(1f);
@@ -107,7 +107,7 @@ public sealed class RagdollTests
         Assert.Equal(a, Hashes(42));
         Assert.Equal(a.Count, a.Distinct().Count()); // the hash moves every checkpoint: the ragdoll is not frozen
         Assert.NotEqual(a[0], Hashes(43)[0]);        // the seed matters
-        Assert.NotEqual(a[0], Hashes(42, (int)Muscle.HipL)[0]); // and so does one strength element
+        Assert.NotEqual(a[0], Hashes(42, BodyPlans.Humanoid().JointIndex("Hip", Side.Left))[0]); // and so does one strength element
     }
 
     [Fact]
@@ -117,10 +117,10 @@ public sealed class RagdollTests
         var v = s.World.View;
         v.TorqueX.Clear(); v.TorqueY.Clear(); v.TorqueZ.Clear(); // drop the shove
         Array.Clear(s.Strength);
-        s.Strength[(int)Muscle.ElbowL] = 1f;
-        s.Strength[(int)Muscle.HipR] = 1f;
-        s.Target[(int)Muscle.ElbowL] = Quat.FromAxisAngle(0f, 0f, 1f, -0.5f);
-        s.Target[(int)Muscle.HipR] = Quat.FromAxisAngle(1f, 0f, 0f, 0.4f);
+        s.Strength[s.Plan.JointIndex("Elbow", Side.Left)] = 1f;
+        s.Strength[s.Plan.JointIndex("Hip", Side.Right)] = 1f;
+        s.Target[s.Plan.JointIndex("Elbow", Side.Left)] = Quat.FromAxisAngle(0f, 0f, 1f, -0.5f);
+        s.Target[s.Plan.JointIndex("Hip", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, 0.4f);
         s.Ragdoll.Drive(s.Strength, s.Target);
 
         float sx = 0f, sy = 0f, sz = 0f;
@@ -131,16 +131,16 @@ public sealed class RagdollTests
         var touched = Enumerable.Range(0, v.Count).Where(i => v.TorqueX[i] != 0f || v.TorqueY[i] != 0f || v.TorqueZ[i] != 0f).ToHashSet();
         Assert.Equal(new HashSet<int>
         {
-            s.Ragdoll.BodyLane(Limb.UpperArmL), s.Ragdoll.BodyLane(Limb.LowerArmL),
-            s.Ragdoll.BodyLane(Limb.Pelvis), s.Ragdoll.BodyLane(Limb.ThighR),
+            s.Ragdoll.BodyLane(s.Plan.PartIndex("UpperArm", Side.Left)), s.Ragdoll.BodyLane(s.Plan.PartIndex("LowerArm", Side.Left)),
+            s.Ragdoll.BodyLane(s.Plan.PartIndex("Pelvis")), s.Ragdoll.BodyLane(s.Plan.PartIndex("Thigh", Side.Right)),
         }, touched);
-        Assert.NotEqual(0f, v.TorqueX[s.Ragdoll.BodyLane(Limb.LowerArmL)]);
+        Assert.NotEqual(0f, v.TorqueX[s.Ragdoll.BodyLane(s.Plan.PartIndex("LowerArm", Side.Left))]);
     }
 
-    private static float TorqueNorm(RagdollScenario s, Limb limb)
+    private static float TorqueNorm(RagdollScenario s, int part)
     {
         var v = s.World.View;
-        var i = s.Ragdoll.BodyLane(limb);
+        var i = s.Ragdoll.BodyLane(part);
         return MathF.Sqrt(v.TorqueX[i] * v.TorqueX[i] + v.TorqueY[i] * v.TorqueY[i] + v.TorqueZ[i] * v.TorqueZ[i]);
     }
 
@@ -155,16 +155,16 @@ public sealed class RagdollTests
     {
         using var s = new RagdollScenario(seed: 1);
         Array.Clear(s.Strength);
-        s.Target[(int)Muscle.HipL] = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f);
+        s.Target[s.Plan.JointIndex("Hip", Side.Left)] = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f);
         ClearTorques(s);
-        s.Strength[(int)Muscle.HipL] = 1f;
+        s.Strength[s.Plan.JointIndex("Hip", Side.Left)] = 1f;
         s.Ragdoll.Drive(s.Strength, s.Target);
-        var full = TorqueNorm(s, Limb.ThighL);
+        var full = TorqueNorm(s, s.Plan.PartIndex("Thigh", Side.Left));
         ClearTorques(s);
-        s.Strength[(int)Muscle.HipL] = 0.25f;
+        s.Strength[s.Plan.JointIndex("Hip", Side.Left)] = 0.25f;
         s.Ragdoll.Drive(s.Strength, s.Target);
         Assert.True(full > 1f);
-        Assert.Equal(full * 0.25f, TorqueNorm(s, Limb.ThighL), full * 1e-3f);
+        Assert.Equal(full * 0.25f, TorqueNorm(s, s.Plan.PartIndex("Thigh", Side.Left)), full * 1e-3f);
     }
 
     [Fact]
@@ -173,14 +173,14 @@ public sealed class RagdollTests
         using var s = new RagdollScenario(seed: 1);
         Array.Clear(s.Strength);
         var offAxis = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f); // about the joint frame's x: not the hinge axis (z)
-        s.Target[(int)Muscle.ElbowL] = offAxis;
-        s.Target[(int)Muscle.HipL] = offAxis;
-        s.Strength[(int)Muscle.ElbowL] = 1f;
-        s.Strength[(int)Muscle.HipL] = 1f;
+        s.Target[s.Plan.JointIndex("Elbow", Side.Left)] = offAxis;
+        s.Target[s.Plan.JointIndex("Hip", Side.Left)] = offAxis;
+        s.Strength[s.Plan.JointIndex("Elbow", Side.Left)] = 1f;
+        s.Strength[s.Plan.JointIndex("Hip", Side.Left)] = 1f;
         ClearTorques(s);
         s.Ragdoll.Drive(s.Strength, s.Target);
-        Assert.Equal(0f, TorqueNorm(s, Limb.LowerArmL));  // the hinge ignores what it cannot turn
-        Assert.True(TorqueNorm(s, Limb.ThighL) > 1f);     // the ball joint does not
+        Assert.Equal(0f, TorqueNorm(s, s.Plan.PartIndex("LowerArm", Side.Left)));  // the hinge ignores what it cannot turn
+        Assert.True(TorqueNorm(s, s.Plan.PartIndex("Thigh", Side.Left)) > 1f);     // the ball joint does not
     }
 
     [Fact]
@@ -199,15 +199,15 @@ public sealed class RagdollTests
         using var s = new RagdollScenario(seed: 1);
         var v = s.World.View;
         var r = s.Ragdoll;
-        Assert.Equal(-1, v.Parent[r.BodyLane(Limb.Pelvis)]);
-        Assert.Equal(r.BodyLane(Limb.Pelvis), v.Parent[r.BodyLane(Limb.Torso)]);
-        Assert.Equal(r.BodyLane(Limb.ThighL), v.Parent[r.BodyLane(Limb.ShinL)]);
-        Assert.Equal(r.BodyLane(Limb.ShinR), v.Parent[r.BodyLane(Limb.FootR)]);
-        Assert.Equal((int)Limb.LowerArmR, v.Limb[r.BodyLane(Limb.LowerArmR)]);
-        Assert.Equal((uint)Box3DSoaKind.Capsule, v.Kind[r.BodyLane(Limb.ThighL)]);
-        Assert.Equal((uint)Box3DSoaKind.Box, v.Kind[r.BodyLane(Limb.Torso)]);
-        Assert.Equal((uint)Box3DSoaKind.Sphere, v.Kind[r.BodyLane(Limb.Head)]);
-        Assert.Equal(HumanoidRagdoll.MuscleCount, v.JointCount);
+        Assert.Equal(-1, v.Parent[r.BodyLane(s.Plan.PartIndex("Pelvis"))]);
+        Assert.Equal(r.BodyLane(s.Plan.PartIndex("Pelvis")), v.Parent[r.BodyLane(s.Plan.PartIndex("Torso"))]);
+        Assert.Equal(r.BodyLane(s.Plan.PartIndex("Thigh", Side.Left)), v.Parent[r.BodyLane(s.Plan.PartIndex("Shin", Side.Left))]);
+        Assert.Equal(r.BodyLane(s.Plan.PartIndex("Shin", Side.Right)), v.Parent[r.BodyLane(s.Plan.PartIndex("Foot", Side.Right))]);
+        Assert.Equal(s.Plan.PartIndex("LowerArm", Side.Right), v.Limb[r.BodyLane(s.Plan.PartIndex("LowerArm", Side.Right))]);
+        Assert.Equal((uint)Box3DSoaKind.Capsule, v.Kind[r.BodyLane(s.Plan.PartIndex("Thigh", Side.Left))]);
+        Assert.Equal((uint)Box3DSoaKind.Box, v.Kind[r.BodyLane(s.Plan.PartIndex("Torso"))]);
+        Assert.Equal((uint)Box3DSoaKind.Sphere, v.Kind[r.BodyLane(s.Plan.PartIndex("Head"))]);
+        Assert.Equal(s.Plan.Joints.Count, v.JointCount);
         Assert.Throws<ArgumentException>(() => r.Drive(new float[3], s.Target));
         Assert.Throws<ArgumentException>(() => r.Drive(s.Strength, new Quat[3]));
     }

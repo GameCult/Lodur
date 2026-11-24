@@ -18,30 +18,37 @@ internal sealed class ConnectedPainBox : IDisposable
     public static readonly (float X, float Y, float Z) Box = (-0.210f, 1.116f, 0.441f);
 
     public readonly Box3DSoaWorld World;
-    public readonly HumanoidRagdoll Ragdoll;
+    public readonly BodyPlan Plan = BodyPlans.Humanoid();
+    public readonly Ragdoll Ragdoll;
     public readonly Actor Actor;
     public readonly BoxStimulus[] Sources = { new BoxStimulus(Box.X, Box.Y, Box.Z, BoxHalf, BoxHalf, BoxHalf) };
-    public readonly float[] X = new float[HumanoidRagdoll.RegionCount], Y = new float[HumanoidRagdoll.RegionCount], Z = new float[HumanoidRagdoll.RegionCount];
-    public readonly float[] Strength = new float[HumanoidRagdoll.MuscleCount];
-    public readonly Quat[] Target = new Quat[HumanoidRagdoll.MuscleCount];
+    public readonly float[] X, Y, Z;
+    public readonly float[] Strength;
+    public readonly Quat[] Target;
+    private readonly int _handR;
     private SplitMix64 _rng;
 
     public ConnectedPainBox(ulong seed, HoldParameters? hold = null, DriveParameters? driveTunables = null)
     {
-        World = new Box3DSoaWorld(capacity: HumanoidRagdoll.LimbCount + 2, jointCapacity: HumanoidRagdoll.MuscleCount + 1);
+        var (bodies, joints) = Ragdoll.Needs(Plan);
+        X = new float[Plan.SensePoints.Count]; Y = new float[Plan.SensePoints.Count]; Z = new float[Plan.SensePoints.Count];
+        Strength = new float[Plan.Joints.Count];
+        Target = new Quat[Plan.Joints.Count];
+        _handR = Plan.SenseIndex("Hand", Side.Right);
+        World = new Box3DSoaWorld(capacity: bodies + 2, jointCapacity: joints + 1);
         World.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
         var stool = World.AddStaticBox(2, (0f, 1.11f, -0.115f), (0.05f, 0.05f, 0.025f), friction: 0.8f);
-        Ragdoll = HumanoidRagdoll.Build(World, (0f, 0f), firstStableId: 100);
-        World.AddJoint(Box3DSoaJointKind.Weld, stool, Ragdoll.BodyLane(Limb.Pelvis), (0f, 1.11f, -0.09f), (0f, 1f, 0f));
+        Ragdoll = Ragdoll.Build(World, Plan, (0f, 0f), firstStableId: 100);
+        World.AddJoint(Box3DSoaJointKind.Weld, stool, Ragdoll.BodyLane(Plan.PartIndex("Pelvis")), (0f, 1.11f, -0.09f), (0f, 1f, 0f));
 
-        var holdPose = new Quat[HumanoidRagdoll.MuscleCount];
-        var withdrawPose = new Quat[HumanoidRagdoll.MuscleCount];
+        var holdPose = new Quat[Plan.Joints.Count];
+        var withdrawPose = new Quat[Plan.Joints.Count];
         Array.Fill(holdPose, Quat.Identity);
         Array.Fill(withdrawPose, Quat.Identity);
-        holdPose[(int)Muscle.ShoulderR] = Quat.FromAxisAngle(1f, 0f, 0f, -1.0f);
-        holdPose[(int)Muscle.ElbowR] = Quat.FromAxisAngle(0f, 0f, 1f, -0.6f);
-        withdrawPose[(int)Muscle.ShoulderR] = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f);
-        withdrawPose[(int)Muscle.ElbowR] = Quat.FromAxisAngle(0f, 0f, 1f, -2.0f);
+        holdPose[Plan.JointIndex("Shoulder", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, -1.0f);
+        holdPose[Plan.JointIndex("Elbow", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, -0.6f);
+        withdrawPose[Plan.JointIndex("Shoulder", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f);
+        withdrawPose[Plan.JointIndex("Elbow", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, -2.0f);
 
         _rng = new SplitMix64(seed);
         var gain = 1.0 + 0.2 * _rng.NextSigned();
@@ -69,7 +76,7 @@ internal sealed class ConnectedPainBox : IDisposable
                 },
             },
         };
-        Actor = new Actor(Dt, HumanoidRagdoll.RegionCount, new NerveParameters { Gain = gain }, new WithdrawalParameters(),
+        Actor = new Actor(Dt, Plan.SensePoints.Count, new NerveParameters { Gain = gain }, new WithdrawalParameters(),
             (driveTunables ?? new DriveParameters()) with { DrainTrait = drain }, brain);
     }
 
@@ -78,7 +85,7 @@ internal sealed class ConnectedPainBox : IDisposable
     /// <summary>Right hand point now.</summary>
     public (float X, float Y, float Z) Hand
     {
-        get { Ragdoll.ReadRegions(X, Y, Z); return (X[(int)Region.HandR], Y[(int)Region.HandR], Z[(int)Region.HandR]); }
+        get { Ragdoll.ReadSensePoints(X, Y, Z); return (X[_handR], Y[_handR], Z[_handR]); }
     }
 
     public bool HandInBox => Sources[0].Contains(Hand.X, Hand.Y, Hand.Z);
@@ -89,7 +96,7 @@ internal sealed class ConnectedPainBox : IDisposable
         var tick = Actor.TickCount;
         var ramp = Math.Min(1.0, tick * Dt / 2.0);
         Sources[0].Intensity = Math.Max(0.0, 0.8 * ramp * (1.0 + 0.1 * _rng.NextSigned()));
-        Ragdoll.ReadRegions(X, Y, Z);
+        Ragdoll.ReadSensePoints(X, Y, Z);
         var events = Actor.Tick(X, Y, Z, Sources, Strength, Target);
         Ragdoll.Drive(Strength, Target);
         World.Step((float)Dt, 4);
@@ -105,29 +112,29 @@ public sealed class ConnectedPainBoxTests
         MathF.Sqrt((a.X - b.X) * (a.X - b.X) + (a.Y - b.Y) * (a.Y - b.Y) + (a.Z - b.Z) * (a.Z - b.Z));
 
     [Fact]
-    public void ReadRegions_puts_the_hands_at_the_palms_at_the_creation_pose()
+    public void ReadSensePoints_puts_the_hands_at_the_palms_at_the_creation_pose()
     {
         using var s = new RagdollScenario(seed: 1);
-        var x = new float[HumanoidRagdoll.RegionCount]; var y = new float[HumanoidRagdoll.RegionCount]; var z = new float[HumanoidRagdoll.RegionCount];
-        s.Ragdoll.ReadRegions(x, y, z);
-        Assert.Equal(0.21f, x[(int)Region.HandL], 3);
-        Assert.Equal(-0.21f, x[(int)Region.HandR], 3);
-        Assert.Equal(0.93f, y[(int)Region.HandR], 3);
-        Assert.Equal(0f, z[(int)Region.HandR], 3);
-        Assert.Equal(0f, x[(int)Region.Head], 3);   // the head body's centre, within a millimetre
-        Assert.Equal(1.74f, y[(int)Region.Head], 3);
-        Assert.Equal(0f, z[(int)Region.Head], 3);
-        Assert.Throws<ArgumentException>(() => s.Ragdoll.ReadRegions(new float[1], y, z));
+        var x = new float[3]; var y = new float[3]; var z = new float[3];
+        s.Ragdoll.ReadSensePoints(x, y, z);
+        Assert.Equal(0.21f, x[s.Plan.SenseIndex("Hand", Side.Left)], 3);
+        Assert.Equal(-0.21f, x[s.Plan.SenseIndex("Hand", Side.Right)], 3);
+        Assert.Equal(0.93f, y[s.Plan.SenseIndex("Hand", Side.Right)], 3);
+        Assert.Equal(0f, z[s.Plan.SenseIndex("Hand", Side.Right)], 3);
+        Assert.Equal(0f, x[s.Plan.SenseIndex("Head")], 3);   // the head body's centre, within a millimetre
+        Assert.Equal(1.74f, y[s.Plan.SenseIndex("Head")], 3);
+        Assert.Equal(0f, z[s.Plan.SenseIndex("Head")], 3);
+        Assert.Throws<ArgumentException>(() => s.Ragdoll.ReadSensePoints(new float[1], y, z));
     }
 
     [Fact]
-    public void ReadRegions_allocates_nothing()
+    public void ReadSensePoints_allocates_nothing()
     {
         using var s = new RagdollScenario(seed: 1);
-        var x = new float[HumanoidRagdoll.RegionCount]; var y = new float[HumanoidRagdoll.RegionCount]; var z = new float[HumanoidRagdoll.RegionCount];
-        s.Ragdoll.ReadRegions(x, y, z);
+        var x = new float[3]; var y = new float[3]; var z = new float[3];
+        s.Ragdoll.ReadSensePoints(x, y, z);
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 1000; i++) s.Ragdoll.ReadRegions(x, y, z);
+        for (var i = 0; i < 1000; i++) s.Ragdoll.ReadSensePoints(x, y, z);
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
     }
 
