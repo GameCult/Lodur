@@ -99,7 +99,16 @@ namespace Lodur
                 new SensePointDef("Hand", Side.Right, palm[1], (0f, 0f, 0f)),
                 new SensePointDef("Head", Side.Center, head, (0f, 0f, 0f)),
             };
-            return new BodyPlan(parts, joints, senses);
+
+            // The airway opens at the face, facing +z, each centred on the head sphere's surface (|offset| 0.110, head r 0.11): fluid never enters
+            // a body, so a sensor wholly inside the head reads 0 (probe, 512-drop pour: inside 0.0 mL; centred on the surface at the nose up to
+            // 46.9 mL). Radius 0.025 holds one drop centre (r 1.25 cm) outside the solid; centres 5.05 cm apart, so the spheres do not overlap.
+            var airway = new[]
+            {
+                new AirwayOpeningDef("Mouth", Side.Center, head, (0f, -0.04f, 0.1025f), 0.025f),
+                new AirwayOpeningDef("Nose", Side.Center, head, (0f, 0.01f, 0.1095f), 0.025f),
+            };
+            return new BodyPlan(parts, joints, senses, airway);
         }
 
         private static int Add(List<PartDef> parts, PartDef part)
