@@ -24,10 +24,12 @@ lodur-exposed-tube-chains).
 | UpperArm, LowerArm, Thigh, Shin (L, R) | yes | yes | fat, bone; vessels, tendons contained |
 | Foot, Palm, Thumb, Fingers (L, R) | yes | no | bone, tendons contained |
 
-Authority: the BodyPlan owns each part's tissue stack (layer kind, thickness, and for a sheet layer: spacing, edge and
-attachment compliance, tensile strength). Lodur.Core derives the sheet geometry (rest points in the part frame, edges, bends,
-joint stitches) from the part's shape and stack, deterministically, at build. Derived geometry is never stored: a stored copy
-would be a cache that could disagree with the stack. The plan lives in BodyPlans.Humanoid until lodur-body-plan-cultcache.
+Authority: `PhysiologyPlan.Parts` owns each part's tissue stack (`PartTissuesDef`: `TissueDef` Thickness and `SheetDef`: spacing,
+edge and attachment compliance, tensile strength), joined to the `BodyPlan` only by `PhysiologyPlan.Resolve`, the one
+(label, side) join. The sheet builder reads (`BodyPlan`, `PhysiologyPlan`). Lodur.Core derives the sheet geometry (rest points
+in the part frame, edges, bends, joint stitches) from the part's shape and stack, deterministically, at build. Derived
+geometry is never stored: a stored copy would be a cache that could disagree with the stack. The content lives in
+`PhysiologyPlans.Humanoid` until lodur-body-plan-cultcache.
 
 ## Authority map
 
@@ -125,8 +127,8 @@ bends 0.028, bodies 0.014. Those are walks over dormant lanes that active lists 
 5. cut-ymir-particle-pinning-dormant (ABI 18): set_pinned; dormant particles out of every substep walk through command-time
    active lists and a derived solve inverse mass; pinned particles bordering live ones are kinematic per substep; wake writes
    position and velocity from the anchor. After 2, 3 and 4.
-6. lodur-tissue-stack (plan data and the deterministic sheet builder; can start any time).
-7. lodur-body-sheets-graph (binding: build dormant, wake per part, re-pin, wounds and severs as commands), after lodur-physiology.
+6. lodur-tissue-sheet-material (stack material in PhysiologyPlan, Resolve), then lodur-sheet-builder (the deterministic sheet builder).
+7. lodur-body-sheets-graph (binding: build dormant, wake per part, re-pin, wounds and severs as commands), after lodur-physiology and lodur-sheet-builder.
 8. bds-flesh-render-embedding; then lodur-organ-release-rope and lodur-exposed-tube-chains.
 
 Budget reading: at rest flesh must cost nothing per tick (P2 B, H); one hurt part costs about 0.2 ms; a whole live Fella about
