@@ -12,6 +12,10 @@ public sealed class BrainTests
         Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw },
     };
 
+    private static readonly Perception Deaf = new(new NerveParameters(), 0.01, 1);
+
+    private static int Pick(Brain brain, DriveState drive, int current) => brain.Select(drive, Deaf, 0f, 0f, 0f, new Choice(current, 0)).Goal;
+
     private static Condition Pain(ConditionOp op, double t) => new(DriveQuantity.Pain, op, t);
 
     private sealed record Run(List<long> Changes, List<int> Goals, long Broke, long[] Held);
@@ -72,12 +76,12 @@ public sealed class BrainTests
                 Goal("d", 9.0, 0.5, Pain(ConditionOp.AtLeast, 0.5)),
             },
         };
-        Assert.Equal(1, brain.Select(calm, 0));  // b and c tie at the top: the lowest index
-        Assert.Equal(2, brain.Select(calm, 2));  // the current goal wins a tie
-        Assert.Equal(1, brain.Select(calm, 3));  // d is ineligible: current is not kept for its own sake
+        Assert.Equal(1, Pick(brain, calm, 0));  // b and c tie at the top: the lowest index
+        Assert.Equal(2, Pick(brain, calm, 2));  // the current goal wins a tie
+        Assert.Equal(1, Pick(brain, calm, 3));  // d is ineligible: current is not kept for its own sake
         var none = new Brain { Goals = new[] { Goal("x", 1.0, 0.5, Pain(ConditionOp.AtLeast, 0.5)), Goal("y", 0.0, 0.5, Pain(ConditionOp.AtLeast, 0.5)) } };
-        Assert.Equal(1, none.Select(calm, 1));   // nothing eligible: the current goal
-        Assert.Equal(0, none.Select(calm, 0));
+        Assert.Equal(1, Pick(none, calm, 1));   // nothing eligible: the current goal
+        Assert.Equal(0, Pick(none, calm, 0));
     }
 
     [Fact]

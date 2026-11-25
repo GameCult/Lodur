@@ -40,6 +40,8 @@ namespace Lodur
         private long _tick;
         private int _goal;
         private int _pending = -1;
+        private ulong _target;
+        private ulong _pendingTarget;
         private long _switchTick;
         private long _goalSince;
         // The entry ramp of the goal in force: its length in ticks (-1: none, as for the Start goal) and the gain and arousal it started from.
@@ -140,6 +142,30 @@ namespace Lodur
 
         public Percept Percept(int slot) => _perception.Percept(slot);
 
+        /// <summary>The id of the percept the committed goal targets; 0 for an untargeted goal. Only the Brain's choice, committed after the latency, writes it.</summary>
+        public ulong TargetId => _target;
+
+        /// <summary>The slot whose Id equals <see cref="TargetId"/>; default (Id 0) when the target is 0 or forgotten.</summary>
+        public Percept Target
+        {
+            get
+            {
+                if (_target != 0UL)
+                {
+                    for (var s = 0; s < _perception.PerceptCount; s++)
+                    {
+                        var p = _perception.Percept(s);
+                        if (p.Id == _target)
+                        {
+                            return p;
+                        }
+                    }
+                }
+
+                return default;
+            }
+        }
+
         /// <summary>
         /// Runs one physics step's worth of nervous system. The point spans hold one entry per region; the strengths
         /// and targets spans one entry per muscle, written for the body to follow. The emitters are the game's point
@@ -207,26 +233,34 @@ namespace Lodur
             // pending. Within the goal in force's minimum dwell only a strictly higher-priority goal is decided on.
             if (_pending < 0)
             {
-                var wanted = _brain.Select(_drive, _goal);
-                if (wanted != _goal && (_tick - _goalSince >= _dwell[_goal] || _brain.Goals[wanted].Priority > _brain.Goals[_goal].Priority))
+                var sr = _perception.SenseRegion;
+                var wanted = _brain.Select(_drive, _perception, regionX[sr], regionY[sr], regionZ[sr], new Choice(_goal, _target));
+                if (wanted != new Choice(_goal, _target)
+                    && (wanted.Goal == _goal || _tick - _goalSince >= _dwell[_goal] || _brain.Goals[wanted.Goal].Priority > _brain.Goals[_goal].Priority))
                 {
-                    _pending = wanted;
+                    _pending = wanted.Goal;
+                    _pendingTarget = wanted.Target;
                     _switchTick = _tick + _latency;
                 }
             }
 
             if (_pending >= 0 && _tick == _switchTick)
             {
+                var changed = _pending != _goal;
                 _goal = _pending;
+                _target = _pendingTarget;
                 _pending = -1;
-                _goalSince = _tick;
-                events |= TickEvents.GoalChanged;
-                _rampTicks = _entryTicks[_goal];
-                _rampGain0 = _drive.SensoryGain;
-                _rampArousal0 = _drive.Arousal;
-                if (_brain.Goals[_goal].EntryResolve is double entry)
+                if (changed)
                 {
-                    _drive.Enter(_driveP, entry);
+                    _goalSince = _tick;
+                    events |= TickEvents.GoalChanged;
+                    _rampTicks = _entryTicks[_goal];
+                    _rampGain0 = _drive.SensoryGain;
+                    _rampArousal0 = _drive.Arousal;
+                    if (_brain.Goals[_goal].EntryResolve is double entry)
+                    {
+                        _drive.Enter(_driveP, entry);
+                    }
                 }
             }
 

@@ -22,20 +22,85 @@ namespace Lodur
         Below,
     }
 
+    internal static class DriveReads
+    {
+        internal static double Read(in DriveState drive, DriveQuantity quantity) => quantity switch
+        {
+            DriveQuantity.Pain => drive.Pain,
+            DriveQuantity.Strain => drive.Strain,
+            DriveQuantity.Arousal => drive.Arousal,
+            DriveQuantity.Resolve => drive.Resolve,
+            DriveQuantity.Breaks => (double)drive.Breaks,
+            _ => drive.WillBroken ? 1.0 : 0.0,
+        };
+    }
+
+    /// <summary>What a consideration reads: a percept's distance from the observer, its salience, the seconds since it was sensed, or a drive quantity.</summary>
+    public enum ConsiderationInput
+    {
+        Distance,
+        Salience,
+        SecondsSinceSensed,
+        Drive,
+    }
+
+    /// <summary>
+    /// One response curve over an input, in [0, 1]: t = clamp01((x - X0) / (X1 - X0)), y = Y0 + (Y1 - Y0) * t^Exponent, clamped. A goal's pair
+    /// score is its Priority times every consideration's response. Drive reads <see cref="Quantity"/> off the drive state.
+    /// </summary>
+    public readonly record struct Consideration(ConsiderationInput Input, double X0, double X1, double Y0, double Y1, double Exponent = 1.0, DriveQuantity Quantity = default)
+    {
+        public double Response(double x)
+        {
+            var t = Math.Clamp((x - X0) / (X1 - X0), 0.0, 1.0);
+            return Math.Clamp(Y0 + (Y1 - Y0) * Math.Pow(t, Exponent), 0.0, 1.0);
+        }
+    }
+
+    /// <summary>The game's kinds a targeted goal accepts; Lodur never interprets them.</summary>
+    public sealed record TargetFilter
+    {
+        private IReadOnlyList<uint> _kinds = Array.AsReadOnly(Array.Empty<uint>());
+
+        /// <summary>Copied when set; read back as a read-only view.</summary>
+        public IReadOnlyList<uint> Kinds
+        {
+            get => _kinds;
+            init
+            {
+                var copy = new uint[value.Count];
+                for (var i = 0; i < copy.Length; i++)
+                {
+                    copy[i] = value[i];
+                }
+
+                _kinds = Array.AsReadOnly(copy);
+            }
+        }
+
+        internal bool Accepts(uint kind)
+        {
+            for (var i = 0; i < _kinds.Count; i++)
+            {
+                if (_kinds[i] == kind)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+    }
+
+    /// <summary>The Brain's choice: a goal index and the id of the percept it targets (0: untargeted).</summary>
+    public readonly record struct Choice(int Goal, ulong Target);
+
     /// <summary>One test of the drive state: the quantity against a threshold.</summary>
     public readonly record struct Condition(DriveQuantity Quantity, ConditionOp Op, double Threshold)
     {
         public bool Holds(in DriveState drive)
         {
-            var v = Quantity switch
-            {
-                DriveQuantity.Pain => drive.Pain,
-                DriveQuantity.Strain => drive.Strain,
-                DriveQuantity.Arousal => drive.Arousal,
-                DriveQuantity.Resolve => drive.Resolve,
-                DriveQuantity.Breaks => (double)drive.Breaks,
-                _ => drive.WillBroken ? 1.0 : 0.0,
-            };
+            var v = DriveReads.Read(drive, Quantity);
             return Op == ConditionOp.AtLeast ? v >= Threshold : v < Threshold;
         }
     }
@@ -117,6 +182,60 @@ namespace Lodur
             }
         }
 
+        /// <summary>The kind of thing this goal targets; null is an untargeted goal. Whether a target exists is decided in <see cref="Brain.Select"/>, not by Eligible.</summary>
+        public TargetFilter? Target { get; init; }
+
+        private Consideration[] _considerations = Array.Empty<Consideration>();
+        private IReadOnlyList<Consideration> _considerationsView = Array.AsReadOnly(Array.Empty<Consideration>());
+
+        /// <summary>Multiplied with Priority to score each (goal, percept) pair. Copied when set; read back as a read-only view.</summary>
+        public IReadOnlyList<Consideration> Considerations
+        {
+            get => _considerationsView;
+            init
+            {
+                _considerations = new Consideration[value.Count];
+                for (var c = 0; c < _considerations.Length; c++)
+                {
+                    _considerations[c] = value[c];
+                }
+
+                _considerationsView = Array.AsReadOnly(_considerations);
+            }
+        }
+
+        internal double Score(in DriveState drive, in Percept percept, float ox, float oy, float oz)
+        {
+            var score = Priority;
+            for (var c = 0; c < _considerations.Length; c++)
+            {
+                var k = _considerations[c];
+                double x;
+                switch (k.Input)
+                {
+                    case ConsiderationInput.Drive:
+                        x = DriveReads.Read(drive, k.Quantity);
+                        break;
+                    case ConsiderationInput.Distance:
+                    {
+                        double dx = percept.X - ox, dy = percept.Y - oy, dz = percept.Z - oz;
+                        x = Math.Sqrt(dx * dx + dy * dy + dz * dz);
+                        break;
+                    }
+                    case ConsiderationInput.Salience:
+                        x = percept.Salience;
+                        break;
+                    default:
+                        x = percept.SecondsSinceSensed;
+                        break;
+                }
+
+                score *= k.Response(x);
+            }
+
+            return score;
+        }
+
         internal bool Eligible(in DriveState drive)
         {
             for (var c = 0; c < _when.Length; c++)
@@ -163,11 +282,22 @@ namespace Lodur
         /// <summary>How long a chosen switch takes to commit; a decision in flight commits even if its condition lapses.</summary>
         public double DeliberateLatencySeconds { get; init; } = 0.1;
 
-        /// <summary>The goal wanted now: the eligible goal of highest priority, ties to the current goal then the lowest index; the current goal if none is eligible.</summary>
-        public int Select(in DriveState drive, int current)
+        /// <summary>How much the current (goal, target) pair's score is multiplied by, finite and at least 1; 1 is no commitment.</summary>
+        public double TargetCommitment { get; init; } = 1.0;
+
+        /// <summary>
+        /// The pair wanted now. Each eligible untargeted goal is one pair (goal, 0) scored Priority times its Drive considerations; each eligible
+        /// targeted goal is one pair per percept slot with a non-zero Id and a Kind it accepts, scored Priority times every consideration. The pair
+        /// equal to <paramref name="current"/> is multiplied by <see cref="TargetCommitment"/>. The highest score wins; ties go to the current pair,
+        /// then the lowest goal index, then the lowest slot; with no pair at all the current choice stays. A percept Id is only compared, never decoded.
+        /// </summary>
+        public Choice Select(in DriveState drive, Perception perception, float observerX, float observerY, float observerZ, Choice current)
         {
-            var best = -1;
-            var bestPriority = 0.0;
+            var best = current;
+            var bestScore = 0.0;
+            var bestIsCurrent = false;
+            var found = false;
+            var slots = perception.PerceptCount;
             for (var i = 0; i < Goals.Count; i++)
             {
                 var goal = Goals[i];
@@ -176,14 +306,42 @@ namespace Lodur
                     continue;
                 }
 
-                if (best < 0 || goal.Priority > bestPriority || (goal.Priority == bestPriority && i == current))
+                if (goal.Target is null)
                 {
-                    best = i;
-                    bestPriority = goal.Priority;
+                    Offer(i, 0UL, goal.Score(drive, default, observerX, observerY, observerZ), current, ref best, ref bestScore, ref bestIsCurrent, ref found);
+                    continue;
+                }
+
+                for (var s = 0; s < slots; s++)
+                {
+                    var percept = perception.Percept(s);
+                    if (percept.Id == 0UL || !goal.Target.Accepts(percept.Kind))
+                    {
+                        continue;
+                    }
+
+                    Offer(i, percept.Id, goal.Score(drive, percept, observerX, observerY, observerZ), current, ref best, ref bestScore, ref bestIsCurrent, ref found);
                 }
             }
 
-            return best < 0 ? current : best;
+            return found ? best : current;
+        }
+
+        private void Offer(int goal, ulong target, double score, Choice current, ref Choice best, ref double bestScore, ref bool bestIsCurrent, ref bool found)
+        {
+            var isCurrent = goal == current.Goal && target == current.Target;
+            if (isCurrent)
+            {
+                score *= TargetCommitment;
+            }
+
+            if (!found || score > bestScore || (score == bestScore && isCurrent && !bestIsCurrent))
+            {
+                best = new Choice(goal, target);
+                bestScore = score;
+                bestIsCurrent = isCurrent;
+                found = true;
+            }
         }
 
         internal void Validate()
@@ -203,9 +361,39 @@ namespace Lodur
                 throw new ArgumentException("DeliberateLatencySeconds must be finite and not negative.");
             }
 
+            if (!(double.IsFinite(TargetCommitment) && TargetCommitment >= 1.0))
+            {
+                throw new ArgumentException("TargetCommitment must be finite and at least 1.");
+            }
+
             var muscles = -1;
             foreach (var goal in Goals)
             {
+                if (goal.Target is { } filter && filter.Kinds.Count == 0)
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: a Target needs at least one kind.");
+                }
+
+                if ((goal.Target != null || goal.Considerations.Count > 0) && !(goal.Priority >= 0.0))
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: Priority must not be negative on a goal with a Target or considerations.");
+                }
+
+                foreach (var k in goal.Considerations)
+                {
+                    if (!double.IsFinite(k.X0) || !double.IsFinite(k.X1) || k.X1 == k.X0
+                        || !(k.Y0 >= 0.0 && k.Y0 <= 1.0) || !(k.Y1 >= 0.0 && k.Y1 <= 1.0)
+                        || !(double.IsFinite(k.Exponent) && k.Exponent > 0.0))
+                    {
+                        throw new ArgumentException($"Goal {goal.Id}: a consideration needs finite X0 != X1, Y0 and Y1 in [0, 1], and Exponent > 0.");
+                    }
+
+                    if (k.Input != ConsiderationInput.Drive && goal.Target is null)
+                    {
+                        throw new ArgumentException($"Goal {goal.Id}: Distance, Salience and SecondsSinceSensed considerations need a targeted goal.");
+                    }
+                }
+
                 if (!double.IsFinite(goal.Priority) || !(goal.Pull >= 0.0 && goal.Pull <= 1.0))
                 {
                     throw new ArgumentException($"Goal {goal.Id}: priority must be finite and pull in [0, 1].");

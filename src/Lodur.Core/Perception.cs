@@ -236,6 +236,9 @@ namespace Lodur
         /// </summary>
         public double ChannelAfferent(Channel channel) => _senseAfferent[(int)channel];
 
+        /// <summary>The region whose point the senses are sensed at.</summary>
+        public int SenseRegion => _senseRegion;
+
         /// <summary>The number of percept slots: the capacity, or 0 with no senses. A slot is free when its percept's id is 0.</summary>
         public int PerceptCount => _pId.Length;
 
