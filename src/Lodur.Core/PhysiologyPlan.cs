@@ -16,14 +16,27 @@ namespace Lodur
     public enum EffectDriver { Severity, Age, BloodLoss }
 
     /// <summary>
+    /// The material of a layer simulated as a particle sheet. <paramref name="Spacing"/> is the particle spacing in m. The compliances are
+    /// XPBD compliances in m/N: along the sheet's edges (also its joint stitches) and to the bone. <paramref name="TensileStrength"/> is
+    /// ultimate stress in Pa; the sheet builder derives an edge's break force as TensileStrength x Thickness x Spacing.
+    /// </summary>
+    public readonly record struct SheetDef(double Spacing, double EdgeCompliance, double AttachCompliance, double TensileStrength);
+
+    /// <summary>
     /// One tissue layer of a part. <paramref name="Consciousness"/>, <paramref name="BloodPumping"/> and <paramref name="Motor"/> are
     /// function weights, a closed set with one reader each: a capacity is the weighted mean integrity of the tissues that carry its weight.
-    /// A Vital tissue at integrity 0 kills.
+    /// A Vital tissue at integrity 0 kills. A stack is shells (<see cref="Thickness"/> above 0, in m) outside-in, then cores (Thickness 0:
+    /// bone, organs, a muscle with no sheet); the cores fill what the shells leave of the part's shape. <see cref="Sheet"/> is the
+    /// material of a shell simulated as a particle sheet; null means it is not.
     /// </summary>
     public readonly record struct TissueDef(
-        string Label, double Hp, double Vascularity, bool Vital = false, double Consciousness = 0.0, double BloodPumping = 0.0, double Motor = 0.0);
+        string Label, double Hp, double Vascularity, bool Vital = false, double Consciousness = 0.0, double BloodPumping = 0.0, double Motor = 0.0)
+    {
+        public double Thickness { get; init; }
+        public SheetDef? Sheet { get; init; }
+    }
 
-    /// <summary>A part's tissue stack, outside-in, named by the body part's label and side.</summary>
+    /// <summary>The one tissue stack of a part, outside-in, owned by <see cref="PhysiologyPlan.Parts"/> and joined to a <see cref="BodyPlan"/> only through <see cref="PhysiologyPlan.Resolve"/>.</summary>
     public readonly record struct PartTissuesDef(string PartLabel, Side Side, IReadOnlyList<TissueDef> Tissues);
 
     /// <summary>The blood: nominal volume in m^3, the lost fraction that kills, and the regrowth per slow second as a fraction of nominal.</summary>
@@ -65,7 +78,7 @@ namespace Lodur
 
     /// <summary>
     /// Physiology as content: tissue stacks per body part, the afflictions that can be bound, the organism-wide effects of blood
-    /// loss, the blood and the size of the affliction table. Validated at construction; resolved against a <see cref="BodyPlan"/> by <see cref="Physiology"/>.
+    /// loss, the blood and the size of the affliction table. Validated at construction; resolved against a <see cref="BodyPlan"/> by <see cref="Resolve"/>, the one (label, side) join, which <see cref="Physiology"/> and the sheet builder both call.
     /// </summary>
     public sealed class PhysiologyPlan
     {
@@ -122,6 +135,7 @@ namespace Lodur
             foreach (var p in Parts)
             {
                 var seen = new HashSet<string>();
+                var core = false;
                 foreach (var t in p.Tissues)
                 {
                     var where = $"tissue '{t.Label}' of part '{p.PartLabel}' {p.Side}";
@@ -132,6 +146,21 @@ namespace Lodur
                     if (!(IsFinite(t.Consciousness) && t.Consciousness >= 0.0 && IsFinite(t.BloodPumping) && t.BloodPumping >= 0.0 && IsFinite(t.Motor) && t.Motor >= 0.0))
                     {
                         throw new ArgumentException($"{where}: a function weight is not finite and at least 0.");
+                    }
+
+                    if (!(IsFinite(t.Thickness) && t.Thickness >= 0.0)) throw new ArgumentException($"{where}: thickness is not finite and at least 0.");
+                    if (t.Thickness == 0.0) core = true;
+                    else if (core) throw new ArgumentException($"{where}: a shell follows a core.");
+                    if (t.Sheet is SheetDef sh)
+                    {
+                        if (!(t.Thickness > 0.0)) throw new ArgumentException($"{where}: a sheet needs a thickness above 0.");
+                        if (!(IsFinite(sh.Spacing) && sh.Spacing > 0.0)) throw new ArgumentException($"{where}: sheet spacing is not finite and above 0.");
+                        if (!(IsFinite(sh.EdgeCompliance) && sh.EdgeCompliance >= 0.0 && IsFinite(sh.AttachCompliance) && sh.AttachCompliance >= 0.0))
+                        {
+                            throw new ArgumentException($"{where}: a sheet compliance is not finite and at least 0.");
+                        }
+
+                        if (!(IsFinite(sh.TensileStrength) && sh.TensileStrength > 0.0)) throw new ArgumentException($"{where}: sheet tensile strength is not finite and above 0.");
                     }
                 }
             }

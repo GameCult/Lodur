@@ -59,6 +59,20 @@ public sealed class PhysiologyPlanTests
         Refuses(() => Plan(new[] { t with { BloodPumping = double.NaN } }));
         Refuses(() => Plan(new[] { t with { Motor = double.PositiveInfinity } }));
 
+        var sheet = new SheetDef(0.1, 1e-4, 1e-3, 1e6);
+        var shell = t with { Label = "shell", Thickness = 0.01, Sheet = sheet };
+        Refuses(() => Plan(new[] { t with { Thickness = -1 } }));
+        Refuses(() => Plan(new[] { t with { Thickness = double.NaN } }));
+        Refuses(() => Plan(new[] { t with { Sheet = sheet } }));                               // a sheet on Thickness 0
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { Spacing = 0 } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { Spacing = double.NaN } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { EdgeCompliance = -1 } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { EdgeCompliance = double.NaN } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { AttachCompliance = -1 } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = 0 } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = double.NaN } } }));
+        Refuses(() => Plan(new[] { t, shell }));                                               // a shell after a core
+
         var a = new AfflictionDef("a", PhysiologyClock.Acute, 0, true, Array.Empty<Effect>());
         Refuses(() => Plan(afflictions: new[] { a, a }));                                      // duplicate affliction label
         Refuses(() => Plan(afflictions: new[] { a with { Label = "" } }));
@@ -79,6 +93,16 @@ public sealed class PhysiologyPlanTests
         Refuses(() => Plan(blood: GoodBlood with { LethalLossFraction = 1.5 }));
         Refuses(() => Plan(blood: GoodBlood with { RegenPerSecond = -1 }));
         Refuses(() => Plan(slots: 0));
+    }
+
+    [Fact]
+    public void A_positional_tissue_has_no_thickness_and_no_sheet_and_zero_compliance_is_accepted()
+    {
+        var t = new TissueDef("t", 10, 1, Consciousness: 1, Motor: 1);
+        Assert.Equal(0.0, t.Thickness);
+        Assert.Null(t.Sheet);
+        Plan(new[] { t });
+        Plan(new[] { t with { Label = "s", Thickness = 0.01, Sheet = new SheetDef(0.1, 0, 0, 1) }, t });
     }
 
     [Fact]
