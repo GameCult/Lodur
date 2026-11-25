@@ -95,10 +95,12 @@ public sealed class OxygenTests
         Assert.Equal(DeathCause.Consciousness, p.Cause);
     }
 
-    [Fact]
-    public void One_lung_lost_still_breathes()
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(20.0)]
+    public void One_lung_lost_still_breathes(double slowScale)
     {
-        var p = Spawn();
+        var p = new Physiology(Body, PhysiologyPlans.Humanoid(), slowScale);
         var torso = Body.PartIndex("Torso");
         Assert.True(p.Afflict(PhysiologyPlans.Humanoid().AfflictionIndex("Bruise"), torso, p.TissueIndex(torso, "LungLeft"), 16));
         double c = 1.0;
@@ -109,8 +111,29 @@ public sealed class OxygenTests
             Assert.True(c >= 0.9, $"consciousness {c} at step {i}");
         }
 
-        Assert.InRange(p.Breathing, 0.5, 0.52);   // the bruise heals a little on the slow clock
+        Assert.Equal(0.5, p.Breathing);   // the bruise is a wound: real seconds, so the slow scale cannot heal it
+        // Half the ventilation settles the blood store at 1 - use / (uptake x breathing) = 0.978 here: uptake 1.0 gives that, 0.5 gives 0.956, 2.0 gives 0.989;
+        // the bounds are the geometric midpoints of the deficit (ruling deterministic-bound-margin).
+        Assert.InRange(p.BloodOxygen, 0.969, 0.9844);
         Assert.False(p.Dead);
+    }
+
+    [Fact]
+    public void A_bruise_heals_identically_at_every_slow_scale()
+    {
+        double Left(double scale)
+        {
+            var p = new Physiology(Body, PhysiologyPlans.Humanoid(), scale);
+            var torso = Body.PartIndex("Torso");
+            Assert.True(p.Afflict(PhysiologyPlans.Humanoid().AfflictionIndex("Bruise"), torso, p.TissueIndex(torso, "LungLeft"), 16));
+            for (var i = 0; i < (int)(300.0 / Dt); i++) p.Step(Dt);
+            Assert.Equal(1, Live(p));
+            return p.SlotSeverity(0);
+        }
+
+        var real = Left(1.0);
+        Assert.Equal(real, Left(20.0));
+        Assert.Equal(16.0 - 20.0 * 300.0 / 86400.0, real, 6);   // 20 HP per day of real seconds
     }
 
     [Fact]

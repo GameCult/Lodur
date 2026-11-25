@@ -70,14 +70,14 @@ namespace Lodur
 
             var afflictions = new[]
             {
-                // Acute: a wound bleeds, clots and heals in real seconds whatever the slow scale (ruling bds-physiology-clock). 1 mL/s per HP of severity
+                // Acute: a wound (Cut, Bruise) bleeds, clots and heals in real seconds whatever the slow scale (ruling bds-physiology-clock); Slow is for toxins, radiation and osmosis only. 1 mL/s per HP of severity
                 // (play-tuned), clotting with age (play-tuned); heals 10 HP per day of real seconds (RimWorld's rate).
                 new AfflictionDef("Cut", PhysiologyClock.Acute, -10.0 / Day, true, new[]
                 {
                     Curve(EffectTarget.Bleed, EffectOp.Offset, EffectDriver.Severity, (0.0, 0.0), (100.0, 1e-4)),
                     Curve(EffectTarget.Bleed, EffectOp.Factor, EffectDriver.Age, (0.0, 1.0), (60.0, 0.5), (300.0, 0.1)),
                 }),
-                new AfflictionDef("Bruise", PhysiologyClock.Slow, -20.0 / Day, true, Array.Empty<Effect>()),
+                new AfflictionDef("Bruise", PhysiologyClock.Acute, -20.0 / Day, true, Array.Empty<Effect>()),
             };
 
             // ATLS class IV past 40% loss (research df-and-atls) puts the lethal fraction at 0.5 (play-tuned); regrowth is RimWorld's 0.333 per slow day.
