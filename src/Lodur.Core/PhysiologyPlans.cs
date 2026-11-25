@@ -52,8 +52,9 @@ namespace Lodur
 
             var afflictions = new[]
             {
-                // 1 mL/s per HP of severity (play-tuned), clotting with age (play-tuned); heals 10 HP per slow day (RimWorld).
-                new AfflictionDef("Cut", PhysiologyClock.Slow, -10.0 / Day, true, new[]
+                // Acute: a wound bleeds, clots and heals in real seconds whatever the slow scale (ruling bds-physiology-clock). 1 mL/s per HP of severity
+                // (play-tuned), clotting with age (play-tuned); heals 10 HP per day of real seconds (RimWorld's rate).
+                new AfflictionDef("Cut", PhysiologyClock.Acute, -10.0 / Day, true, new[]
                 {
                     Curve(EffectTarget.Bleed, EffectOp.Offset, EffectDriver.Severity, (0.0, 0.0), (100.0, 1e-4)),
                     Curve(EffectTarget.Bleed, EffectOp.Factor, EffectDriver.Age, (0.0, 1.0), (60.0, 0.5), (300.0, 0.1)),

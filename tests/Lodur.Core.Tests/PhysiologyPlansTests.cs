@@ -100,11 +100,39 @@ public sealed class PhysiologyPlansTests
         p.Step(0.01);
         Assert.Equal(0.0, p.Bleed(torso));
 
-        Assert.True(p.Afflict(Cut, torso, muscle, 50));
+        Assert.True(p.Afflict(Cut, torso, muscle, 20));
         p.Step(0.01);
         var fresh = p.Bleed(torso);
-        Assert.InRange(fresh, 4.9e-5, 5e-5);   // 1 mL/s per HP of severity (5e-5 m^3/s at 50), x vascularity 1 x pumping 1, a hair clotted
-        for (var i = 0; i < 100; i++) p.Step(0.1);               // 10 s at slow scale 20 is 200 clock seconds
-        Assert.True(p.Bleed(torso) < fresh * 0.5);
+        Assert.InRange(fresh, 1.9e-5, 2e-5);   // 1 mL/s per HP of severity (2e-5 m^3/s at 20), x vascularity 1 x pumping 1, a hair clotted
+        for (var i = 0; i < 600; i++) p.Step(0.1);               // 60 real seconds: the clot factor has fallen to a half
+        Assert.False(p.Dead);
+        Assert.True(p.Bleed(torso) > 0.0 && p.Bleed(torso) < fresh * 0.55);
+    }
+
+    [Fact]
+    public void A_cut_bleeds_and_clots_in_real_seconds_whatever_the_slow_scale()
+    {
+        (double Bleed3, double Lost60) Run(double scale)
+        {
+            var p = new Physiology(Body, PhysiologyPlans.Humanoid(), scale);
+            var torso = Body.PartIndex("Torso");
+            Assert.True(p.Afflict(Cut, torso, p.TissueIndex(torso, "Muscle"), 10));
+            var at3 = 0.0;
+            for (var i = 1; i <= 1200; i++)
+            {
+                p.Step(0.05);
+                if (i == 60) at3 = p.Bleed(torso);
+            }
+
+            Assert.False(p.Dead);
+            return (at3, 0.005 - p.BloodVolume);
+        }
+
+        var one = Run(1);
+        var twenty = Run(20);
+        Assert.InRange(one.Bleed3, 9.5e-6, 9.9e-6);          // about 9.7 mL/s at 3 s: 10 HP x 1 mL/s, a hair clotted
+        Assert.InRange(one.Lost60, 4.4e-4, 4.6e-4);          // about 450 mL in 60 s
+        Assert.Equal(one.Bleed3, twenty.Bleed3);
+        Assert.Equal(one.Lost60, twenty.Lost60);
     }
 }
