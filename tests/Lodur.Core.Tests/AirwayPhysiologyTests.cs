@@ -19,6 +19,9 @@ public sealed class AirwayPhysiologyTests
 
     private static readonly double Capacity = PhysiologyPlans.Humanoid().Airway.Capacity;
 
+    /// <summary>The humanoid's DrawPerSecond, a placeholder: the tests that read what a free breath draws read it from here.</summary>
+    private static readonly double Draw = PhysiologyPlans.Humanoid().Airway.DrawPerSecond;
+
     private static Brain RestOnly() => new()
     {
         Goals = new[]
@@ -104,7 +107,7 @@ public sealed class AirwayPhysiologyTests
         Assert.True(r.Arousal30 > 0.0866, $"arousal at 30 s {r.Arousal30}");
     }
 
-    private readonly record struct Hold(double FirstLiquid, double MaxBeforeGasp, double Gasp, double WillAtGasp, double After);
+    private readonly record struct Hold(double FirstLiquid, double MaxBeforeGasp, double Gasp, double WillAtGasp, double After, double Window);
 
     /// <summary>A real Actor, calm and awake, with liquid at the airway openings from the first tick on, facing down.</summary>
     private static Hold HoldUnderLiquid(double slowScale, WithdrawalParameters? breath = null, double attention = 1.0)
@@ -115,7 +118,7 @@ public sealed class AirwayPhysiologyTests
         var s = new float[2];
         var q = new Quat[2];
         var liquid = new AirwaySample(2.0 * HoldAt, 0.0, -1.0);
-        double first = -1, max = 0, gasp = -1, will = -1, after = -1;
+        double first = -1, max = 0, gasp = -1, will = -1, after = -1, window = -1;
         for (long i = 0; i < (long)(200.0 / Dt); i++)
         {
             var e = a.Tick(NoPoint, NoPoint, NoPoint, default, s, q, default, liquid);
@@ -133,14 +136,18 @@ public sealed class AirwayPhysiologyTests
                     max = Math.Max(max, p.AirwayLiquid);
                 }
             }
-            else if (t >= gasp + 1.0)
+            else
             {
-                after = p.AirwayLiquid;
-                break;
+                if (window < 0 && t >= gasp + 0.25) window = p.AirwayLiquid;
+                if (t >= gasp + 1.0)
+                {
+                    after = p.AirwayLiquid;
+                    break;
+                }
             }
         }
 
-        return new Hold(first, max, gasp, will, after);
+        return new Hold(first, max, gasp, will, after, window);
     }
 
     [Theory]
@@ -152,10 +159,12 @@ public sealed class AirwayPhysiologyTests
         // the step found), 2.6e-7 m^3; held, nothing more enters and the cough clears it, so the airway never holds more than that until the gasp. With inflow while held it climbs to the cough's balance, 1.6e-5 (60 times).
         var h = HoldUnderLiquid(slowScale);
         Assert.InRange(h.Gasp, 45.0, 90.0);
-        Assert.Equal(1.0 * 2.0 * HoldAt * Dt, h.FirstLiquid, 12);
+        // Draw is a placeholder and decides this reading (the first tick's inflow is Draw x Breathing x liquid x dt): it is read from the content, not written here.
+        Assert.Equal(Draw * 1.0 * 2.0 * HoldAt * Dt, h.FirstLiquid, 12);
         Assert.True(h.MaxBeforeGasp <= h.FirstLiquid * 1.0000001, $"airway liquid {h.MaxBeforeGasp} while held");
         Assert.Equal(0.0, h.WillAtGasp);
-        // The gasp draws the liquid in: a second later the airway holds 1.35e-5 (the held mutant 2.6e-7); the bound is their geometric mean.
+        // Placeholders deciding this test: Draw (the first-tick inflow, and the 1.35e-5 after the gasp); Cough (the airway never holds more than a tick's inflow while held, since it clears at once); HoldAt is
+        // content the test reads. The gasp draws the liquid in: a second later the airway holds 1.35e-5 (the held mutant 2.6e-7); the bound is their geometric mean.
         Assert.True(h.After > 1.8e-6, $"airway liquid a second after the gasp {h.After}");
     }
 
@@ -173,7 +182,7 @@ public sealed class AirwayPhysiologyTests
     public void With_no_will_there_is_no_hold()
     {
         // The will is 0 (attention is the seam): the breath is never held, liquid is drawn at once and no gasp is ever reported. Shipped the airway fills to the cough's balance (1.56e-5) within 5 s;
-        // a hold not gated by will stays at one tick's inflow (2.6e-7): the bound is the midpoint, 6.4e-6.
+        // a hold not gated by will stays at one tick's inflow (2.6e-7): the bound is the geometric midpoint, sqrt(1.56e-5 x 2.6e-7) = 2.0e-6.
         var p = Breather(20.0);
         var a = Real(p, StruggleBrain());
         a.SetAttention(0.0);
@@ -185,7 +194,7 @@ public sealed class AirwayPhysiologyTests
             Assert.Equal(TickEvents.None, a.Tick(NoPoint, NoPoint, NoPoint, default, s, q, default, liquid) & TickEvents.Gasp);
         }
 
-        Assert.True(p.AirwayLiquid > 6.4e-6, $"airway liquid {p.AirwayLiquid}");
+        Assert.True(p.AirwayLiquid > 2.0e-6, $"airway liquid {p.AirwayLiquid}");
     }
 
     /// <summary>
@@ -216,6 +225,7 @@ public sealed class AirwayPhysiologyTests
     [InlineData(0.5)]
     public void Face_down_or_on_his_side_the_airway_drains_and_he_lives(double facing)
     {
+        // Placeholders: Drain decides nothing here but whether it is above zero (a tiny drain restarts ventilation and the awake cough then clears the airway: probed at 0.1, 0.01, 0.001); Cough decides the recovery once he wakes.
         // Out at 0.1 with the airway full, then drained at 0.1 (facing 1) or 0.05 (facing 0.5) per second: back above 0.5 in 7.0 and 8.5 s (the bound is the 200 s simulated; a drain that waits on consciousness never comes). Face up it never drains and he dies (below).
         var p = Rolled(facing, 200.0);
         Assert.False(p.Dead);
@@ -226,6 +236,7 @@ public sealed class AirwayPhysiologyTests
     [Fact]
     public void Face_up_the_airway_stays_full_and_he_dies_through_consciousness()
     {
+        // Decided by the Cough curve (zero below 0.3 consciousness) and by facing; Drain and Draw decide nothing here (nothing drains face up, nothing is drawn, none at the openings).
         var p = Rolled(-1.0, 600.0);
         Assert.True(p.Dead);
         Assert.Equal(DeathCause.Consciousness, p.Cause);
@@ -246,6 +257,7 @@ public sealed class AirwayPhysiologyTests
     [Fact]
     public void An_awake_Fella_coughs_his_airway_clear()
     {
+        // Placeholders deciding this: Cough (2.2 s to clear half, and every bound below); Draw only fills the half airway first and decides no outcome; Drain is 0 facing up and decides nothing.
         // Half the airway, awake, face up, nothing at the openings: gone (below 1e-6, a 75-fold fall) in 10 s; shipped it takes 2.2 s. Without the cough (or with one gated by something else) it never falls.
         var p = Breather(20.0);
         var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, -1.0));
@@ -266,7 +278,7 @@ public sealed class AirwayPhysiologyTests
     [Fact]
     public void A_stuporous_Fella_cannot_cough()
     {
-        // Consciousness held at 0.2 by eight Dim afflictions, below the cough's 0.3.
+        // Consciousness held at 0.2 by eight Dim afflictions, below the cough's 0.3: the Cough curve's knee (a placeholder) decides this; Drain decides nothing (facing up).
         var p = Flooded(8);
         Assert.Equal(0.2, p.Consciousness, 9);
         var clear = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, -1.0));
@@ -301,6 +313,66 @@ public sealed class AirwayPhysiologyTests
             Assert.Equal(lungLost ? 0.5 : 1.0, p.Breathing);
             Assert.True(p.CarbonDioxide < 0.5, $"carbon dioxide {p.CarbonDioxide}");
         }
+    }
+
+    [Fact]
+    public void After_a_gasp_the_breath_is_free_for_its_window_before_it_is_held_again()
+    {
+        // The leak gasp (the will still holds): a quarter second later the breath is still free and the airway holds 6.2e-6 (Draw and Cough, placeholders, decide it); with no window (_held = willing) the
+        // breath is held the very next tick and the airway holds a tick's inflow, 2.6e-7 or less: the bound is their geometric mean, 1.3e-6.
+        var h = HoldUnderLiquid(1.0, new WithdrawalParameters { MaxSuppression = 0.0, FlinchLeakThreshold = 0.05 });
+        Assert.True(h.WillAtGasp > 0.0, "the will had not given out");
+        Assert.True(h.Window > 1.3e-6, $"airway liquid a quarter second after the gasp {h.Window}");
+    }
+
+    [Fact]
+    public void Liquid_below_the_hold_threshold_is_breathed_in_and_not_held()
+    {
+        // Liquid at the openings under HoldAt: the breath is not held, so the airway draws it in and never gasps. With the hold at any liquid the breath is held from the second tick and the airway keeps a tick's draw (6.5e-8). Shipped it holds 3.9e-6 after 5 s (Draw and Cough, placeholders); the bound is the geometric mean, 5.0e-7.
+        var p = Breather(20.0);
+        var a = Real(p, StruggleBrain());
+        var s = new float[2];
+        var q = new Quat[2];
+        var low = new AirwaySample(0.5 * HoldAt, 0.0, -1.0);
+        for (long i = 0; i < (long)(5.0 / Dt); i++)
+        {
+            Assert.Equal(TickEvents.None, a.Tick(NoPoint, NoPoint, NoPoint, default, s, q, default, low) & TickEvents.Gasp);
+        }
+
+        Assert.True(p.AirwayLiquid > 5.0e-7, $"airway liquid {p.AirwayLiquid}");
+    }
+
+    [Fact]
+    public void A_breath_draws_in_what_the_lung_ventilates()
+    {
+        // One step from empty (nothing to cough or drain yet): the inflow is Draw x Breathing x liquid x dt, and a lung half lost draws half. An inflow that ignores Breathing draws the same in both.
+        double Drawn(bool lungLost)
+        {
+            var p = Breather(20.0);
+            if (lungLost) Assert.True(p.Afflict(Af("Lesion"), 0, 2, 5.0));
+            p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.5 * HoldAt, 0.0, -1.0)));
+            Assert.Equal(lungLost ? 0.5 : 1.0, p.Breathing);
+            return p.AirwayLiquid;
+        }
+
+        Assert.Equal(Draw * 1.0 * 0.5 * HoldAt * Dt, Drawn(false), 14);
+        Assert.Equal(Draw * 0.5 * 0.5 * HoldAt * Dt, Drawn(true), 14);
+    }
+
+    [Fact]
+    public void A_dead_body_feels_no_urge()
+    {
+        var p = Smothered(20.0);
+        double last = 0.0;
+        for (long i = 0; i < (long)(500.0 / Dt) && !p.Dead; i++)
+        {
+            p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, default));
+            if (!p.Dead) last = p.BreathUrge;
+        }
+
+        Assert.True(p.Dead);
+        Assert.True(last > 0.5, $"urge the step before he died {last}");
+        Assert.Equal(0.0, p.BreathUrge);
     }
 
     [Fact]
