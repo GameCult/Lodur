@@ -9,12 +9,14 @@ namespace Lodur.Body.Ymir
     /// parent in the plan. The game owns the physics world: Build adds bodies to the caller's world and Lodur never creates or steps one.
     /// <see cref="Drive"/> is the muscle layer: it turns caller-owned strengths and target rotations into torques on the world's
     /// torque lanes and does nothing else to the physics. The binding holds no body numbers; the plan owns them.
+    /// In a world with a particle system Build also places one liquid sensor per plan airway opening, and <see cref="ReadAirway"/> reads them.
     /// </summary>
     public sealed class Ragdoll
     {
         private readonly Box3DSoaWorld _world;
         private readonly int[] _bodyLane;
         private readonly int[] _jointLane;
+        private readonly int[] _sensorLane;
         private readonly MuscleGains[] _gains;
 
         private Ragdoll(Box3DSoaWorld world, BodyPlan plan)
@@ -23,6 +25,8 @@ namespace Lodur.Body.Ymir
             Plan = plan;
             _bodyLane = new int[plan.Parts.Count];
             _jointLane = new int[plan.Joints.Count];
+            _sensorLane = new int[plan.AirwayOpenings.Count];
+            Array.Fill(_sensorLane, -1);
             _gains = new MuscleGains[plan.Joints.Count];
         }
 
@@ -35,8 +39,11 @@ namespace Lodur.Body.Ymir
         /// <summary>World lane index of a joint, by plan joint ordinal.</summary>
         public int JointLane(int joint) => _jointLane[joint];
 
-        /// <summary>Body and joint capacity a world needs to hold one ragdoll of <paramref name="plan"/> (plus whatever else the caller adds).</summary>
-        public static (int Bodies, int Joints) Needs(BodyPlan plan) => (plan.Parts.Count, plan.Joints.Count);
+        /// <summary>
+        /// Body and joint capacity a world needs to hold one ragdoll of <paramref name="plan"/> (plus whatever else the caller adds), and the sensor
+        /// capacity: a world with a particle system must hold Sensors sensor lanes (a world without one needs none).
+        /// </summary>
+        public static (int Bodies, int Joints, int Sensors) Needs(BodyPlan plan) => (plan.Parts.Count, plan.Joints.Count, plan.AirwayOpenings.Count);
 
         /// <summary>Builds <paramref name="plan"/> at <paramref name="origin"/> (x, z used). Stable ids are firstStableId + part ordinal.</summary>
         public static Ragdoll Build(Box3DSoaWorld world, BodyPlan plan, (float X, float Z) origin, ulong firstStableId)
@@ -74,6 +81,21 @@ namespace Lodur.Body.Ymir
                 r._jointLane[j] = world.AddJoint(kind, r._bodyLane[d.Parent], r._bodyLane[d.Child],
                     (ox + d.Anchor.X, d.Anchor.Y, oz + d.Anchor.Z), d.Axis, limit: true, lower: d.Lower, upper: d.Upper, coneAngle: d.Cone);
                 r._gains[j] = d.Gains;
+            }
+
+            if (plan.AirwayOpenings.Count > 0 && world.View.ParticleCapacity > 0)
+            {
+                // Ymir refuses the whole batch when it lacks lanes: a particle world that cannot hold the airway fails here, never silently.
+                var sensors = new (int Body, (float X, float Y, float Z) Point, float Radius)[plan.AirwayOpenings.Count];
+                for (var k = 0; k < sensors.Length; k++)
+                {
+                    var a = plan.AirwayOpenings[k];
+                    sensors[k] = (r._bodyLane[a.Part], a.Offset, a.Radius);
+                }
+
+                var handles = new Box3DSoaConstraintHandle[sensors.Length];
+                world.CreateSensors(sensors, handles);
+                for (var k = 0; k < handles.Length; k++) r._sensorLane[k] = handles[k].Lane;
             }
 
             return r;
@@ -130,6 +152,24 @@ namespace Lodur.Body.Ymir
                 x[s] = v.PositionX[i] + rx;
                 y[s] = v.PositionY[i] + ry;
                 z[s] = v.PositionZ[i] + rz;
+            }
+        }
+
+        /// <summary>
+        /// Writes, per plan airway opening, the end-of-step volume (m^3) of live fluid and of settled (wet patch) liquid inside its sphere.
+        /// Zeros in a world with no particle system. Allocates nothing.
+        /// </summary>
+        public void ReadAirway(Span<float> live, Span<float> pooled)
+        {
+            var n = _sensorLane.Length;
+            if (live.Length != n || pooled.Length != n) throw new ArgumentException($"live and pooled need {n} entries, one per airway opening.");
+
+            var v = _world.View;
+            for (var k = 0; k < n; k++)
+            {
+                var lane = _sensorLane[k];
+                live[k] = lane < 0 ? 0f : v.SensorLiquidVolume[lane];
+                pooled[k] = lane < 0 ? 0f : v.SensorWetVolume[lane];
             }
         }
     }

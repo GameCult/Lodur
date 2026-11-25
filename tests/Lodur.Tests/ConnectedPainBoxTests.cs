@@ -30,7 +30,7 @@ internal sealed class ConnectedPainBox : IDisposable
 
     public ConnectedPainBox(ulong seed, HoldParameters? hold = null, DriveParameters? driveTunables = null)
     {
-        var (bodies, joints) = Ragdoll.Needs(Plan);
+        var (bodies, joints, _) = Ragdoll.Needs(Plan);
         X = new float[Plan.SensePoints.Count]; Y = new float[Plan.SensePoints.Count]; Z = new float[Plan.SensePoints.Count];
         Strength = new float[Plan.Joints.Count];
         Target = new Quat[Plan.Joints.Count];

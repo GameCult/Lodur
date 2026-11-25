@@ -39,9 +39,10 @@ public sealed class QuadrupedPlanTests
     {
         var humanoidPlan = BodyPlans.Humanoid();
         var quadPlan = Quadruped();
-        var (hb, hj) = Ragdoll.Needs(humanoidPlan);
-        var (qb, qj) = Ragdoll.Needs(quadPlan);
-        Assert.Equal((6, 5), (qb, qj));
+        var (hb, hj, hs) = Ragdoll.Needs(humanoidPlan);
+        var (qb, qj, qs) = Ragdoll.Needs(quadPlan);
+        Assert.Equal((6, 5, 0), (qb, qj, qs));
+        Assert.Equal(2, hs);
         using var world = new Box3DSoaWorld(capacity: hb + qb + 1, jointCapacity: hj + qj);
         world.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
         var human = Ragdoll.Build(world, humanoidPlan, (0f, 0f), firstStableId: 100);
@@ -108,7 +109,7 @@ public sealed class QuadrupedPlanTests
         };
         var joints = new[] { new JointDef("J", Side.Center, JointKind.Spherical, 0, 1, (0f, 1.2f, 0f), (0f, 1f, 0f), -1f, 1f, 0.5f, new MuscleGains(1f, 1f, 1f, 1f)) };
         var plan = new BodyPlan(parts, joints, new[] { new SensePointDef("Probe", Side.Center, 0, (0.5f, 0.2f, 0.1f)) });
-        var (bodies, jointCount) = Ragdoll.Needs(plan);
+        var (bodies, jointCount, _) = Ragdoll.Needs(plan);
         using var world = new Box3DSoaWorld(capacity: bodies, jointCapacity: jointCount);
         var ragdoll = Ragdoll.Build(world, plan, (3f, 0f), firstStableId: 1);
 
