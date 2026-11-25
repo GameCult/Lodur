@@ -59,13 +59,57 @@ scratch project `imag-goals/probe` (not committed); humanoid, 120 Hz, 4 substeps
     `BodyPlans.cs`, `Ragdoll.cs`. `brain-goal-targets` touches `Actor.cs` only at 36-40, 126-129 and 169-194;
     `lodur-ik-goals` touches none of these files.
 
+Pass `goal-planner-map`, Lodur `997b1fe`, 2026-11-25, after `lodur:ruling:bds-intelligence-is-planning-depth`.
+Probe: a scratch C# replica (not committed), net10 Release on the workstation, 41 rounds of 200 calls in shuffled
+order per round, paired medians against a utility-only Select in the same round.
+
+13. **Planner cost (probe).** World: 16 percept slots (the `Perception` default capacity), 48 grounded verbs (go to
+    each slot, grab and drop four portable things, unlock with either key on either door, open, cut the strap,
+    switch off, eat, two filler verbs on each of eight other things), facts as a 128-bit set; Fella starts strapped
+    down with a knife in reach. Six planned wants per Select (open either door, 8 steps; pain off, 4; fed, 6; hold
+    the knife, 1; a filler, 5). Iterative-deepening regression to the depth limit, plus the utility pass over six
+    goals by 16 slots. Paired median extra cost per Select over utility alone (3.75 us):
+
+    | Depth | Regressive (F.E.A.R.) | Forward | Wants planned | Regressive nodes |
+    |---|---|---|---|---|
+    | 1 | 0.47 us | 0.59 us | 1/6 | 18 |
+    | 2 | 1.33 us | 1.56 us | 1/6 | 41 |
+    | 3 | 3.30 us | 4.06 us | 1/6 | 97 |
+    | 4 | 8.52 us | 16.07 us | 2/6 | 244 |
+
+    Nodes, untimed, beyond 4: 516, 1118, 2744, 5860 at depths 5 to 8 (all six wants planned at 8); forward search
+    visits 15035 at depth 5. Regression grows about 2.2x a level, forward about 10x. At depth 4 the planner costs
+    about 1 ms of CPU per second per puppet at 120 Hz, so it can run every Select: no planning cadence, no plan cache.
+14. **Where depth bites.** In the probe world a depth-3 Fella plans nothing but grabbing the knife; depth 4 finds
+    "grab knife, cut strap, go to switch, switch off"; the door needs 8. Depth is visible in play exactly as the
+    ruling wants: the same room, the same wants, a different number of things he can work out.
+15. **What exists to plan over.** Percepts carry id, kind, position, salience and age (`Perception.cs:111-131`);
+    nothing carries a fact about the thing (open, locked, on). Interactions do not exist (follow-up
+    `lodur-interactions`); a verb today has neither preconditions nor effects.
+
 ## Prior art (research pass `goal-ai-prior-art`)
 
 - The Sims: needs-based utility; objects advertise what they offer, so the data lives on the object and new
   objects need no character code. Fits "interact with objects in various ways" and `sandbox-is-content`.
 - F.E.A.R. (Orkin, GDC 2006): three states (Goto, Animate, UseSmartObject) plus a STRIPS-like A* planner over
-  actions. The three states are the motor vocabulary we need; the planner is not (puppets do not plan
-  multi-step tactics, and planners are hard to author and to read).
+  actions. The three states are the motor vocabulary we need. The planner was rejected in the first pass and is
+  taken now (pass `goal-planner-map`): its depth is plan length, which is what the intelligence ruling names.
+  Read from the paper's text: the world state is a fixed array of variables, effects and preconditions are
+  entries in it, search regresses from the goal, and **target and weapon selection run outside the planner**,
+  which reasons about the one target in focus. That is the split this map keeps: utility picks (goal, target),
+  the planner finds how.
+- HTN (Killzone 2 bots, SHOP-like; Horizon's Decima planner, which backtracks over preconditions as Prolog does):
+  depth there is the decomposition depth of authored methods. Capping it does not make a duller character, it
+  truncates a method into a broken one; a dim NPC is one with fewer methods, which is authoring, not a stat.
+  No published cost figures (Guerrilla's pages give none).
+- The Sims: objects advertise and selection is one step; no lookahead (Forbus's lecture notes mention only
+  routing A*). Wright said the early autonomy was too good and Sims were made dumber for play: the precedent for
+  intelligence as a tunable limit rather than a fixed competence.
+- MCTS (Total War: Rome II campaign AI, Champandard 2014): depth is rollout length and iterations, it needs a
+  forward simulator of the world, and it is stochastic per decision; built for turn-based campaigns.
+- Dave Mark (gamedev.net) on GOAP: long plans in a dynamic world are invalidated each think and replanned
+  whole. Fella's plans are short (the depth cap) and replanning is the measured 0.5-8.5 us, so the cost he
+  names is paid and affordable.
 - RimWorld: a priority think tree picks a job; a job driver runs a fixed list of toils (go to, reserve, wait,
   interact). The tree is what `Brain` already is (priority plus conditions); toils are the shape of an
   interaction.
@@ -94,6 +138,31 @@ owner (physiology and substances, `lodur-phantom-perception`) is the only writer
 with a commitment bonus on the current pair. Conditions stay eligibility gates. A goal with no target scores
 its Priority alone, so OfficeBrain and ChamberBrain select exactly as now.
 
+**The planner (layer 4, between selection and the motor layers).** A goal may name a want: a fact about its
+target (open, off, held) or about himself (free, fed). Objects advertise verbs (BDS content, keyed by kind);
+each verb carries preconditions and effects as facts over the acting slot, a second slot, or himself, plus the
+toil step list that performs it. An emitter carries the thing's facts as the game sees them, and the percept
+remembers the facts as last sensed, so a remembered door is still locked to him after it was opened out of
+sight. Lodur never interprets a fact key, as it never interprets a kind.
+
+Search is regressive and depth-first with iterative deepening, as F.E.A.R.'s, over verbs grounded on the
+percept slots, to a depth limit that is the intelligence stat; it returns the shallowest plan, ties to the
+lowest verb order, and allocates nothing. Selection stays utility (`brain-goal-targets`): a (goal, target) pair
+whose goal has a want is admitted only if a plan of length at most the depth exists, and is scored with one
+more consideration on the plan's length. The plan is derived state on the Actor, recomputed each Select from
+current percepts (fact 13 says it can be); the pair's commitment keeps it stable. A plan step is a verb on a
+percept, and a phantom percept advertises as its kind does: a clever Fella plans through a hallucinated door
+and fails at it as a dim one fails at a real one. Intelligence 0 is the Fella of `brain-goal-targets`: no
+plans, only goals with direct behaviours. What a goal with a want and no plan within depth does is
+`lodur:question:bds-unplannable-goal` (Deru).
+
+**Mind stats.** Four sim stats per `lodur:ruling:bds-intelligence-is-planning-depth`, each derived each step as
+a physiology capacity is (base from the character content, then the offsets and factors of live afflictions,
+so a potion is an affliction whose effects target a stat): intelligence (planner depth, rounded down),
+quickness (scales the deliberate latency and the dwell), judgment (temperature of a seeded softmax over pair
+scores; perfect judgment is the argmax of `brain-goal-targets`), memory (percept memory seconds). Player-facing
+stats, if fewer, map onto these four and own nothing.
+
 **Motor layers (layer 4 to 5).** A goal's behaviour becomes a set of voluntary layers, each weighted by will:
 pose (exists), look (head IK at the target), reach (arm IK to the target), ward off (arms between head and
 target), lean or recoil (pose blend by the target's side), and, once the body can stand, locomotion (a desired
@@ -119,10 +188,16 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 - Owner of what the puppet perceives: `Perception` (the game supplies emitters; Lodur decides what is sensed
   and remembered). Owner of what is real to him: the same; phantom-ness is not an input the Brain reads.
 - Owner of which goal and which target: `Brain` data, committed by the `Actor`.
+- Owner of how a goal is reached: the planner, reading percept facts and advertised verbs to the depth the
+  intelligence stat gives it. The plan is derived, never stored across Selects; nothing outside the Actor writes it.
+- Owner of the four mind stats' current values: physiology, from character base and live afflictions. Brain,
+  planner and Perception read them; a potion, a session or BDS never writes a depth, a latency or a memory time.
 - Owner of motion: the will mix over voluntary layers; reflexes act against it.
 - Forbidden writers: the game writing a phantom (top-bit id), a Brain reading phantom-ness, BDS setting a goal
-  or target from outside, any layer writing a joint or force (`body-one-interface`), a kinematic root move.
-- Derived: salience, the target slot, the thought-bubble type (from the phantoms in memory), desired velocity.
+  or target from outside, any layer writing a joint or force (`body-one-interface`), a kinematic root move,
+  the planner reading phantom-ness or a kind's meaning, BDS handing Lodur a plan or a depth.
+- Derived: salience, the target slot, the thought-bubble type (from the phantoms in memory), desired velocity,
+  the plan, the mind stats.
 - Shared paths: a phantom and a real thing go through the same `Sense`; a scenario Brain and a sandbox Brain
   are the same data; a player-placed lure and an arena's lure are the same object content.
 
@@ -132,6 +207,7 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 |---|---|---|---|---|---|
 | 1 | `lodur-percepts` | Lodur | emitter id and kind, percept memory, phantom id bit | none | S, specced |
 | 2 | `brain-goal-targets` | Lodur | target filters, (goal, percept) utility, commitment | 1 | M |
+| 2b | `lodur-goal-planner` | Lodur | wants, percept facts, verbs with preconditions and effects, depth-limited regressive planner, plan on the Actor | 2 | M |
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
 | 3b | `lodur-reach-tracking` | Lodur | reach under gravity: feedforward or a damped error loop | 3 | S-M |
 | 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off, recoil, fetal and stare-at-hands as layers; seated Fella demo | 2, 3 | M |
@@ -140,12 +216,14 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 7 | `lodur-stand` | Lodur + BDS | standing puppet scene, stool weld dropped | 6 | S |
 | 8 | `lodur-walk-gait` | Lodur | Rosen walk, leg IK | 3, 7 | M |
 | 9 | `lodur-steering` | Lodur | approach, avoid, arrive into desired velocity | 2, 8 | M |
-| 10 | `lodur-grip`, then `lodur-interactions` | Lodur + BDS | advertised verbs as step lists | 9, Q `bds-sandbox-lures` | M each |
-| 11 | `lodur-intelligence` | Lodur | what intelligence scales | 2, Q `bds-intelligence-in-goal-ai` | S |
+| 10 | `lodur-grip`, then `lodur-interaction-steps` | Lodur + BDS | a verb's toil steps run the plan's current step | 2b, 9, Q `bds-sandbox-lures` | M each |
+| 11 | `lodur-mind-stats` | Lodur | intelligence, quickness, judgment, memory as derived stats; potions drive them | 2b, `lodur-physiology-core` | S-M |
 
 Cut 1 is `lodur:cut_spec:cut-lodur-percepts.r1` (landed). Cuts 2 and 3 are
 `lodur:cut_spec:cut-brain-goal-targets.r1` and `lodur:cut_spec:cut-lodur-ik-goals.r1`; they touch disjoint files.
-The rest are follow-ups.
+The rest are follow-ups. `brain-goal-targets.r1` stands unchanged under the planner: its (goal, target) pair is the
+planner's unit, F.E.A.R.'s split of target selection from planning; cut 2b adds one admission gate and one
+consideration input to its Select.
 
 **IK rationale (pass `goal-targets-ik-map`, research `ik-prior-art`).** IK is a producer of joint targets in
 Lodur.Core, as Final IK feeds PuppetMaster's target pose, not a solver in the binding: the binding stays the
@@ -158,9 +236,16 @@ up is an authored elbow direction. Reach under gravity lands short by PD sag (fa
 and a retarget inside the goal waits the deliberate latency but not the dwell, held only by the commitment
 multiplier. No `TargetChanged` event: nothing reads one.
 
-## What intelligence changes
+**Planner rationale (pass `goal-planner-map`).** The ruling makes intelligence the lookahead, and utility
+selection has none, so a planner exists. Regression over verbs (F.E.A.R.) is taken because its depth is plan
+length, the ruling's own words, and because it visits about a tenth of forward search's nodes at depth 4
+(fact 13). HTN is not taken: its depth is authored decomposition, so lowering it breaks methods rather than
+dulling the puppet. MCTS is not taken: it needs a forward simulator and is stochastic per decision. What this
+gives up: verbs now need preconditions and effects authored as facts (the cost the first pass named), a failed
+plan has to be read by a debug view of the plan, and facts on emitters widen the game's interface to Lodur by
+one field.
 
-Open as `lodur:question:bds-intelligence-in-goal-ai`. Against this AI, intelligence can scale three
-things: quickness (deliberate latency and dwell), judgment (how sharply selection prefers the best pair; a dim
-puppet picks among good options at random, as the Sims do), and memory (how long an unsensed thing stays
-known). Recommended all three from one scalar.
+## Mind stats
+
+`lodur:ruling:bds-intelligence-is-planning-depth` answers the withdrawn `bds-intelligence-in-goal-ai`: four
+stats, not one scalar. Follow-up `lodur-mind-stats` holds them (see Target shape).
