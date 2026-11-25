@@ -57,15 +57,45 @@ namespace Lodur
         private long _rampTicks = -1;
         private double _rampGain0;
         private double _rampArousal0;
+        // The orient layers' solvers (null when no goal has a layer) and the arm the Nearer mode holds, set when a (goal, target) pair commits.
+        private readonly OrientRig? _rig;
+        private readonly bool _layered;
+        private Side _arm = Side.Right;
 
         public Actor(
             double tickSeconds, int regionCount,
             NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, Brain brain,
             NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null, Physiology? physiology = null,
-            WithdrawalParameters? breath = null)
+            WithdrawalParameters? breath = null, BodyPlan? body = null)
         {
             brain.Validate();
             drive.Validate();
+            Body = body;
+            foreach (var goal in brain.Goals)
+            {
+                if (!goal.Behaviour.HasLayers)
+                {
+                    continue;
+                }
+
+                if (body == null)
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: a behaviour with orient layers needs the Actor's BodyPlan.");
+                }
+
+                if (goal.Behaviour.MuscleCount != body.Joints.Count)
+                {
+                    throw new ArgumentException($"Goal {goal.Id}: a behaviour with orient layers needs one muscle per joint of the body ({body.Joints.Count}), not {goal.Behaviour.MuscleCount}.");
+                }
+
+                _layered = true;
+            }
+
+            if (_layered)
+            {
+                _rig = new OrientRig(body!, brain);
+            }
+
             if (physiology != null && !physiology.TryBind())
             {
                 throw new ArgumentException("this physiology is already bound to an actor; one actor steps one physiology.");
@@ -119,6 +149,9 @@ namespace Lodur
         }
 
         public int RegionCount => _reflexes.Length;
+
+        /// <summary>The body the orient layers solve against; null when the actor was built without one.</summary>
+        public BodyPlan? Body { get; }
 
         /// <summary>Ticks run so far.</summary>
         public long TickCount => _tick;
@@ -187,12 +220,19 @@ namespace Lodur
         /// Runs one physics step's worth of nervous system. The point spans hold one entry per region; the strengths
         /// and targets spans one entry per muscle, written for the body to follow. The emitters are the game's point
         /// sources, sensed at the sense region's point. The airway is what the caller finds at the body's airway openings; nothing by default.
+        /// The parts are the body's part poses (one per plan part), read when the goal in force has orient layers and ignored otherwise.
         /// </summary>
         public TickEvents Tick(
             ReadOnlySpan<float> regionX, ReadOnlySpan<float> regionY, ReadOnlySpan<float> regionZ,
             ReadOnlySpan<BoxStimulus> sources, Span<float> strengths, Span<Quat> targets,
-            ReadOnlySpan<Emitter> emitters = default, in AirwaySample airway = default)
+            ReadOnlySpan<Emitter> emitters = default, in AirwaySample airway = default, ReadOnlySpan<PartPose> parts = default)
         {
+            // The goal that will write this tick: a decision due now commits before the behaviour runs, and one made now cannot (the latency is a tick at least).
+            if (_layered && _brain.Goals[_pending >= 0 && _tick == _switchTick ? _pending : _goal].Behaviour.HasLayers && parts.Length != Body!.Parts.Count)
+            {
+                throw new ArgumentException($"parts needs one pose per part of the body ({Body.Parts.Count}).");
+            }
+
             var events = TickEvents.None;
             if (_physiology != null)
             {
@@ -293,6 +333,15 @@ namespace Lodur
                 _goal = _pending;
                 _target = _pendingTarget;
                 _pending = -1;
+                if (_layered && _brain.Goals[_goal].Behaviour.Arms is { Side: ArmSide.Nearer } && _target != 0UL)
+                {
+                    var committed = Target;
+                    if (committed.Id != 0UL)
+                    {
+                        _arm = _rig!.NearerArm(parts, committed);
+                    }
+                }
+
                 if (changed)
                 {
                     _goalSince = _tick;
@@ -326,7 +375,16 @@ namespace Lodur
             // Every voluntary layer is held by will, in contest with the reflex; an involuntary one (the onset of a goal) is not.
             var secondsInGoal = (_tick - _goalSince) * _dt;
             var weight = _tick - _goalSince >= _onset[_goal] ? Math.Pow(_drive.Will, _driveP.WillCurve) : 1.0;
-            _brain.Goals[_goal].Behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets);
+            var behaviour = _brain.Goals[_goal].Behaviour;
+            if (behaviour.HasLayers)
+            {
+                behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets, new OrientInput(_rig!, parts, Target, _arm));
+            }
+            else
+            {
+                behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets);
+            }
+
             if (_physiology != null)
             {
                 // The only scaling of strength: each muscle (plan joint m) is held to its ceiling.

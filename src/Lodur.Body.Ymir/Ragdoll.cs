@@ -155,6 +155,23 @@ namespace Lodur.Body.Ymir
             }
         }
 
+        /// <summary>Writes each plan part's world rotation and centre into the caller's span, one entry per part, for the Actor's orient layers. Allocates nothing.</summary>
+        public void ReadPartPoses(Span<PartPose> poses)
+        {
+            var count = Plan.Parts.Count;
+            if (poses.Length != count)
+            {
+                throw new ArgumentException($"poses needs {count} entries, one per part.");
+            }
+
+            var v = _world.View;
+            for (var p = 0; p < count; p++)
+            {
+                var i = _bodyLane[p];
+                poses[p] = new PartPose(new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i]), v.PositionX[i], v.PositionY[i], v.PositionZ[i]);
+            }
+        }
+
         /// <summary>
         /// Writes, per plan airway opening, the end-of-step volume (m^3) of live fluid and of settled (wet patch) liquid inside its sphere.
         /// Zeros in a world with no particle system. Allocates nothing.

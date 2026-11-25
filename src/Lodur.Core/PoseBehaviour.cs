@@ -79,6 +79,18 @@ namespace Lodur
 
         public HoldParameters Hold { get; init; } = new HoldParameters();
 
+        /// <summary>Aims the neck at the committed target. Null: no layer. Layers need a BodyPlan on the Actor.</summary>
+        public LookLayer? Look { get; init; }
+
+        /// <summary>Drives one or both arms by the arm solver: reach the target, ward it off, or present the wrists. Null: no layer.</summary>
+        public ArmLayer? Arms { get; init; }
+
+        /// <summary>Shrinks the pose from the target by its bearing and proximity. Null: no layer.</summary>
+        public RecoilLayer? Recoil { get; init; }
+
+        /// <summary>Whether any orient layer is present. Such a behaviour needs the Actor to hold a <see cref="BodyPlan"/> and be given part poses each tick.</summary>
+        public bool HasLayers => Look != null || Arms != null || Recoil != null;
+
         public int MuscleCount => _keys.Length == 0 ? 0 : _keys[0].Length;
 
         internal void Validate(string goal)
@@ -105,6 +117,10 @@ namespace Lodur
             {
                 throw new ArgumentException($"Goal {goal}: SecondsPerKey must be positive and finite.");
             }
+
+            Look?.Validate(goal);
+            Arms?.Validate(goal);
+            Recoil?.Validate(goal, _keys[0].Length);
         }
 
         /// <summary>The blend toward the flinch pose: the leak and the shake, clamped to [0, 1]. <paramref name="seconds"/> is the Actor's absolute time.</summary>
@@ -114,13 +130,24 @@ namespace Lodur
             return Math.Min(Math.Max(w, 0.0), 1.0);
         }
 
+
         /// <summary>
         /// Writes one tick's strengths and targets. The strength is <see cref="HoldParameters.HoldStrength"/> scaled by the
         /// <paramref name="weight"/> in [0, 1] (the will that powers the layer, or 1 while it is involuntary) plus the leaked
         /// reflex, capped at 1: a reflex that gets past a failing will still moves the muscle. The target rule is
-        /// <see cref="Blend"/>, unchanged.
+        /// <see cref="Blend"/>, unchanged. A behaviour with orient layers needs the Actor's part poses and refuses this overload.
         /// </summary>
         public void Write(double weight, double leak, double strain, double seconds, double secondsInGoal, Span<float> strengths, Span<Quat> targets)
+        {
+            Write(weight, leak, strain, seconds, secondsInGoal, strengths, targets, default);
+        }
+
+        /// <summary>
+        /// The same, with the orient layers composed between the keys and the flinch: the base key pose, then recoil, look and the arms (each a
+        /// blend toward its solution), then the flinch blend over every muscle. Layers write joint targets only; the strength line is the pose rule's.
+        /// With no layers, the arithmetic is the key loop's, operation for operation.
+        /// </summary>
+        internal void Write(double weight, double leak, double strain, double seconds, double secondsInGoal, Span<float> strengths, Span<Quat> targets, in OrientInput orient)
         {
             var count = MuscleCount;
             if (strengths.Length != count || targets.Length != count)
@@ -131,6 +158,12 @@ namespace Lodur
             if (!(weight >= 0.0 && weight <= 1.0))
             {
                 throw new ArgumentOutOfRangeException(nameof(weight), "The weight must be in [0, 1].");
+            }
+
+            var layered = HasLayers;
+            if (layered && orient.Rig == null)
+            {
+                throw new ArgumentException("A behaviour with orient layers needs the Actor's orient input.");
             }
 
             var w = (float)Blend(leak, strain, seconds);
@@ -157,7 +190,17 @@ namespace Lodur
                 }
 
                 strengths[m] = strength;
-                targets[m] = Quat.Nlerp(a, _flinch[m], w);
+                targets[m] = a;
+            }
+
+            if (layered)
+            {
+                orient.Rig!.Compose(this, orient, targets);
+            }
+
+            for (var m = 0; m < count; m++)
+            {
+                targets[m] = Quat.Nlerp(targets[m], _flinch[m], w);
             }
         }
     }
