@@ -21,10 +21,11 @@ public sealed class IkReachTests
 
     /// <summary>
     /// Wrist error bound at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 2.98 cm over the three free-floating targets
-    /// (probe 3.0, 2.3, 1.0 cm), and the least claimed mutant, 5.58 cm (the joint frame applied the wrong way round): separation 1.87, bound under the 5 cm cap.
-    /// A flipped elbow flex reads 33 cm. Twist is not this metric's mutant (the arm tracks twist weakly); the Core twist test claims it.
+    /// (probe 3.0, 2.3, 1.0 cm), and the least claimed mutant, 4.78 cm (the parent rotation conjugate dropped in the creation-frame transform): margin 1.27 each side.
+    /// Also killed: swing order flipped, 5.22 cm; the joint frame applied the wrong way round, 5.58 cm. A flipped elbow flex reads 33 cm.
+    /// Twist is not this metric's mutant (the arm tracks twist weakly); the Core twist test claims it.
     /// </summary>
-    private const float FreeBound = 0.0408f;
+    private const float FreeBound = 0.0377f;
 
     /// <summary>Runs the right arm toward shoulder + offset for four seconds and returns the wrist error, the final state hash and the torso drift.</summary>
     private static (float Error, ulong Hash) Reach((float X, float Y, float Z) offset, float gravity, bool weldPelvis)
