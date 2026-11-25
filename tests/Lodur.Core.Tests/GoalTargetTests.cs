@@ -219,6 +219,124 @@ public sealed class GoalTargetTests
         Assert.True(a.Drive.Resolve < resolve, "EntryResolve must not be applied again by a retarget: resolve keeps draining");
     }
 
+    private static Emitter AtXyz(ulong id, float x, float y, float z, double intensity = 1.0) =>
+        new(Channel.Audio, x, y, z, 40f, intensity, id, Thing);
+
+    private static Perception HearingAt(params Emitter[] emitters)
+    {
+        var p = Ears(8);
+        p.Sense(Zero, Zero, Zero, NoBoxes, emitters, 1.0);
+        return p;
+    }
+
+    private static ulong Nearest(Perception p, float ox, float oy, float oz)
+    {
+        var brain = new Brain { Goals = new[] { Goal("go", 1.0, Kinds(Thing), new[] { Nearer(60.0) }) } };
+        return brain.Select(default, p, ox, oy, oz, default).Target;
+    }
+
+    [Fact]
+    public void Distance_is_euclidean_over_all_three_axes_from_the_observer_point()
+    {
+        // Each pair ranks differently under a dropped axis, a Manhattan sum, or a mixed-up observer coordinate.
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 2f, 0f, 0f), AtXyz(2, 1f, 5f, 0f)), 0f, 0f, 0f));   // dy matters
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 2f, 0f, 0f), AtXyz(2, 1f, 0f, 5f)), 0f, 0f, 0f));   // dz matters
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 0f, 2f, 0f), AtXyz(2, 5f, 1f, 0f)), 0f, 0f, 0f));   // dx matters
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 3f, 3f, 0f), AtXyz(2, 5f, 0f, 0f)), 0f, 0f, 0f));   // 4.24 < 5, though 6 > 5
+        // The observer is a point, each coordinate its own: swapping any two moves the answer.
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 6f, 3f, 0f), AtXyz(2, 3f, 1f, 0f)), 6f, 1f, 0f));   // x with y
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 6f, 0f, 3f), AtXyz(2, 3f, 0f, 1f)), 6f, 0f, 1f));   // x with z
+        Assert.Equal(1UL, Nearest(HearingAt(AtXyz(1, 0f, 6f, 3f), AtXyz(2, 0f, 3f, 1f)), 0f, 6f, 1f));   // y with z
+    }
+
+    [Fact]
+    public void A_percept_is_scored_by_its_age_and_by_every_consideration()
+    {
+        // Thing 1 (slot 0) falls silent while thing 2 keeps sounding: the fresher thing wins on a falling age curve.
+        var p = Ears(4, 5.0);
+        p.Sense(Zero, Zero, Zero, NoBoxes, new[] { At(1, 3f), At(2, 3f) }, 1.0);
+        for (var i = 0; i < 100; i++) p.Sense(Zero, Zero, Zero, NoBoxes, new[] { At(2, 3f) }, 1.0);
+        Assert.True(p.Percept(SlotOf(p, 1)).SecondsSinceSensed > 0.9);
+        var young = new Brain { Goals = new[] { Goal("go", 1.0, Kinds(Thing), new[] { new Consideration(ConsiderationInput.SecondsSinceSensed, 0.0, 5.0, 1.0, 0.0) }) } };
+        Assert.Equal(2UL, Pick(young, p, default).Target);
+        var stale = new Brain { Goals = new[] { Goal("go", 1.0, Kinds(Thing), new[] { new Consideration(ConsiderationInput.SecondsSinceSensed, 0.0, 5.0, 0.0, 1.0) }) } };
+        Assert.Equal(1UL, Pick(stale, p, default).Target);
+
+        // Two considerations multiply: the nearer thing is quiet, the farther loud; the second curve decides.
+        var mixed = Hearing(At(1, 2f, intensity: 0.05), At(2, 6f, intensity: 1.0));
+        Assert.Equal(1UL, Pick(new Brain { Goals = new[] { Goal("go", 1.0, Kinds(Thing), new[] { Nearer(10.0) }) } }, mixed, default).Target);
+        var both = new Brain { Goals = new[] { Goal("go", 1.0, Kinds(Thing), new[] { Nearer(10.0), new Consideration(ConsiderationInput.Salience, 0.0, 1.0, 0.0, 1.0) }) } };
+        Assert.Equal(2UL, Pick(both, mixed, default).Target);
+    }
+
+    [Fact]
+    public void A_filter_holds_several_kinds_and_a_free_slot_is_never_a_target_even_of_kind_zero()
+    {
+        var brain = new Brain { Goals = new[] { Goal("idle", 1.0), Goal("chase", 5.0, Kinds(Other, Thing)) } };
+        Assert.Equal(new Choice(1, 1), Pick(brain, Hearing(At(1, 2f, Thing)), default));
+        var rev = new Brain { Goals = new[] { Goal("idle", 1.0), Goal("chase", 5.0, Kinds(Thing, Other)) } };
+        Assert.Equal(new Choice(1, 1), Pick(rev, Hearing(At(1, 2f, Other)), default));
+
+        // Free slots read Kind 0 and Id 0; a filter naming kind 0 still finds nothing in them.
+        var zero = new Brain { Goals = new[] { Goal("idle", 1.0), Goal("chase", 5.0, Kinds(0u)) } };
+        Assert.Equal(new Choice(0, 0), Pick(zero, Ears(), new Choice(0, 0)));
+        Assert.Equal(new Choice(0, 0), Pick(zero, Hearing(At(1, 2f, Thing)), new Choice(0, 0)));
+    }
+
+    private static Actor HunterAt(Brain brain, int regions, int senseRegion) =>
+        new(Dt, regions, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), brain,
+            new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0, ConductionDelaySeconds = 0.0 }, senseRegion,
+            new PerceptParameters { Capacity = 4, MemorySeconds = 5.0 });
+
+    [Fact]
+    public void The_actor_measures_distance_from_the_sense_region_point()
+    {
+        var brain = new Brain { Goals = new[] { Goal("idle", 0.0), Goal("chase", 1.0, Kinds(Thing), new[] { Nearer(60.0) }) } };
+        var a = HunterAt(brain, 2, 1);
+        var x = new[] { 0f, 10f };
+        var y = new[] { 0f, 3f };
+        var z = new[] { 0f, 2f };
+        // Thing 1 is one unit from the sense region's point. Each of the others sits on the point a wrong reading would use:
+        // region 0, the point with y and z zeroed, and the point with x and y swapped.
+        var emitters = new[] { AtXyz(1, 11f, 3f, 2f), AtXyz(2, 0f, 0f, 0f), AtXyz(3, 10f, 0f, 0f), AtXyz(4, 3f, 10f, 2f) };
+        for (var i = 0; i < 40; i++) a.Tick(x, y, z, NoBoxes, new float[2], new Quat[2], emitters);
+        Assert.Equal(1UL, a.TargetId);
+    }
+
+    [Fact]
+    public void A_goal_without_a_target_clears_the_target_and_a_retarget_ignores_the_goals_dwell()
+    {
+        var brain = new Brain { Goals = new[] { Goal("idle", 0.0), Goal("chase", 1.0, Kinds(Thing), new[] { Nearer(30.0) }) } };
+        var a = Hunter(brain, memory: 0.2);
+        for (var i = 0; i < 40; i++) Tick(a, At(1, 5f));
+        Assert.Equal(1, a.GoalIndex);
+        Assert.Equal(1UL, a.TargetId);
+        // The thing is forgotten; only the untargeted goal has a pair, and it takes no target with it.
+        for (var i = 0; i < 80; i++) Tick(a);
+        Assert.Equal(0, a.GoalIndex);
+        Assert.Equal(0UL, a.TargetId);
+
+        // Within a long dwell, another thing in the same goal is taken a latency later all the same.
+        var held = new Brain
+        {
+            Goals = new[]
+            {
+                Goal("idle", 0.0),
+                new GoalSpec
+                {
+                    Id = "chase", Priority = 1.0, MinDwellSeconds = 5.0, Target = Kinds(Thing), Considerations = new[] { Nearer(30.0) },
+                    Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw },
+                },
+            },
+        };
+        var b = Hunter(held);
+        for (var i = 0; i < 40; i++) Tick(b, At(1, 5f), At(2, 9f));
+        Assert.Equal(1UL, b.TargetId);
+        for (var i = 0; i < 30; i++) Tick(b, At(1, 5f), At(2, 1f));
+        Assert.Equal(2UL, b.TargetId);
+        Assert.True(b.SecondsInGoal < 5.0);
+    }
+
     [Fact]
     public void A_forgotten_target_reads_id_zero_and_the_brain_reselects()
     {
