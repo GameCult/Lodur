@@ -388,6 +388,10 @@ namespace Lodur
                 if (_pId[s] != 0 && !_pSensed[s] && _pSince[s] > _memorySeconds)
                 {
                     _pId[s] = 0;
+                    _pKind[s] = 0;
+                    _pX[s] = 0f; _pY[s] = 0f; _pZ[s] = 0f;
+                    _pSalience[s] = 0.0;
+                    _pSince[s] = 0.0;
                 }
             }
 
@@ -484,6 +488,7 @@ namespace Lodur
                 _pSalience[slot] = salience;
             }
 
+            _pKind[slot] = e.Kind;
             _pSensed[slot] = true;
             _pSince[slot] = 0.0;
         }

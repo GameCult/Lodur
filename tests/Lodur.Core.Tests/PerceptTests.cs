@@ -40,6 +40,36 @@ public sealed class PerceptTests
     }
 
     [Fact]
+    public void A_remembered_id_sensed_with_a_new_kind_takes_the_new_kind()
+    {
+        var p = Make();
+        Sense(p, new[] { At(1, kind: 7) });
+        Sense(p, new[] { At(1, kind: 9) });
+        Assert.Equal(9u, p.Percept(SlotOf(p, 1)).Kind);
+    }
+
+    [Fact]
+    public void A_free_slot_is_all_zero_after_forgetting_and_an_anonymous_emitter_cannot_write_into_it()
+    {
+        var p = Make(capacity: 2, memory: 0.05);
+        Sense(p, new[] { At(1, x: 0.5f) });
+        for (var i = 0; i < 20; i++) Sense(p, Array.Empty<Emitter>());
+        Assert.Equal(0, Occupied(p));
+        for (var i = 0; i < 3; i++) Sense(p, new[] { At(0, x: 0.5f) });
+        for (var s = 0; s < p.PerceptCount; s++)
+        {
+            var c = p.Percept(s);
+            Assert.Equal(0UL, c.Id);
+            Assert.Equal(0u, c.Kind);
+            Assert.Equal(0f, c.X);
+            Assert.Equal(0f, c.Y);
+            Assert.Equal(0f, c.Z);
+            Assert.Equal(0.0, c.Salience);
+            Assert.Equal(0.0, c.SecondsSinceSensed);
+        }
+    }
+
+    [Fact]
     public void An_anonymous_emitter_loads_the_nerve_and_makes_no_percept()
     {
         var anonymous = Make();
