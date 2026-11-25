@@ -25,7 +25,7 @@ public sealed class PhysiologyPlansTests
     }
 
     [Fact]
-    public void The_brain_on_the_head_and_the_heart_on_the_torso_are_vital_and_a_skull_is_not()
+    public void The_brain_is_vital_the_heart_is_not_and_a_skull_is_not()
     {
         var head = Body.PartIndex("Head");
         var torso = Body.PartIndex("Torso");
@@ -38,7 +38,8 @@ public sealed class PhysiologyPlansTests
         var heart = Spawn();
         Assert.True(heart.Afflict(Cut, torso, heart.TissueIndex(torso, "Heart"), 16));
         heart.Step(0.01);
-        Assert.Equal(DeathCause.VitalTissue, heart.Cause);
+        Assert.False(heart.Dead);   // a stopped heart kills through brain oxygen and consciousness (ruling bds-heart-stop-stagger)
+        Assert.Equal(DeathCause.None, heart.Cause);
 
         var skull = Spawn();
         Assert.True(skull.Afflict(Bruise, head, skull.TissueIndex(head, "Skull"), 26));
@@ -49,7 +50,7 @@ public sealed class PhysiologyPlansTests
         var lung = Spawn();
         Assert.True(lung.Afflict(Bruise, torso, lung.TissueIndex(torso, "LungLeft"), 16));
         lung.Step(0.01);
-        Assert.False(lung.Dead);   // an organ with no vital flag yet; the airway cut gives lungs their function
+        Assert.False(lung.Dead);   // a lung carries Breathing, not a vital flag; one lost still breathes
     }
 
     [Fact]

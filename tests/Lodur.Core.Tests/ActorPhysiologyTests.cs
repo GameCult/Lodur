@@ -127,6 +127,30 @@ public sealed class ActorPhysiologyTests
     }
 
     [Fact]
+    public void The_actor_reports_its_last_ticks_strength_as_effort()
+    {
+        double Oxygen(float hold)
+        {
+            var brain = new Brain
+            {
+                Goals = new[] { new GoalSpec { Id = "g", Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = new HoldParameters { HoldStrength = hold } } } },
+            };
+            var p = Make3();
+            Assert.True(p.Afflict(Af("Choke"), 0, 0, 1e9));
+            var a = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), brain, physiology: p);
+            var s = new float[2];
+            var q = new Quat[2];
+            for (var i = 0; i < 3000; i++) Tick(a, 0.0, s, q);
+            Assert.False(p.Dead);
+            return p.BloodOxygen;
+        }
+
+        var strong = Oxygen(0.7f);
+        var idle = Oxygen(0.0f);
+        Assert.True(strong < idle, $"strong {strong}, idle {idle}");
+    }
+
+    [Fact]
     public void A_healthy_physiology_changes_nothing_bit_for_bit()
     {
         foreach (var seed in new ulong[] { 1, 2, 3 })
@@ -154,12 +178,14 @@ public sealed class ActorPhysiologyTests
     [Fact]
     public void A_tick_with_a_physiology_and_eight_bleeding_afflictions_allocates_nothing()
     {
-        var p = new Physiology(Body3(), Plan3(blood: new BloodDef(1000.0, 0.5, 1e-4)), 20);
+        var p = new Physiology(Body3(), Plan3(blood: new BloodDef(1000.0, 0.5, 1e-4), slots: 9, organism: new[] { Hypoxia }), 20);
         for (var i = 0; i < 4; i++)
         {
             Assert.True(p.Afflict(Af("Bleeder"), 1 + i % 2, 0, 0.5 + 0.1 * i));
             Assert.True(p.Afflict(Af("Clot"), 0, RootMuscle, 1.0));
         }
+
+        Assert.True(p.Afflict(Af("Choke"), 0, 0, 0.8));      // the gases run and the hypoxia curve reads, through the warm-up and into the measured ticks
 
         var a = Make(p);
         var s = new float[2];

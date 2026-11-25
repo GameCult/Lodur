@@ -35,6 +35,8 @@ internal static class PhysioFixtures
         Def("Staunch", 0, false, PhysiologyClock.Acute, Const(EffectTarget.Bleed, EffectOp.Offset, -1e-3)),
         Def("Fading", -0.1, false, PhysiologyClock.Acute, new Effect(EffectTarget.Bleed, EffectOp.Offset, EffectDriver.Severity, new[] { (0.0, 0.0), (1.0, 1e-5) })),
         Def("SlowBleeder", 0, false, PhysiologyClock.Slow, new Effect(EffectTarget.Bleed, EffectOp.Offset, EffectDriver.Severity, new[] { (0.0, 0.0), (1.0, 1e-3) })),
+        // A test smothering: ventilation is zero until it lifts, 40 s at severity 1.
+        Def("Choke", -1.0 / 40.0, false, PhysiologyClock.Acute, Const(EffectTarget.Breathing, EffectOp.Factor, 0.0)),
     };
 
     public static int Af(string label)
@@ -44,6 +46,12 @@ internal static class PhysioFixtures
     }
 
     public static BloodDef DefaultBlood => new(0.005, 0.5, 0.0);
+
+    /// <summary>The same literature-shaped placeholders as the humanoid's content.</summary>
+    public static RespirationDef DefaultRespiration => new(1.0, 0.002, 0.5, 4.0, 9.5);
+
+    /// <summary>The humanoid's hypoxia curve: brain oxygen to consciousness, flat 1 above 0.70.</summary>
+    public static Effect Hypoxia => new(EffectTarget.Consciousness, EffectOp.Factor, EffectDriver.BrainOxygen, new[] { (0.10, 0.0), (0.35, 0.1), (0.70, 1.0) });
 
     /// <summary>Root: brain (weight 1), heart (pumping 1, vital unless asked otherwise), a muscle; A and B: a muscle each. Every tissue has Hp 10.</summary>
     public static PhysiologyPlan Plan3(bool heartVital = true, BloodDef? blood = null, int slots = 8, IReadOnlyList<Effect>? organism = null, TissueDef[]? root = null, TissueDef[]? limbA = null)
@@ -57,7 +65,7 @@ internal static class PhysioFixtures
         var limb = new[] { new TissueDef("muscle", 10, 1, Motor: 1) };
         return new PhysiologyPlan(
             new[] { new PartTissuesDef("Root", Side.Center, stack), new PartTissuesDef("A", Side.Center, limbA ?? limb), new PartTissuesDef("B", Side.Center, limb) },
-            Defs, organism ?? Array.Empty<Effect>(), blood ?? DefaultBlood, slots);
+            Defs, organism ?? Array.Empty<Effect>(), blood ?? DefaultBlood, DefaultRespiration, slots);
     }
 
     public static Physiology Make(double slowScale = 20.0, bool heartVital = true, BloodDef? blood = null, int slots = 8, IReadOnlyList<Effect>? organism = null, TissueDef[]? root = null, TissueDef[]? limbA = null) =>

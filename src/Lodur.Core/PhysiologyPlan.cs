@@ -6,14 +6,20 @@ namespace Lodur
     /// <summary>The clock a process runs on: Acute on the caller's seconds, Slow on those times the session's slow scale (ruling bds-physiology-clock).</summary>
     public enum PhysiologyClock { Acute, Slow }
 
-    /// <summary>What an effect shapes. One mechanism reads each: capacities (Consciousness, BloodPumping), an affliction's bleed rate, a part's motor ceiling.</summary>
-    public enum EffectTarget { Consciousness, BloodPumping, Bleed, Motor }
+    /// <summary>
+    /// What an effect shapes. One mechanism reads each: capacities (Consciousness, BloodPumping, Breathing, the last read by gas exchange as
+    /// ventilation), an affliction's bleed rate, a part's motor ceiling. The three capacities come first and their order is the capacity index.
+    /// </summary>
+    public enum EffectTarget { Consciousness, BloodPumping, Breathing, Bleed, Motor }
 
     /// <summary>How an effect's value joins its target: summed into the offsets, or multiplied into the factors.</summary>
     public enum EffectOp { Offset, Factor }
 
-    /// <summary>What an effect's curve is read at: its affliction's severity or age (in its clock's seconds), or the organism's blood loss.</summary>
-    public enum EffectDriver { Severity, Age, BloodLoss }
+    /// <summary>
+    /// What an effect's curve is read at: its affliction's severity or age (in its clock's seconds), or an organism value as the step began:
+    /// the blood loss or the brain oxygen. Severity and Age belong to an affliction alone; BloodLoss and BrainOxygen index the organism's driver array.
+    /// </summary>
+    public enum EffectDriver { Severity, Age, BloodLoss, BrainOxygen }
 
     /// <summary>
     /// The material of a layer simulated as a particle sheet. <paramref name="Spacing"/> is the particle spacing in m. The compliances are
@@ -24,13 +30,13 @@ namespace Lodur
 
     /// <summary>
     /// One tissue layer of a part. <paramref name="Consciousness"/>, <paramref name="BloodPumping"/> and <paramref name="Motor"/> are
-    /// function weights, a closed set with one reader each: a capacity is the weighted mean integrity of the tissues that carry its weight.
+    /// function weights, a closed set with one reader each (<paramref name="Breathing"/> is the lungs' share of ventilation): a capacity is the weighted mean integrity of the tissues that carry its weight.
     /// A Vital tissue at integrity 0 kills. A stack is shells (<see cref="Thickness"/> above 0, in m) outside-in, then cores (Thickness 0:
     /// bone, organs, a muscle with no sheet); the cores fill what the shells leave of the part's shape. <see cref="Sheet"/> is the
     /// material of a shell simulated as a particle sheet; null means it is not.
     /// </summary>
     public readonly record struct TissueDef(
-        string Label, double Hp, double Vascularity, bool Vital = false, double Consciousness = 0.0, double BloodPumping = 0.0, double Motor = 0.0)
+        string Label, double Hp, double Vascularity, bool Vital = false, double Consciousness = 0.0, double BloodPumping = 0.0, double Motor = 0.0, double Breathing = 0.0)
     {
         public double Thickness { get; init; }
         public SheetDef? Sheet { get; init; }
@@ -41,6 +47,14 @@ namespace Lodur
 
     /// <summary>The blood: nominal volume in m^3, the lost fraction that kills, and the regrowth per slow second as a fraction of nominal.</summary>
     public readonly record struct BloodDef(double NominalVolume, double LethalLossFraction, double RegenPerSecond);
+
+    /// <summary>
+    /// The gases, all on the Acute clock (ruling bds-asphyxia-real-time): the blood oxygen store S refills at
+    /// <paramref name="UptakePerSecond"/> x ventilation x (1 - S) per second and is used at <paramref name="BasalUsePerSecond"/> x
+    /// (1 + <paramref name="ArousalUse"/> x arousal + <paramref name="EffortUse"/> x effort); the brain oxygen relaxes toward BloodPumping x S
+    /// with time constant <paramref name="BrainSeconds"/>. Both stores run 0..1.
+    /// </summary>
+    public readonly record struct RespirationDef(double UptakePerSecond, double BasalUsePerSecond, double ArousalUse, double EffortUse, double BrainSeconds);
 
     /// <summary>
     /// A piecewise-linear curve in its driver, clamped at the ends. An equal-x pair is a step: at that x the later value holds
@@ -77,8 +91,8 @@ namespace Lodur
     public readonly record struct AfflictionDef(string Label, PhysiologyClock Clock, double SeverityRate, bool Injures, IReadOnlyList<Effect> Effects);
 
     /// <summary>
-    /// Physiology as content: tissue stacks per body part, the afflictions that can be bound, the organism-wide effects of blood
-    /// loss, the blood and the size of the affliction table. Validated at construction; resolved against a <see cref="BodyPlan"/> by <see cref="Resolve"/>, the one (label, side) join, which <see cref="Physiology"/> and the sheet builder both call.
+    /// Physiology as content: tissue stacks per body part, the afflictions that can be bound, the organism-wide effects of the organism's blood
+    /// loss and brain oxygen, the blood, the respiration and the size of the affliction table. Validated at construction; resolved against a <see cref="BodyPlan"/> by <see cref="Resolve"/>, the one (label, side) join, which <see cref="Physiology"/> and the sheet builder both call.
     /// </summary>
     public sealed class PhysiologyPlan
     {
@@ -86,7 +100,7 @@ namespace Lodur
 
         public PhysiologyPlan(
             IReadOnlyList<PartTissuesDef> parts, IReadOnlyList<AfflictionDef> afflictions, IReadOnlyList<Effect> organismEffects,
-            BloodDef blood, int afflictionSlots)
+            BloodDef blood, RespirationDef respiration, int afflictionSlots)
         {
             var ownedParts = new List<PartTissuesDef>(parts.Count);
             foreach (var p in parts)
@@ -104,6 +118,7 @@ namespace Lodur
             Afflictions = ownedAfflictions.AsReadOnly();
             OrganismEffects = Own(organismEffects);
             Blood = blood;
+            Respiration = respiration;
             AfflictionSlots = afflictionSlots;
             Validate();
         }
@@ -112,6 +127,7 @@ namespace Lodur
         public IReadOnlyList<AfflictionDef> Afflictions { get; }
         public IReadOnlyList<Effect> OrganismEffects { get; }
         public BloodDef Blood { get; }
+        public RespirationDef Respiration { get; }
         public int AfflictionSlots { get; }
 
         public int AfflictionIndex(string label) =>
@@ -180,7 +196,7 @@ namespace Lodur
                     if (!seen.Add(t.Label)) throw new ArgumentException($"{where}: the label is not unique within the part.");
                     if (!(IsFinite(t.Hp) && t.Hp > 0.0)) throw new ArgumentException($"{where}: Hp is not finite and above 0.");
                     if (!(IsFinite(t.Vascularity) && t.Vascularity >= 0.0)) throw new ArgumentException($"{where}: vascularity is not finite and at least 0.");
-                    if (!(IsFinite(t.Consciousness) && t.Consciousness >= 0.0 && IsFinite(t.BloodPumping) && t.BloodPumping >= 0.0 && IsFinite(t.Motor) && t.Motor >= 0.0))
+                    if (!(IsFinite(t.Consciousness) && t.Consciousness >= 0.0 && IsFinite(t.BloodPumping) && t.BloodPumping >= 0.0 && IsFinite(t.Motor) && t.Motor >= 0.0 && IsFinite(t.Breathing) && t.Breathing >= 0.0))
                     {
                         throw new ArgumentException($"{where}: a function weight is not finite and at least 0.");
                     }
@@ -220,20 +236,28 @@ namespace Lodur
             foreach (var e in OrganismEffects)
             {
                 ValidateEffect(e, "an organism effect");
-                if (e.Target != EffectTarget.Consciousness && e.Target != EffectTarget.BloodPumping)
+                if (e.Target != EffectTarget.Consciousness && e.Target != EffectTarget.BloodPumping && e.Target != EffectTarget.Breathing)
                 {
-                    throw new ArgumentException("an organism effect targets only Consciousness or BloodPumping.");
+                    throw new ArgumentException("an organism effect targets only a capacity: Consciousness, BloodPumping or Breathing.");
                 }
 
-                if (e.Driver != EffectDriver.BloodLoss)
+                if (e.Driver == EffectDriver.Severity || e.Driver == EffectDriver.Age)
                 {
-                    throw new ArgumentException("an organism effect is driven only by BloodLoss.");
+                    throw new ArgumentException("an organism effect is not driven by Severity or Age: those belong to an affliction.");
                 }
             }
 
             if (!(IsFinite(Blood.NominalVolume) && Blood.NominalVolume > 0.0)) throw new ArgumentException("blood: the nominal volume is not finite and above 0.");
             if (!(Blood.LethalLossFraction > 0.0 && Blood.LethalLossFraction <= 1.0)) throw new ArgumentException("blood: the lethal loss fraction is not in (0, 1].");
             if (!(IsFinite(Blood.RegenPerSecond) && Blood.RegenPerSecond >= 0.0)) throw new ArgumentException("blood: the regrowth is not finite and at least 0.");
+            var r = Respiration;
+            if (!(IsFinite(r.UptakePerSecond) && r.UptakePerSecond >= 0.0 && IsFinite(r.BasalUsePerSecond) && r.BasalUsePerSecond >= 0.0
+                && IsFinite(r.ArousalUse) && r.ArousalUse >= 0.0 && IsFinite(r.EffortUse) && r.EffortUse >= 0.0))
+            {
+                throw new ArgumentException("respiration: a rate is not finite and at least 0.");
+            }
+
+            if (!(IsFinite(r.BrainSeconds) && r.BrainSeconds > 0.0)) throw new ArgumentException("respiration: BrainSeconds is not finite and above 0.");
             if (AfflictionSlots < 1) throw new ArgumentException("the affliction table needs at least one slot.");
         }
 

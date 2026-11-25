@@ -36,6 +36,8 @@ namespace Lodur
         private readonly WithdrawalReflex[] _reflexes;
         private readonly Physiology? _physiology;
         private bool _diedReported;
+        // The mean of the strengths written on the last tick, after the ceiling, 0..1: the exertion the physiology is told about.
+        private double _effort;
         private DriveState _drive = DriveState.Fresh;
         private long _tick;
         private int _goal;
@@ -187,7 +189,7 @@ namespace Lodur
                 // The physiology steps first, on the drive as the last tick left it, and its consciousness is the slot's only writer.
                 if (!_physiology.Dead)
                 {
-                    _physiology.Step(_dt);
+                    _physiology.Step(_dt, new PhysiologyInput(_drive.Arousal, _effort));
                     _drive.Consciousness = _physiology.Consciousness;
                 }
 
@@ -287,10 +289,15 @@ namespace Lodur
             if (_physiology != null)
             {
                 // The only scaling of strength: each muscle (plan joint m) is held to its ceiling.
+                var sum = 0.0;
                 for (var m = 0; m < strengths.Length; m++)
                 {
                     strengths[m] *= (float)_physiology.MotorCeiling(m);
+                    sum += strengths[m];
                 }
+
+                var mean = strengths.Length > 0 ? sum / strengths.Length : 0.0;
+                _effort = mean < 0.0 ? 0.0 : mean > 1.0 ? 1.0 : mean;
             }
 
             _tick++;

@@ -6,11 +6,14 @@ namespace Lodur
     /// <summary>Why a body died; the first rule that held at the end of the step that killed it (ruling bds-death).</summary>
     public enum DeathCause { None, VitalTissue, BloodLoss, Consciousness }
 
+    /// <summary>What the stepping Actor reports each step, each in [0, 1]: Arousal is the sensory load carried over time, Effort the mean strength it asked of the muscles. The default is rest.</summary>
+    public readonly record struct PhysiologyInput(double Arousal, double Effort);
+
     /// <summary>
-    /// The body's physiology: tissue integrity, bound afflictions, blood, the capacities they fold into, the motor ceiling and death.
+    /// The body's physiology: tissue integrity, bound afflictions, blood and its oxygen, the capacities they fold into, the motor ceiling and death.
     /// Harm enters only through <see cref="Afflict"/>; time through <see cref="Step"/>. Integrity is derived from the severities of the
     /// Injures afflictions bound to a tissue (part HP is never stored), and capacities, bleed and the motor ceiling are recomputed each step;
-    /// nobody writes them. Content owns every label and number (<see cref="PhysiologyPlan"/>). Everything is allocated in the constructor.
+    /// nobody writes them; the gases are integrated by Step and nobody writes those either. Content owns every label and number (<see cref="PhysiologyPlan"/>). Everything is allocated in the constructor.
     /// </summary>
     public sealed class Physiology
     {
@@ -25,8 +28,9 @@ namespace Lodur
         private readonly TissueDef[] _tissues;
         private readonly double[] _injury;
         private readonly double[] _integrity;
-        private readonly double _consciousnessWeight;
-        private readonly double _pumpingWeight;
+        private readonly double[] _capacityWeight;     // per capacity, indexed by EffectTarget (Consciousness, BloodPumping, Breathing)
+        private readonly RespirationDef _respiration;
+        private readonly double[] _drivers;             // the organism's driver values as the step began, indexed by EffectDriver
         private readonly double[] _motorWeight;         // per part
         private readonly int[] _slotDef;                // -1: free
         private readonly int[] _slotPart;
@@ -38,6 +42,9 @@ namespace Lodur
         private double _volume;
         private double _consciousness;
         private double _pumping = 1.0;
+        private double _breathing = 1.0;
+        private double _bloodOxygen = 1.0;
+        private double _brainOxygen = 1.0;
         private long _steps;
         private bool _bound;
 
@@ -49,7 +56,10 @@ namespace Lodur
             _nominal = plan.Blood.NominalVolume;
             _lethalLoss = plan.Blood.LethalLossFraction;
             _regen = plan.Blood.RegenPerSecond;
+            _respiration = plan.Respiration;
             _volume = _nominal;
+            _capacityWeight = new double[CapacityCount];
+            _drivers = new double[Enum.GetValues(typeof(EffectDriver)).Length];
 
             _defs = new AfflictionDef[plan.Afflictions.Count];
             for (var i = 0; i < _defs.Length; i++) _defs[i] = plan.Afflictions[i];
@@ -80,13 +90,14 @@ namespace Lodur
                     var t = stack[l];
                     _tissues[_partStart[p] + l] = t;
                     _integrity[_partStart[p] + l] = 1.0;
-                    _consciousnessWeight += t.Consciousness;
-                    _pumpingWeight += t.BloodPumping;
+                    _capacityWeight[(int)EffectTarget.Consciousness] += t.Consciousness;
+                    _capacityWeight[(int)EffectTarget.BloodPumping] += t.BloodPumping;
+                    _capacityWeight[(int)EffectTarget.Breathing] += t.Breathing;
                     _motorWeight[p] += t.Motor;
                 }
             }
 
-            if (!(_consciousnessWeight > 0.0)) throw new ArgumentException("no tissue carries consciousness.");
+            if (!(_capacityWeight[(int)EffectTarget.Consciousness] > 0.0)) throw new ArgumentException("no tissue carries consciousness.");
             _motor = new double[body.Joints.Count];
             for (var j = 0; j < _motor.Length; j++)
             {
@@ -131,6 +142,15 @@ namespace Lodur
 
         /// <summary>The heart's capacity to drive what bleeds, 0..1; 0 once dead.</summary>
         public double BloodPumping => Dead ? 0.0 : _pumping;
+
+        /// <summary>The lungs' capacity to ventilate, 0..1; 0 once dead. An empty Breathing weight reads 1, as BloodPumping does.</summary>
+        public double Breathing => Dead ? 0.0 : _breathing;
+
+        /// <summary>The blood's oxygen store, 0..1, starting full; integrated by <see cref="Step"/>.</summary>
+        public double BloodOxygen => _bloodOxygen;
+
+        /// <summary>The brain's oxygen, 0..1, starting full: it relaxes toward what the pumping delivers from the blood store. Content turns it into consciousness.</summary>
+        public double BrainOxygen => _brainOxygen;
 
         /// <summary>The tissue's remaining fraction, 0..1, as of the last step.</summary>
         public double Integrity(int part, int layer) => _integrity[Flat(part, layer)];
@@ -199,10 +219,16 @@ namespace Lodur
 
         /// <summary>
         /// Advances by dt seconds of the caller's clock: afflictions age and change severity (healed ones free their slot), integrity,
-        /// capacities, bleeding and regrowth follow, then death is judged once. A dead physiology does not change.
+        /// capacities, bleeding and regrowth follow, then the gases on the Acute clock, the motor ceilings, and death is judged once.
+        /// A dead physiology does not change. A non-finite input, or one outside [0, 1], is refused before anything changes.
         /// </summary>
-        public void Step(double dt)
+        public void Step(double dt, in PhysiologyInput input = default)
         {
+            if (!(input.Arousal >= 0.0 && input.Arousal <= 1.0 && input.Effort >= 0.0 && input.Effort <= 1.0))
+            {
+                throw new ArgumentException("the input's arousal and effort must be finite and in [0, 1].");
+            }
+
             if (Dead) return;
             var slowDt = dt * _slowScale;
 
@@ -226,10 +252,12 @@ namespace Lodur
 
             for (var i = 0; i < _integrity.Length; i++) _integrity[i] = Clamp01(1.0 - _injury[i] / _tissues[i].Hp);
 
-            // 3. Capacities: the weighted mean integrity, then every effect's offsets, then its factors. The blood loss they read is the volume the step began with.
-            var bloodLoss = BloodLoss;
-            _consciousness = Capacity(EffectTarget.Consciousness, bloodLoss);
-            _pumping = Capacity(EffectTarget.BloodPumping, bloodLoss);
+            // 3. Capacities: the weighted mean integrity, then every effect's offsets, then its factors. The blood loss and brain oxygen they read are the values the step began with.
+            _drivers[(int)EffectDriver.BloodLoss] = BloodLoss;
+            _drivers[(int)EffectDriver.BrainOxygen] = _brainOxygen;
+            _consciousness = Capacity(EffectTarget.Consciousness);
+            _pumping = Capacity(EffectTarget.BloodPumping);
+            _breathing = Capacity(EffectTarget.Breathing);
 
             // 4. Bleeding: each affliction's bleed effects, through its tissue's vascularity and the pumping.
             Array.Clear(_bleed, 0, _bleed.Length);
@@ -238,7 +266,7 @@ namespace Lodur
             {
                 if (_slotDef[s] < 0) continue;
                 double offset = 0.0, factor = 1.0;
-                Fold(_defs[_slotDef[s]].Effects, EffectTarget.Bleed, _slotSeverity[s], _slotAge[s], bloodLoss, ref offset, ref factor);
+                Fold(_defs[_slotDef[s]].Effects, EffectTarget.Bleed, _slotSeverity[s], _slotAge[s], ref offset, ref factor);
                 var rate = Math.Max(0.0, offset * factor) * _tissues[_slotTissue[s]].Vascularity * _pumping;
                 _bleed[_slotPart[s]] += rate;
                 totalBleed += rate;
@@ -252,7 +280,14 @@ namespace Lodur
                 _volume = Math.Min(_nominal, _volume + _regen * _nominal * slowDt);
             }
 
-            // 6. Motor ceilings: the child part's motor-weighted integrity, folded with its live afflictions' motor effects, times consciousness.
+            // 6. The gases, on the Acute clock (ruling bds-asphyxia-real-time): the blood store refills by ventilation and is used by exertion;
+            // the brain relaxes toward what the pumping delivers. Placeholder constants live in content (RespirationDef).
+            var r = _respiration;
+            var use = r.BasalUsePerSecond * (1.0 + r.ArousalUse * input.Arousal + r.EffortUse * input.Effort);
+            _bloodOxygen = Clamp01(_bloodOxygen + dt * (r.UptakePerSecond * _breathing * (1.0 - _bloodOxygen) - use));
+            _brainOxygen = Clamp01(_brainOxygen + (_pumping * _bloodOxygen - _brainOxygen) * (1.0 - Math.Exp(-dt / r.BrainSeconds)));
+
+            // 7. Motor ceilings: the child part's motor-weighted integrity, folded with its live afflictions' motor effects, times consciousness.
             for (var j = 0; j < _motor.Length; j++)
             {
                 var part = _body.Joints[j].Child;
@@ -268,14 +303,14 @@ namespace Lodur
                 {
                     if (_slotDef[s] >= 0 && _slotPart[s] == part)
                     {
-                        Fold(_defs[_slotDef[s]].Effects, EffectTarget.Motor, _slotSeverity[s], _slotAge[s], bloodLoss, ref offset, ref factor);
+                        Fold(_defs[_slotDef[s]].Effects, EffectTarget.Motor, _slotSeverity[s], _slotAge[s], ref offset, ref factor);
                     }
                 }
 
                 _motor[j] = Clamp01((mean / _motorWeight[part] + offset) * factor) * _consciousness;
             }
 
-            // 7. Death, once, for every cause; the first rule that holds names it.
+            // 8. Death, once, for every cause; the first rule that holds names it.
             var cause = DeathCause.None;
             for (var i = 0; i < _tissues.Length && cause == DeathCause.None; i++)
             {
@@ -294,16 +329,25 @@ namespace Lodur
             _steps++;
         }
 
-        private double Capacity(EffectTarget target, double bloodLoss)
+        private const int CapacityCount = 3;
+
+        private static double Weight(in TissueDef t, EffectTarget target) => target switch
         {
-            var weightSum = target == EffectTarget.Consciousness ? _consciousnessWeight : _pumpingWeight;
+            EffectTarget.Consciousness => t.Consciousness,
+            EffectTarget.BloodPumping => t.BloodPumping,
+            _ => t.Breathing,
+        };
+
+        private double Capacity(EffectTarget target)
+        {
+            var weightSum = _capacityWeight[(int)target];
             var mean = 1.0;
             if (weightSum > 0.0)
             {
                 var acc = 0.0;
                 for (var i = 0; i < _tissues.Length; i++)
                 {
-                    var w = target == EffectTarget.Consciousness ? _tissues[i].Consciousness : _tissues[i].BloodPumping;
+                    var w = Weight(_tissues[i], target);
                     if (w > 0.0) acc += w * _integrity[i];
                 }
 
@@ -313,29 +357,34 @@ namespace Lodur
             double offset = 0.0, factor = 1.0;
             for (var i = 0; i < _organism.Length; i++)
             {
-                Fold(_organism[i], target, 0.0, 0.0, bloodLoss, ref offset, ref factor);
+                Fold(_organism[i], target, 0.0, 0.0, ref offset, ref factor);
             }
 
             for (var s = 0; s < _slotDef.Length; s++)
             {
-                if (_slotDef[s] >= 0) Fold(_defs[_slotDef[s]].Effects, target, _slotSeverity[s], _slotAge[s], bloodLoss, ref offset, ref factor);
+                if (_slotDef[s] >= 0) Fold(_defs[_slotDef[s]].Effects, target, _slotSeverity[s], _slotAge[s], ref offset, ref factor);
             }
 
             return Clamp01((mean + offset) * factor);
         }
 
-        private static void Fold(IReadOnlyList<Effect> effects, EffectTarget target, double severity, double age, double bloodLoss, ref double offset, ref double factor)
+        private void Fold(IReadOnlyList<Effect> effects, EffectTarget target, double severity, double age, ref double offset, ref double factor)
         {
             for (var i = 0; i < effects.Count; i++)
             {
-                Fold(effects[i], target, severity, age, bloodLoss, ref offset, ref factor);
+                Fold(effects[i], target, severity, age, ref offset, ref factor);
             }
         }
 
-        private static void Fold(Effect e, EffectTarget target, double severity, double age, double bloodLoss, ref double offset, ref double factor)
+        private void Fold(Effect e, EffectTarget target, double severity, double age, ref double offset, ref double factor)
         {
             if (e.Target != target) return;
-            var x = e.Driver == EffectDriver.Severity ? severity : e.Driver == EffectDriver.Age ? age : bloodLoss;
+            var x = e.Driver switch
+            {
+                EffectDriver.Severity => severity,
+                EffectDriver.Age => age,
+                _ => _drivers[(int)e.Driver],
+            };
             var v = e.Eval(x);
             if (e.Op == EffectOp.Offset) offset += v;
             else factor *= v;

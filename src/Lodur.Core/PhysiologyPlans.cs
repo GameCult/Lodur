@@ -32,7 +32,7 @@ namespace Lodur
 
         /// <summary>
         /// The 19-part humanoid of <see cref="BodyPlans.Humanoid"/>: tissue stacks outside-in with RimWorld's human part HP (fat and bone are stack thickness and core, not particles), the
-        /// blood, the stages of blood loss, and the Cut and Bruise afflictions. Numbers not cited are play-tuned placeholders.
+        /// blood, the stages of blood loss, the hypoxia curve and the respiration, and the Cut and Bruise afflictions. Numbers not cited are play-tuned placeholders; the respiration constants (uptake, basal and exertion use, brain lag) are literature-shaped placeholders.
         /// </summary>
         public static PhysiologyPlan Humanoid()
         {
@@ -42,8 +42,8 @@ namespace Lodur
             Stack("Pelvis", Side.Center, Skin(10), Fat(10), MuscleSheet(30), Bone("Pelvis", 25), new TissueDef("Gut", 20, GutV));
             Stack("Torso", Side.Center,
                 Skin(10), Fat(10), MuscleSheet(40), Bone("Ribcage", 25),
-                new TissueDef("Heart", 15, HeartV, Vital: true, BloodPumping: 1.0),
-                new TissueDef("LungLeft", 15, LungV), new TissueDef("LungRight", 15, LungV),
+                new TissueDef("Heart", 15, HeartV, BloodPumping: 1.0),
+                new TissueDef("LungLeft", 15, LungV, Breathing: 1.0), new TissueDef("LungRight", 15, LungV, Breathing: 1.0),
                 new TissueDef("Liver", 20, LiverV), new TissueDef("KidneyLeft", 15, KidneyV), new TissueDef("KidneyRight", 15, KidneyV));
             // The neck's muscle carries the Neck joint's motor weight: the head has to be a joint child with a muscle (spec discrepancy, report deviation).
             Stack("Head", Side.Center, Skin(5), Fat(5), Muscle(25), Bone("Skull", 25), new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0));
@@ -63,6 +63,11 @@ namespace Lodur
             var bloodLoss = Curve(EffectTarget.Consciousness, EffectOp.Offset, EffectDriver.BloodLoss,
                 (0.0, 0.0), (0.15, 0.0), (0.15, -0.1), (0.30, -0.1), (0.30, -0.2), (0.45, -0.2), (0.45, -0.4), (0.60, -0.4), (0.60, -0.9), (1.0, -0.9));
 
+            // Brain oxygen to consciousness: flat 1 above 0.70 so a healthy body reads exactly 1, falling to 0 at 0.10. A stopped heart or a smothering
+            // reaches it through the stores. (placeholder, fitted to ~75 s unconscious while struggling and death at 134-360 s, PMC8928428 and Szpilman NEJM 2012;
+            // 6-10 s after cerebral circulation stops, Rossen, Kabat and Anderson 1943; rulings bds-asphyxia-real-time, bds-heart-stop-stagger)
+            var hypoxia = Curve(EffectTarget.Consciousness, EffectOp.Factor, EffectDriver.BrainOxygen, (0.10, 0.0), (0.35, 0.1), (0.70, 1.0));
+
             var afflictions = new[]
             {
                 // Acute: a wound bleeds, clots and heals in real seconds whatever the slow scale (ruling bds-physiology-clock). 1 mL/s per HP of severity
@@ -76,7 +81,8 @@ namespace Lodur
             };
 
             // ATLS class IV past 40% loss (research df-and-atls) puts the lethal fraction at 0.5 (play-tuned); regrowth is RimWorld's 0.333 per slow day.
-            return new PhysiologyPlan(parts, afflictions, new[] { bloodLoss }, new BloodDef(0.005, 0.5, 0.333 / Day), 64);
+            return new PhysiologyPlan(parts, afflictions, new[] { bloodLoss, hypoxia }, new BloodDef(0.005, 0.5, 0.333 / Day),
+                new RespirationDef(1.0, 0.002, 0.5, 4.0, 9.5), 64);
         }
     }
 }

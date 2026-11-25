@@ -12,12 +12,14 @@ public sealed class PhysiologyPlanTests
 
     private static BloodDef GoodBlood => new(0.005, 0.5, 0.001);
 
+    private static RespirationDef GoodRespiration => new(1.0, 0.002, 0.5, 4.0, 9.5);
+
     private static PhysiologyPlan Plan(
         IReadOnlyList<TissueDef>? tissues = null, IReadOnlyList<AfflictionDef>? afflictions = null,
-        IReadOnlyList<Effect>? organism = null, BloodDef? blood = null, int slots = 4) =>
+        IReadOnlyList<Effect>? organism = null, BloodDef? blood = null, int slots = 4, RespirationDef? respiration = null) =>
         new(new[] { new PartTissuesDef("A", Side.Center, tissues ?? new[] { new TissueDef("brain", 10, 1, Consciousness: 1, Motor: 1) }) },
             afflictions ?? new[] { new AfflictionDef("a", PhysiologyClock.Acute, 0, true, Array.Empty<Effect>()) },
-            organism ?? Array.Empty<Effect>(), blood ?? GoodBlood, slots);
+            organism ?? Array.Empty<Effect>(), blood ?? GoodBlood, respiration ?? GoodRespiration, slots);
 
     private static void Refuses(Action build) => Assert.Throws<ArgumentException>(build);
 
@@ -91,6 +93,15 @@ public sealed class PhysiologyPlanTests
         Refuses(() => Plan(organism: new[] { Fx(d: EffectDriver.Age) }));
         Refuses(() => Plan(organism: new[] { Fx(t: EffectTarget.Bleed) }));                    // a target only an affliction has
         Refuses(() => Plan(organism: new[] { Fx(t: EffectTarget.Motor) }));
+        Refuses(() => Plan(new[] { new TissueDef("brain", 10, 1, Consciousness: 1, Motor: 1, Breathing: -1) }));
+        Refuses(() => Plan(new[] { new TissueDef("brain", 10, 1, Consciousness: 1, Motor: 1, Breathing: double.NaN) }));
+
+        Refuses(() => Plan(respiration: GoodRespiration with { UptakePerSecond = -1 }));
+        Refuses(() => Plan(respiration: GoodRespiration with { BasalUsePerSecond = -1 }));
+        Refuses(() => Plan(respiration: GoodRespiration with { ArousalUse = double.NaN }));
+        Refuses(() => Plan(respiration: GoodRespiration with { EffortUse = double.PositiveInfinity }));
+        Refuses(() => Plan(respiration: GoodRespiration with { BrainSeconds = 0 }));
+        Refuses(() => Plan(respiration: GoodRespiration with { BrainSeconds = double.NaN }));
 
         Refuses(() => Plan(blood: GoodBlood with { NominalVolume = 0 }));
         Refuses(() => Plan(blood: GoodBlood with { NominalVolume = double.NaN }));
@@ -113,8 +124,10 @@ public sealed class PhysiologyPlanTests
     [Fact]
     public void An_affliction_may_use_every_driver_and_the_boundary_values_of_the_rules_are_accepted()
     {
-        var effects = new[] { Fx(EffectTarget.Bleed, EffectDriver.Severity), Fx(EffectTarget.Motor, EffectDriver.Age), Fx(EffectTarget.Consciousness, EffectDriver.BloodLoss), Fx(curve: new[] { (1.0, 0.0), (1.0, 1.0) }) };
+        var effects = new[] { Fx(EffectTarget.Bleed, EffectDriver.Severity), Fx(EffectTarget.Motor, EffectDriver.Age), Fx(EffectTarget.Consciousness, EffectDriver.BloodLoss), Fx(EffectTarget.Consciousness, EffectDriver.BrainOxygen), Fx(curve: new[] { (1.0, 0.0), (1.0, 1.0) }) };
         Plan(afflictions: new[] { new AfflictionDef("a", PhysiologyClock.Slow, -1, false, effects) }, blood: GoodBlood with { LethalLossFraction = 1, RegenPerSecond = 0 }, slots: 1);
+        Plan(organism: new[] { Fx(EffectTarget.Breathing, EffectDriver.BrainOxygen) });       // organism: a capacity driven by a store
+        Plan(organism: new[] { Fx(EffectTarget.BloodPumping, EffectDriver.BloodLoss) });
     }
 
     [Fact]
