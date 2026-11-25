@@ -75,6 +75,48 @@ public sealed class PhysiologyTests
         Shelled(0.019).Resolve(slab);
     }
 
+    private static BodyPlan RootOf(PartShape shape, (float X, float Y, float Z) size)
+    {
+        PartDef P(string label, PartShape sh, (float X, float Y, float Z) sz) => new(label, Side.Center, sh, sz, (0f, 0f, 0f), Quat.Identity, 1000f, 0.8f, 0f);
+        var joint = new JointDef("J", Side.Center, JointKind.Spherical, 0, 1, (0f, 0f, 0f), (0f, 1f, 0f), 0f, 0f, 0f, new MuscleGains(1f, 1f, 1f, 1f));
+        return new BodyPlan(new[] { P("Root", shape, size), P("Kid", PartShape.Box, (0.1f, 0.1f, 0.1f)) }, new[] { joint }, Array.Empty<SensePointDef>());
+    }
+
+    private static PhysiologyPlan Layered(params double[] shells)
+    {
+        var tissues = new TissueDef[shells.Length + 1];
+        for (var i = 0; i < shells.Length; i++) tissues[i] = new TissueDef("s" + i, 10, 1) with { Thickness = shells[i] };
+        tissues[shells.Length] = BrainT;
+        return Over(Stack("Root", tissues), Stack("Kid", MuscleT));
+    }
+
+    [Fact]
+    public void Every_shell_counts_and_every_box_axis_bounds_the_fit()
+    {
+        var cube = RootOf(PartShape.Box, (0.1f, 0.1f, 0.1f));
+        Layered(0.04, 0.04).Resolve(cube);
+        Assert.Throws<ArgumentException>(() => Layered(0.06, 0.06).Resolve(cube));          // the sum, not the first or the largest
+        Assert.Throws<ArgumentException>(() => Layered(0.01, 0.05, 0.05).Resolve(cube));    // the last shell counts
+
+        foreach (var thin in new[] { (0.02f, 0.1f, 0.1f), (0.1f, 0.02f, 0.1f), (0.1f, 0.1f, 0.02f) })
+        {
+            var body = RootOf(PartShape.Box, thin);
+            Layered(0.019).Resolve(body);
+            Assert.Throws<ArgumentException>(() => Layered(0.03).Resolve(body));
+        }
+    }
+
+    [Fact]
+    public void A_capsule_and_a_sphere_fit_shells_inside_the_radius()
+    {
+        foreach (var body in new[] { RootOf(PartShape.Capsule, (0.1f, 0.5f, 0f)), RootOf(PartShape.Sphere, (0.1f, 0f, 0f)) })
+        {
+            Layered(0.0999).Resolve(body);
+            Assert.Throws<ArgumentException>(() => Layered(0.1).Resolve(body));
+            Assert.Throws<ArgumentException>(() => Layered(0.06, 0.06).Resolve(body));
+        }
+    }
+
     [Fact]
     public void A_physiology_refuses_a_body_with_no_consciousness_tissue_or_a_joint_child_with_no_motor_tissue()
     {

@@ -63,14 +63,19 @@ public sealed class PhysiologyPlanTests
         var shell = t with { Label = "shell", Thickness = 0.01, Sheet = sheet };
         Refuses(() => Plan(new[] { t with { Thickness = -1 } }));
         Refuses(() => Plan(new[] { t with { Thickness = double.NaN } }));
+        Refuses(() => Plan(new[] { t with { Thickness = double.PositiveInfinity } }));
         Refuses(() => Plan(new[] { t with { Sheet = sheet } }));                               // a sheet on Thickness 0
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { Spacing = 0 } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { Spacing = double.NaN } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { Spacing = double.PositiveInfinity } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { EdgeCompliance = -1 } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { EdgeCompliance = double.PositiveInfinity } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { EdgeCompliance = double.NaN } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { AttachCompliance = -1 } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { AttachCompliance = double.PositiveInfinity } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = 0 } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = double.NaN } } }));
+        Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = double.PositiveInfinity } } }));
         Refuses(() => Plan(new[] { t, shell }));                                               // a shell after a core
 
         var a = new AfflictionDef("a", PhysiologyClock.Acute, 0, true, Array.Empty<Effect>());
