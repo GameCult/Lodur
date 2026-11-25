@@ -15,6 +15,8 @@ namespace Lodur
         GoalChanged = 4,
         /// <summary>The physiology died this tick (reported once, on the tick it died).</summary>
         Died = 8,
+        /// <summary>An involuntary breath ended a held breath: the breath reflex leaked past the will, or the will gave out while the breath was wanted held.</summary>
+        Gasp = 16,
     }
 
     /// <summary>
@@ -35,6 +37,11 @@ namespace Lodur
         private readonly Perception _perception;
         private readonly WithdrawalReflex[] _reflexes;
         private readonly Physiology? _physiology;
+        // The breath-hold's contest with air hunger (null without a physiology), the gasp's length in ticks, the tick of the last gasp, and whether the breath is held for the next step.
+        private readonly WithdrawalReflex? _breath;
+        private readonly long _gaspTicks;
+        private long _lastGasp = long.MinValue / 2;
+        private bool _held;
         private bool _diedReported;
         // The mean of the strengths written on the last tick, after the ceiling, 0..1: the exertion the physiology is told about.
         private double _effort;
@@ -54,7 +61,8 @@ namespace Lodur
         public Actor(
             double tickSeconds, int regionCount,
             NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, Brain brain,
-            NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null, Physiology? physiology = null)
+            NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null, Physiology? physiology = null,
+            WithdrawalParameters? breath = null)
         {
             brain.Validate();
             drive.Validate();
@@ -93,6 +101,13 @@ namespace Lodur
                 // The entry ramp is rounded once as well; EntrySeconds is finite, but its quotient can still pass the long range.
                 var entryTicks = brain.Goals[g].EntrySeconds / tickSeconds;
                 _entryTicks[g] = entryTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(entryTicks);
+            }
+
+            if (physiology != null)
+            {
+                var breathP = breath ?? new WithdrawalParameters();
+                _breath = new WithdrawalReflex(breathP, tickSeconds);
+                _gaspTicks = (long)Math.Round(breathP.FlinchRefractorySeconds / tickSeconds);
             }
 
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion, percepts);
@@ -171,12 +186,12 @@ namespace Lodur
         /// <summary>
         /// Runs one physics step's worth of nervous system. The point spans hold one entry per region; the strengths
         /// and targets spans one entry per muscle, written for the body to follow. The emitters are the game's point
-        /// sources, sensed at the sense region's point.
+        /// sources, sensed at the sense region's point. The airway is what the caller finds at the body's airway openings; nothing by default.
         /// </summary>
         public TickEvents Tick(
             ReadOnlySpan<float> regionX, ReadOnlySpan<float> regionY, ReadOnlySpan<float> regionZ,
             ReadOnlySpan<BoxStimulus> sources, Span<float> strengths, Span<Quat> targets,
-            ReadOnlySpan<Emitter> emitters = default)
+            ReadOnlySpan<Emitter> emitters = default, in AirwaySample airway = default)
         {
             var events = TickEvents.None;
             if (_physiology != null)
@@ -189,8 +204,9 @@ namespace Lodur
                 // The physiology steps first, on the drive as the last tick left it, and its consciousness is the slot's only writer.
                 if (!_physiology.Dead)
                 {
-                    _physiology.Step(_dt, new PhysiologyInput(_drive.Arousal, _effort));
+                    _physiology.Step(_dt, new PhysiologyInput(_drive.Arousal, _effort, _held, airway));
                     _drive.Consciousness = _physiology.Consciousness;
+                    _drive.AirHunger = _physiology.BreathUrge;
                 }
 
                 if (_physiology.Dead)
@@ -221,6 +237,31 @@ namespace Lodur
                 {
                     events |= TickEvents.Flinch;
                 }
+            }
+
+            // The breath is held on will while liquid is at the airway, in contest with air hunger as a reflex is with pain: it ends in a gasp when the hunger leaks past the will, or
+            // when the will gives out. The breath's leak is not the limbs' leak; its strain joins the drive's.
+            if (_physiology != null)
+            {
+                var wanted = _physiology.LiquidAtAirway;
+                var willing = wanted && _drive.Will > 0.0;
+                if (willing)
+                {
+                    if (_breath!.Step(_drive.AirHunger, _drive))
+                    {
+                        events |= TickEvents.Gasp;
+                        _lastGasp = _tick;
+                    }
+
+                    strainLoad += _breath.StrainLoad;
+                }
+                else if (wanted && _held)
+                {
+                    events |= TickEvents.Gasp;
+                    _lastGasp = _tick;
+                }
+
+                _held = willing && _tick - _lastGasp >= _gaspTicks;
             }
 
             // Effort is paid only once the goal is voluntary: the onset (InvoluntarySeconds) runs without will, and without cost.

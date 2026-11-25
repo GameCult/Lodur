@@ -82,7 +82,19 @@ namespace Lodur
 
             // ATLS class IV past 40% loss (research df-and-atls) puts the lethal fraction at 0.5 (play-tuned); regrowth is RimWorld's 0.333 per slow day.
             return new PhysiologyPlan(parts, afflictions, new[] { bloodLoss, hypoxia }, new BloodDef(0.005, 0.5, 0.333 / Day),
-                new RespirationDef(1.0, 0.002, 0.5, 4.0, 9.5), 64);
+                new RespirationDef(
+                    1.0, 0.002, 0.5, 4.0, 9.5,
+                    // CO2 (placeholders, the readings are the real Actor smothered: struggle takes over at 0.1 s, out 81.6 s, dead 154.3 s; calm breath-hold gasps at 60.1 s). Rise 1/300 per second of
+                    // basal load: carbon dioxide reaches its urge threshold in tens of seconds of exertion with no ventilation (breath-hold breaking point, PMC8511405; Frontiers Physiol 2021, 10.3389/fphys.2021.731633).
+                    // Clear 0.5 per ventilated second keeps a healthy body at 0.01-0.07, below the curves' floor of 0.5.
+                    1.0 / 300.0, 0.5,
+                    // Urge by CO2 (placeholder): nothing up to 0.5, full at 1.3. Urge by ventilation deficit (placeholder): nothing up to a deficit of 0.5 (a lung lost), 0.6 at no breath at all;
+                    // a breath tried and not got is felt at once (Banzett, Lansing and Schwartzstein, Air hunger, Respir Physiol Neurobiol 2008).
+                    new[] { (0.5, 0.0), (1.3, 1.0) }, new[] { (0.5, 0.0), (1.0, 0.6) }),
+                // The airway (placeholders). Capacity 150 mL is 2 mL/kg at 75 kg (an upper-airway and bronchial volume, the lung's own is far larger: the airway fills before the lung); it holds the breath from 15.6 mL
+                // of liquid at the openings (a mouthful, a tenth of the capacity). A free breath draws the liquid at the airway in at 1 per second, an awake cough clears 2 per second of what is there and fails below 0.3
+                // consciousness, and the airway drains at 0.1 per second once the face points down (facing from 0: on his side halves it). Liquid and pooled liquid count alike.
+                new AirwayDef(150e-6, 1.0, 1.0, 1.0, 15.6e-6, 2.0, new[] { (0.3, 0.0), (0.6, 1.0) }, 0.1, 0.0), 64);
         }
     }
 }

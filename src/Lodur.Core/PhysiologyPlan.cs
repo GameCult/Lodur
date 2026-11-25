@@ -52,9 +52,27 @@ namespace Lodur
     /// The gases, all on the Acute clock (ruling bds-asphyxia-real-time): the blood oxygen store S refills at
     /// <paramref name="UptakePerSecond"/> x ventilation x (1 - S) per second and is used at <paramref name="BasalUsePerSecond"/> x
     /// (1 + <paramref name="ArousalUse"/> x arousal + <paramref name="EffortUse"/> x effort); the brain oxygen relaxes toward BloodPumping x S
-    /// with time constant <paramref name="BrainSeconds"/>. Both stores run 0..1.
+    /// with time constant <paramref name="BrainSeconds"/>. Both stores run 0..1. Carbon dioxide C (0 at rest, about 1 at the break point) rises at
+    /// <paramref name="CarbonDioxideRise"/> x (1 + ArousalUse x arousal + EffortUse x effort) per second, the load that uses oxygen, and is blown off at
+    /// <paramref name="CarbonDioxideClear"/> x ventilation x C. Air hunger is the larger of two curves: <paramref name="UrgeByCarbonDioxide"/> read at C and
+    /// <paramref name="UrgeByVentilationDeficit"/> read at the deficit, 1 - Breathing x (1 - occlusion), a breath tried and not got (zero while the breath is held).
     /// </summary>
-    public readonly record struct RespirationDef(double UptakePerSecond, double BasalUsePerSecond, double ArousalUse, double EffortUse, double BrainSeconds);
+    public readonly record struct RespirationDef(
+        double UptakePerSecond, double BasalUsePerSecond, double ArousalUse, double EffortUse, double BrainSeconds,
+        double CarbonDioxideRise, double CarbonDioxideClear,
+        IReadOnlyList<(double X, double Y)> UrgeByCarbonDioxide, IReadOnlyList<(double X, double Y)> UrgeByVentilationDeficit);
+
+    /// <summary>
+    /// The airway as a quantity, not as particles: it holds <paramref name="Capacity"/> m^3 of liquid at most. Liquid at the airway is
+    /// <paramref name="LiveWeight"/> x the live liquid plus <paramref name="PooledWeight"/> x the pooled; at <paramref name="HoldAt"/> or more it is "at the airway"
+    /// and the Actor holds the breath. A free breath draws <paramref name="DrawPerSecond"/> x Breathing x (liquid at the airway) per second into it; a cough
+    /// removes <paramref name="CoughPerSecond"/> x <paramref name="CoughByConsciousness"/>(consciousness) x contents per second; and it drains at
+    /// <paramref name="DrainPerSecond"/> x clamp01((facing - <paramref name="DrainFacingStart"/>) / (1 - DrainFacingStart)) x contents, facing being the cosine of an
+    /// opening's outward direction with down, -1..1.
+    /// </summary>
+    public readonly record struct AirwayDef(
+        double Capacity, double DrawPerSecond, double LiveWeight, double PooledWeight, double HoldAt, double CoughPerSecond,
+        IReadOnlyList<(double X, double Y)> CoughByConsciousness, double DrainPerSecond, double DrainFacingStart);
 
     /// <summary>
     /// A piecewise-linear curve in its driver, clamped at the ends. An equal-x pair is a step: at that x the later value holds
@@ -62,9 +80,11 @@ namespace Lodur
     /// </summary>
     public readonly record struct Effect(EffectTarget Target, EffectOp Op, EffectDriver Driver, IReadOnlyList<(double X, double Y)> Curve)
     {
-        public double Eval(double x)
+        public double Eval(double x) => EvalCurve(Curve, x);
+
+        /// <summary>The evaluation every curve of the plan shares: clamped at the ends, an equal-x pair a step.</summary>
+        internal static double EvalCurve(IReadOnlyList<(double X, double Y)> c, double x)
         {
-            var c = Curve;
             if (x < c[0].X)
             {
                 return c[0].Y;
@@ -100,7 +120,7 @@ namespace Lodur
 
         public PhysiologyPlan(
             IReadOnlyList<PartTissuesDef> parts, IReadOnlyList<AfflictionDef> afflictions, IReadOnlyList<Effect> organismEffects,
-            BloodDef blood, RespirationDef respiration, int afflictionSlots)
+            BloodDef blood, RespirationDef respiration, AirwayDef airway, int afflictionSlots)
         {
             var ownedParts = new List<PartTissuesDef>(parts.Count);
             foreach (var p in parts)
@@ -118,7 +138,8 @@ namespace Lodur
             Afflictions = ownedAfflictions.AsReadOnly();
             OrganismEffects = Own(organismEffects);
             Blood = blood;
-            Respiration = respiration;
+            Respiration = respiration with { UrgeByCarbonDioxide = OwnCurve(respiration.UrgeByCarbonDioxide), UrgeByVentilationDeficit = OwnCurve(respiration.UrgeByVentilationDeficit) };
+            Airway = airway with { CoughByConsciousness = OwnCurve(airway.CoughByConsciousness) };
             AfflictionSlots = afflictionSlots;
             Validate();
         }
@@ -128,6 +149,7 @@ namespace Lodur
         public IReadOnlyList<Effect> OrganismEffects { get; }
         public BloodDef Blood { get; }
         public RespirationDef Respiration { get; }
+        public AirwayDef Airway { get; }
         public int AfflictionSlots { get; }
 
         public int AfflictionIndex(string label) =>
@@ -169,6 +191,9 @@ namespace Lodur
 
             return stackOf;
         }
+
+        private static IReadOnlyList<(double X, double Y)> OwnCurve(IReadOnlyList<(double X, double Y)>? curve) =>
+            curve == null ? null! : new List<(double X, double Y)>(curve).AsReadOnly();
 
         private static IReadOnlyList<Effect> Own(IReadOnlyList<Effect> effects)
         {
@@ -258,6 +283,23 @@ namespace Lodur
             }
 
             if (!(IsFinite(r.BrainSeconds) && r.BrainSeconds > 0.0)) throw new ArgumentException("respiration: BrainSeconds is not finite and above 0.");
+            if (!(IsFinite(r.CarbonDioxideRise) && r.CarbonDioxideRise >= 0.0 && IsFinite(r.CarbonDioxideClear) && r.CarbonDioxideClear >= 0.0))
+            {
+                throw new ArgumentException("respiration: a carbon dioxide rate is not finite and at least 0.");
+            }
+
+            ValidateCurve(r.UrgeByCarbonDioxide, "respiration: the carbon dioxide urge curve");
+            ValidateCurve(r.UrgeByVentilationDeficit, "respiration: the ventilation deficit urge curve");
+            var w = Airway;
+            if (!(IsFinite(w.Capacity) && w.Capacity > 0.0)) throw new ArgumentException("airway: the capacity is not finite and above 0.");
+            if (!(IsFinite(w.DrawPerSecond) && w.DrawPerSecond >= 0.0 && IsFinite(w.LiveWeight) && w.LiveWeight >= 0.0 && IsFinite(w.PooledWeight) && w.PooledWeight >= 0.0
+                && IsFinite(w.HoldAt) && w.HoldAt >= 0.0 && IsFinite(w.CoughPerSecond) && w.CoughPerSecond >= 0.0 && IsFinite(w.DrainPerSecond) && w.DrainPerSecond >= 0.0))
+            {
+                throw new ArgumentException("airway: a number is not finite and at least 0.");
+            }
+
+            if (!(w.DrainFacingStart >= -1.0 && w.DrainFacingStart < 1.0)) throw new ArgumentException("airway: DrainFacingStart is not in [-1, 1).");
+            ValidateCurve(w.CoughByConsciousness, "airway: the cough curve");
             if (AfflictionSlots < 1) throw new ArgumentException("the affliction table needs at least one slot.");
         }
 
@@ -268,12 +310,17 @@ namespace Lodur
                 throw new ArgumentException($"{where}: an effect has an undefined target, op or driver.");
             }
 
-            if (e.Curve.Count == 0) throw new ArgumentException($"{where}: an effect has an empty curve.");
-            for (var i = 0; i < e.Curve.Count; i++)
+            ValidateCurve(e.Curve, $"{where}: an effect curve");
+        }
+
+        private static void ValidateCurve(IReadOnlyList<(double X, double Y)> curve, string where)
+        {
+            if (curve == null || curve.Count == 0) throw new ArgumentException($"{where} is empty.");
+            for (var i = 0; i < curve.Count; i++)
             {
-                var (x, y) = e.Curve[i];
-                if (!IsFinite(x) || !IsFinite(y)) throw new ArgumentException($"{where}: an effect curve has a non-finite point.");
-                if (i > 0 && x < e.Curve[i - 1].X) throw new ArgumentException($"{where}: an effect curve's x decreases.");
+                var (x, y) = curve[i];
+                if (!IsFinite(x) || !IsFinite(y)) throw new ArgumentException($"{where} has a non-finite point.");
+                if (i > 0 && x < curve[i - 1].X) throw new ArgumentException($"{where}'s x decreases.");
             }
         }
     }

@@ -102,6 +102,9 @@ namespace Lodur
         /// <summary>The gain on the sense channels in force, 0..1: the goal in force's <see cref="GoalSpec.SensoryGain"/> as the Actor has reached it. Written only by the Actor.</summary>
         public double SensoryGain { get; internal set; }
 
+        /// <summary>Air hunger, 0..1: written each tick by the Actor from its <see cref="Physiology"/> (the only writer), 0 for an Actor with no physiology. It raises arousal like sensory load does.</summary>
+        public double AirHunger { get; internal set; }
+
         internal static DriveState Fresh => new DriveState { Resolve = 1.0, Attention = 1.0, Consciousness = 1.0, SensoryGain = 1.0 };
 
         /// <summary>A goal's entry effect: sets resolve, then the mend check runs (a break the entry lifts past <see cref="DriveParameters.WillMendsAt"/> is mended). It is not a break and counts none.</summary>
@@ -117,7 +120,7 @@ namespace Lodur
         /// <summary>Steps one tick; returns true on the tick the will breaks (each break, not only the first). <paramref name="pull"/> is the active goal's: it scales resolve drain by (1 - pull). <paramref name="effort"/> is the active goal's resolve drained per second to sustain it (0 while it is involuntary); it joins the drain sum, so pull scales it too.</summary>
         internal bool Step(DriveParameters p, double dt, double afferent, double strainLoad, double load, double pull, double effort)
         {
-            Arousal = Math.Min(Math.Max(Arousal + dt * (p.ArousalRise * load * (1.0 - Arousal) - p.ArousalDecay * Arousal), 0.0), 1.0);
+            Arousal = Math.Min(Math.Max(Arousal + dt * (p.ArousalRise * Math.Max(load, AirHunger) * (1.0 - Arousal) - p.ArousalDecay * Arousal), 0.0), 1.0);
             Pain = Math.Min(Math.Max(Pain + dt * (p.PainRise * afferent * (1.0 - Pain) - p.PainDecay * Pain), 0.0), 1.0);
             Strain = Math.Max(0.0, Strain + dt * (strainLoad - p.StrainRecover * Strain));
             var drain = (p.ResolveDrainPain * Pain + p.ResolveDrainStrain * Strain + p.ResolveDrainArousal * Arousal + effort) * (1.0 - pull) * p.DrainTrait;

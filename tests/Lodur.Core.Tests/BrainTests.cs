@@ -297,6 +297,7 @@ public sealed class BrainTests
         DriveQuantity.Arousal => d.Arousal,
         DriveQuantity.Resolve => d.Resolve,
         DriveQuantity.Breaks => d.Breaks,
+        DriveQuantity.AirHunger => d.AirHunger,
         _ => d.WillBroken ? 1.0 : 0.0,
     };
 

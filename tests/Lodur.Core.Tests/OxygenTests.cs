@@ -22,7 +22,7 @@ public sealed class OxygenTests
         var choke = new AfflictionDef("Choke", PhysiologyClock.Acute, -1.0 / 40.0, false,
             new[] { new Effect(EffectTarget.Breathing, EffectOp.Factor, EffectDriver.Severity, new[] { (0.0, 0.0), (1.0, 0.0) }) });
         var defs = new List<AfflictionDef>(h.Afflictions) { choke };
-        var plan = new PhysiologyPlan(h.Parts, defs, h.OrganismEffects, h.Blood, h.Respiration, h.AfflictionSlots);
+        var plan = new PhysiologyPlan(h.Parts, defs, h.OrganismEffects, h.Blood, h.Respiration, h.Airway, h.AfflictionSlots);
         var p = new Physiology(Body, plan, 20);
         Assert.True(p.Afflict(plan.AfflictionIndex("Choke"), Body.PartIndex("Torso"), 0, 1e9));
         return p;

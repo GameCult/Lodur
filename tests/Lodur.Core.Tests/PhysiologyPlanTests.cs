@@ -12,14 +12,14 @@ public sealed class PhysiologyPlanTests
 
     private static BloodDef GoodBlood => new(0.005, 0.5, 0.001);
 
-    private static RespirationDef GoodRespiration => new(1.0, 0.002, 0.5, 4.0, 9.5);
+    private static RespirationDef GoodRespiration => PhysioFixtures.DefaultRespiration;
 
     private static PhysiologyPlan Plan(
         IReadOnlyList<TissueDef>? tissues = null, IReadOnlyList<AfflictionDef>? afflictions = null,
         IReadOnlyList<Effect>? organism = null, BloodDef? blood = null, int slots = 4, RespirationDef? respiration = null) =>
         new(new[] { new PartTissuesDef("A", Side.Center, tissues ?? new[] { new TissueDef("brain", 10, 1, Consciousness: 1, Motor: 1) }) },
             afflictions ?? new[] { new AfflictionDef("a", PhysiologyClock.Acute, 0, true, Array.Empty<Effect>()) },
-            organism ?? Array.Empty<Effect>(), blood ?? GoodBlood, respiration ?? GoodRespiration, slots);
+            organism ?? Array.Empty<Effect>(), blood ?? GoodBlood, respiration ?? GoodRespiration, PhysioFixtures.InertAirway, slots);
 
     private static void Refuses(Action build) => Assert.Throws<ArgumentException>(build);
 

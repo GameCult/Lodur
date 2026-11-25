@@ -21,7 +21,7 @@ public sealed class PhysiologyTests
     private static PartTissuesDef Stack(string part, params TissueDef[] tissues) => new(part, Side.Center, tissues);
 
     private static PhysiologyPlan Over(params PartTissuesDef[] parts) =>
-        new(parts, Array.Empty<AfflictionDef>(), Array.Empty<Effect>(), DefaultBlood, DefaultRespiration, 4);
+        new(parts, Array.Empty<AfflictionDef>(), Array.Empty<Effect>(), DefaultBlood, DefaultRespiration, InertAirway, 4);
 
     private static readonly TissueDef BrainT = new("brain", 10, 1, Consciousness: 1);
     private static readonly TissueDef MuscleT = new("muscle", 10, 1, Motor: 1);

@@ -14,6 +14,8 @@ namespace Lodur
         WillBroken,
         /// <summary>How many times the will has broken: the one-way latch, for a goal that must hold after a mend.</summary>
         Breaks,
+        /// <summary>Air hunger, 0..1: the physiology's urge to breathe, carried by the Actor.</summary>
+        AirHunger,
     }
 
     public enum ConditionOp
@@ -31,6 +33,7 @@ namespace Lodur
             DriveQuantity.Arousal => drive.Arousal,
             DriveQuantity.Resolve => drive.Resolve,
             DriveQuantity.Breaks => (double)drive.Breaks,
+            DriveQuantity.AirHunger => drive.AirHunger,
             _ => drive.WillBroken ? 1.0 : 0.0,
         };
     }

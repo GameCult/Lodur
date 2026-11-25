@@ -6,8 +6,30 @@ namespace Lodur
     /// <summary>Why a body died; the first rule that held at the end of the step that killed it (ruling bds-death).</summary>
     public enum DeathCause { None, VitalTissue, BloodLoss, Consciousness }
 
-    /// <summary>What the stepping Actor reports each step, each in [0, 1]: Arousal is the sensory load carried over time, Effort the mean strength the muscles actually applied last tick, after each joint's motor ceiling (the Actor reports it so, not what the behaviour asked). The default is rest.</summary>
-    public readonly record struct PhysiologyInput(double Arousal, double Effort);
+    /// <summary>
+    /// The liquid at a body's airway openings this step, as the caller measures it: the live liquid and the pooled liquid, each a non-negative amount
+    /// summed over the openings, and Facing, the greatest cosine between an opening's outward direction and down, in [-1, 1] (1: an opening faces straight down).
+    /// The default is nothing at the airway.
+    /// </summary>
+    public readonly record struct AirwaySample(double Live, double Pooled, double Facing)
+    {
+        /// <summary>One entry per opening: Live and Pooled summed, Facing the largest (-1 with no opening).</summary>
+        public static AirwaySample Of(ReadOnlySpan<float> live, ReadOnlySpan<float> pooled, ReadOnlySpan<float> facing)
+        {
+            double l = 0.0, p = 0.0, f = -1.0;
+            for (var i = 0; i < live.Length; i++) l += live[i];
+            for (var i = 0; i < pooled.Length; i++) p += pooled[i];
+            for (var i = 0; i < facing.Length; i++) f = Math.Max(f, facing[i]);
+            return new AirwaySample(l, p, f);
+        }
+    }
+
+    /// <summary>
+    /// What the stepping Actor reports each step. Arousal is the sensory load carried over time and Effort the mean strength the muscles actually applied last tick,
+    /// after each joint's motor ceiling (the Actor reports it so, not what the behaviour asked), each in [0, 1]. BreathHeld is whether the breath is held this step
+    /// (decided by the Actor on the tick before); Airway is what the caller finds at the airway. The default is rest, breathing freely, nothing at the airway.
+    /// </summary>
+    public readonly record struct PhysiologyInput(double Arousal, double Effort, bool BreathHeld = false, AirwaySample Airway = default);
 
     /// <summary>
     /// The body's physiology: tissue integrity, bound afflictions, blood and its oxygen, the capacities they fold into, the motor ceiling and death.
@@ -30,6 +52,7 @@ namespace Lodur
         private readonly double[] _integrity;
         private readonly double[] _capacityWeight;     // per capacity, indexed by EffectTarget (Consciousness, BloodPumping, Breathing)
         private readonly RespirationDef _respiration;
+        private readonly AirwayDef _airway;
         private readonly double[] _drivers;             // the organism's driver values as the step began, indexed by EffectDriver
         private readonly double[] _motorWeight;         // per part
         private readonly int[] _slotDef;                // -1: free
@@ -45,6 +68,13 @@ namespace Lodur
         private double _breathing = 1.0;
         private double _bloodOxygen = 1.0;
         private double _brainOxygen = 1.0;
+        private double _airwayLiquid;
+        private double _occlusion;
+        private double _carbonDioxide;
+        private double _urge;
+        private double _coughed;
+        private double _drained;
+        private bool _atAirway;
         private long _steps;
         private bool _bound;
 
@@ -57,6 +87,7 @@ namespace Lodur
             _lethalLoss = plan.Blood.LethalLossFraction;
             _regen = plan.Blood.RegenPerSecond;
             _respiration = plan.Respiration;
+            _airway = plan.Airway;
             _volume = _nominal;
             _capacityWeight = new double[CapacityCount];
             _drivers = new double[Enum.GetValues(typeof(EffectDriver)).Length];
@@ -152,6 +183,27 @@ namespace Lodur
         /// <summary>The brain's oxygen, 0..1, starting full: it relaxes toward what the pumping delivers from the blood store. Content turns it into consciousness.</summary>
         public double BrainOxygen => _brainOxygen;
 
+        /// <summary>The liquid in the airway in m^3, 0 to the airway's capacity; integrated by <see cref="Step"/>.</summary>
+        public double AirwayLiquid => _airwayLiquid;
+
+        /// <summary>The fraction of the airway the liquid fills, 0..1; it takes that share of the ventilation. Derived from the liquid each step.</summary>
+        public double Occlusion => _occlusion;
+
+        /// <summary>Carbon dioxide, 0 at rest and about 1 at the break point; it rises with the load that uses oxygen and is blown off by ventilation.</summary>
+        public double CarbonDioxide => _carbonDioxide;
+
+        /// <summary>Air hunger, 0..1: the larger of the carbon dioxide urge and the ventilation deficit urge as the last step computed them; 0 once dead. The Actor carries it to the drive.</summary>
+        public double BreathUrge => Dead ? 0.0 : _urge;
+
+        /// <summary>True when the liquid at the airway the last step was sampled was at least the airway's HoldAt: the Actor holds the breath while it is.</summary>
+        public bool LiquidAtAirway => _atAirway;
+
+        /// <summary>The liquid in m^3 the last step coughed out of the airway.</summary>
+        public double Coughed => _coughed;
+
+        /// <summary>The liquid in m^3 the last step drained out of the airway (facing down).</summary>
+        public double Drained => _drained;
+
         /// <summary>The tissue's remaining fraction, 0..1, as of the last step.</summary>
         public double Integrity(int part, int layer) => _integrity[Flat(part, layer)];
 
@@ -229,6 +281,12 @@ namespace Lodur
                 throw new ArgumentException("the input's arousal and effort must be finite and in [0, 1].");
             }
 
+            var air = input.Airway;
+            if (!(air.Live >= 0.0 && air.Live < double.PositiveInfinity && air.Pooled >= 0.0 && air.Pooled < double.PositiveInfinity && air.Facing >= -1.0 && air.Facing <= 1.0))
+            {
+                throw new ArgumentException("the airway sample's liquid must be finite and not negative and its facing in [-1, 1].");
+            }
+
             if (Dead) return;
             var slowDt = dt * _slowScale;
 
@@ -259,6 +317,24 @@ namespace Lodur
             _pumping = Capacity(EffectTarget.BloodPumping);
             _breathing = Capacity(EffectTarget.Breathing);
 
+            // 3b. The airway, a quantity (not particles): liquid at the openings is drawn in by a free breath, never by a held one; a cough clears it by this step's
+            // consciousness, and it drains by facing. What a step removes is reported as Coughed and Drained; occlusion takes its share of the ventilation below.
+            var held = input.BreathHeld;
+            var aw = _airway;
+            var at = aw.LiveWeight * air.Live + aw.PooledWeight * air.Pooled;
+            _atAirway = at > 0.0 && at >= aw.HoldAt;
+            var inflow = held ? 0.0 : aw.DrawPerSecond * _breathing * at;
+            var cough = aw.CoughPerSecond * Effect.EvalCurve(aw.CoughByConsciousness, _consciousness);
+            var drain = aw.DrainPerSecond * Clamp01((air.Facing - aw.DrainFacingStart) / (1.0 - aw.DrainFacingStart));
+            var total = cough + drain;
+            var avail = _airwayLiquid + dt * inflow;
+            var want = dt * total * _airwayLiquid;
+            var removed = want < avail ? want : avail;
+            _coughed = total > 0.0 ? removed * cough / total : 0.0;
+            _drained = removed - _coughed;
+            _airwayLiquid = Math.Min(aw.Capacity, avail - removed);
+            _occlusion = Clamp01(_airwayLiquid / aw.Capacity);
+
             // 4. Bleeding: each affliction's bleed effects, through its tissue's vascularity and the pumping.
             Array.Clear(_bleed, 0, _bleed.Length);
             var totalBleed = 0.0;
@@ -283,8 +359,14 @@ namespace Lodur
             // 6. The gases, on the Acute clock (ruling bds-asphyxia-real-time): the blood store refills by ventilation and is used by exertion;
             // the brain relaxes toward what the pumping delivers. Placeholder constants live in content (RespirationDef).
             var r = _respiration;
-            var use = r.BasalUsePerSecond * (1.0 + r.ArousalUse * input.Arousal + r.EffortUse * input.Effort);
-            _bloodOxygen = Clamp01(_bloodOxygen + dt * (r.UptakePerSecond * _breathing * (1.0 - _bloodOxygen) - use));
+            var load = 1.0 + r.ArousalUse * input.Arousal + r.EffortUse * input.Effort;
+            var use = r.BasalUsePerSecond * load;
+            var ventilation = held ? 0.0 : _breathing * (1.0 - _occlusion);
+            _bloodOxygen = Clamp01(_bloodOxygen + dt * (r.UptakePerSecond * ventilation * (1.0 - _bloodOxygen) - use));
+            _carbonDioxide = Math.Max(0.0, _carbonDioxide + dt * (r.CarbonDioxideRise * load - r.CarbonDioxideClear * ventilation * _carbonDioxide));
+            // Air hunger: carbon dioxide, or a breath tried and not got (neuroventilatory dissociation, felt at once); a held breath is not tried, so its urge is carbon dioxide alone.
+            var deficit = held ? 0.0 : 1.0 - _breathing * (1.0 - _occlusion);
+            _urge = Math.Max(Effect.EvalCurve(r.UrgeByCarbonDioxide, _carbonDioxide), Effect.EvalCurve(r.UrgeByVentilationDeficit, deficit));
             _brainOxygen = Clamp01(_brainOxygen + (_pumping * _bloodOxygen - _brainOxygen) * (1.0 - Math.Exp(-dt / r.BrainSeconds)));
 
             // 7. Motor ceilings: the child part's motor-weighted integrity, folded with its live afflictions' motor effects, times consciousness.
