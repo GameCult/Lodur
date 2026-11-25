@@ -14,8 +14,8 @@ are not coded.
 
 Entry points: `src/Lodur.Core/Actor.cs` (one character's nervous state, one tick per
 physics step), `src/Lodur.Core/PdMuscle.cs` (engine-free PD law, strength per muscle),
-`src/Lodur.Core/BodyPlan.cs` (a body as data: parts, joints that are the tree, sense points),
-`src/Lodur.Body.Ymir/Ragdoll.cs` (builds a `BodyPlan` into a Ymir world; `Drive` and `ReadSensePoints`),
+`src/Lodur.Core/BodyPlan.cs` (a body as data: parts, joints that are the tree, sense points, airway openings),
+`src/Lodur.Body.Ymir/Ragdoll.cs` (builds a `BodyPlan` into a Ymir world; `Drive`, `ReadSensePoints`, and `ReadAirway`, which reads the liquid sensors it places at the airway openings),
 `tests/Lodur.Core.Tests` (the layers and parity with the pain box; builds without Ymir),
 `tests/Lodur.Tests` (stand, fall, rest, same-seed-same-hash, and the connected pain box:
 `ConnectedPainBoxTests`). The map this was cut from is

@@ -17,7 +17,7 @@ internal sealed class RagdollScenario : IDisposable
 
     public RagdollScenario(ulong seed)
     {
-        var (bodies, joints) = Ragdoll.Needs(Plan);
+        var (bodies, joints, _) = Ragdoll.Needs(Plan);
         Strength = new float[Plan.Joints.Count];
         Target = new Quat[Plan.Joints.Count];
         World = new Box3DSoaWorld(capacity: bodies + 1, jointCapacity: joints);
