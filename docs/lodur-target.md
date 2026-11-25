@@ -32,8 +32,13 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    (from the body binding, read-only) and the game's stimulus sources. Two source kinds today: noxious box
    volumes with an intensity the game writes each tick, and point emitters on the audio, visual and interrupt
    channels (position, radius and intensity written each tick, falling off linearly to the radius), sensed at
-   one region and combined into one load, `1 - prod(1 - afferent)`. Output per region: the stimulus, and
-   the afferent signal after threshold, sensitisation and conduction delay; and the load. A poke that barely moves the body
+   one region and combined into one load, `1 - prod(1 - afferent)`. An emitter may carry an `Id` (the game's
+   stable id; 0 is anonymous and only loads the nerve) and a `Kind` (the game's tag, never interpreted by Lodur).
+   Perception keeps a bounded percept memory (`PerceptParameters`, `Percept`): one slot per identified thing
+   strictly inside an emitter's radius, with its kind, the position of the emitter that reached it hardest,
+   salience (that reach times the sensory gain) and seconds since sensed, forgotten after a memory time. The top
+   id bit (`PhantomIdBit`) is reserved to Lodur's phantoms and `Sense` refuses it from the game. Output per region: the stimulus, and
+   the afferent signal after threshold, sensitisation and conduction delay; and the load, and the percepts. A poke that barely moves the body
    is still a stimulus.
 2. **Reflex** (`WithdrawalReflex`, `WithdrawalParameters`). Fast, local responses to afferent signals
    (withdrawal now; startle and bracing later), each with a latency, overlaid on whatever the body is doing.
@@ -97,7 +102,7 @@ behaviour writes strengths and targets at the will's weight. The tick that commi
 
 | Owner | Inputs | Outputs | Derived state | Forbidden writers |
 |---|---|---|---|---|
-| `Perception` | region points, the game's stimulus sources and emitters, the sensory gain passed in | per-region stimulus and afferent, per-channel stimulus and afferent, `Load` | sensitisation, the conduction rings; the channel afferents are gated, the stimuli are not | the drive or a goal writing an afferent; a gain outside [0, 1] (`Sense` refuses it, NaN and infinity included); gating a region (nociceptive) afferent |
+| `Perception` | region points, the game's stimulus sources and emitters, the sensory gain passed in | per-region stimulus and afferent, per-channel stimulus and afferent, `Load`, the percept slots | sensitisation, the conduction rings, percept salience and slot occupancy; the channel afferents are gated, the stimuli are not | the drive or a goal writing an afferent; the game setting `PhantomIdBit` (`Sense` refuses it); the Brain or a session writing a percept; a gain outside [0, 1] (`Sense` refuses it, NaN and infinity included); gating a region (nociceptive) afferent |
 | Reflex (`WithdrawalReflex`) | its region's afferent and the drive's `Will` (the pull acts through resolve's drain, not here) | leak, strain load, flinch | none beyond its latency ring | the Brain or the behaviour setting a reflex gain |
 | Drive (`DriveState`) | afferent sum, strain load, `Load`, the goal's pull and effort | pain, strain, arousal, resolve, `Breaks`, `Will` (= min(resolve x attention, consciousness)), the break and mend events | `Will` is derived and never stored; the break recurs (it mends at `WillMendsAt`) | the Brain, a session or the body writing resolve, arousal or `Will`; the one sanctioned jumps are `Enter` (a goal's entry resolve) and the Actor's entry ramp (arousal) |
 | Attention, Consciousness slots | nothing yet: both read 1 (startle and physiology are the writers to come) | the two factors of `Will` | none | anything but the startle reflex (`lodur-startle-attention`) and physiology; the Actor's test seam `SetWillSlots` is internal |

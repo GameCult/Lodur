@@ -46,7 +46,7 @@ namespace Lodur
         public Actor(
             double tickSeconds, int regionCount,
             NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, Brain brain,
-            NerveParameters? senses = null, int senseRegion = 0)
+            NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null)
         {
             brain.Validate();
             drive.Validate();
@@ -81,7 +81,7 @@ namespace Lodur
                 _entryTicks[g] = entryTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(entryTicks);
             }
 
-            _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion);
+            _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion, percepts);
             _reflexes = new WithdrawalReflex[regionCount];
             for (var r = 0; r < regionCount; r++)
             {
@@ -122,6 +122,11 @@ namespace Lodur
         public double ChannelStimulus(Channel channel) => _perception.ChannelStimulus(channel);
 
         public double ChannelAfferent(Channel channel) => _perception.ChannelAfferent(channel);
+
+        /// <summary>The number of percept slots (0 with no senses); a free slot reads as Id 0.</summary>
+        public int PerceptCount => _perception.PerceptCount;
+
+        public Percept Percept(int slot) => _perception.Percept(slot);
 
         /// <summary>
         /// Runs one physics step's worth of nervous system. The point spans hold one entry per region; the strengths

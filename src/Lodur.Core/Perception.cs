@@ -37,7 +37,7 @@ namespace Lodur
     /// <summary>
     /// A game stimulus at a point: sound, flicker, a notification. The game writes its position and intensity every
     /// tick; Lodur decides what reaches the sense region. What arrives is the intensity falling off linearly to zero
-    /// at the radius.
+    /// at the radius. With an <see cref="Id"/> it is also a thing the puppet can come to know, remembered as a percept.
     /// </summary>
     public struct Emitter
     {
@@ -46,12 +46,20 @@ namespace Lodur
         public float Radius;
         public double Intensity;
 
-        public Emitter(Channel channel, float x, float y, float z, float radius, double intensity = 0.0)
+        /// <summary>The game's stable id for the thing this emitter belongs to. 0 is anonymous: it loads the nerve and is never a percept. The top bit is reserved (<see cref="Perception.PhantomIdBit"/>); <see cref="Perception.Sense"/> refuses it.</summary>
+        public ulong Id;
+
+        /// <summary>The game's tag for the thing (what kind it is). Lodur carries it and never interprets it; emitters sharing an id must share a kind.</summary>
+        public uint Kind;
+
+        public Emitter(Channel channel, float x, float y, float z, float radius, double intensity = 0.0, ulong id = 0, uint kind = 0)
         {
             Channel = channel;
             X = x; Y = y; Z = z;
             Radius = radius;
             Intensity = intensity;
+            Id = id;
+            Kind = kind;
         }
 
         /// <summary>Intensity * max(0, 1 - distance / Radius) at the point; zero at and beyond the radius.</summary>
@@ -76,11 +84,57 @@ namespace Lodur
         public double Gain { get; init; } = 1.0;
     }
 
+    /// <summary>The percept memory's tunables.</summary>
+    public sealed record PerceptParameters
+    {
+        /// <summary>How many things can be remembered at once, 1..256.</summary>
+        public int Capacity { get; init; } = 16;
+
+        /// <summary>How long a thing stays remembered after it was last sensed; finite and not negative.</summary>
+        public double MemorySeconds { get; init; } = 5.0;
+
+        public void Validate()
+        {
+            if (Capacity < 1 || Capacity > 256)
+            {
+                throw new ArgumentException("The percept capacity must be in 1..256.", nameof(Capacity));
+            }
+
+            if (!(MemorySeconds >= 0.0 && MemorySeconds < double.PositiveInfinity))
+            {
+                throw new ArgumentException("The percept memory time must be finite and not negative.", nameof(MemorySeconds));
+            }
+        }
+    }
+
+    /// <summary>One remembered thing. Id 0 is a free slot. Nothing here says whether the thing is real.</summary>
+    public readonly struct Percept
+    {
+        public ulong Id { get; }
+        public uint Kind { get; }
+
+        /// <summary>Where the emitter that reached the puppet hardest was, the last tick the thing was sensed.</summary>
+        public float X { get; }
+        public float Y { get; }
+        public float Z { get; }
+
+        /// <summary>The largest intensity received among the thing's emitters times the sensory gain; 0 on a tick it is not sensed.</summary>
+        public double Salience { get; }
+
+        /// <summary>0 on a tick the thing is sensed.</summary>
+        public double SecondsSinceSensed { get; }
+
+        public Percept(ulong id, uint kind, float x, float y, float z, double salience, double secondsSinceSensed)
+        {
+            Id = id; Kind = kind; X = x; Y = y; Z = z; Salience = salience; SecondsSinceSensed = secondsSinceSensed;
+        }
+    }
+
     /// <summary>
     /// Layer 1 for one character, a fixed number of body regions. Each tick it takes one point per region and the
     /// game's stimulus sources and produces, per region, the stimulus there and the afferent signal after
     /// threshold, sensitisation and conduction delay. With a sensory nerve it also senses point emitters at one
-    /// region on three channels and combines the channels into one load. Everything is allocated in the constructor.
+    /// region on three channels and combines the channels into one load and remembers the identified things it senses in a bounded slot table. Everything is allocated in the constructor.
     /// </summary>
     public sealed class Perception
     {
@@ -99,13 +153,23 @@ namespace Lodur
         private readonly double[] _senseSens = new double[ChannelCount];
         private readonly double[] _senseStimulus = new double[ChannelCount];
         private readonly double[] _senseAfferent = new double[ChannelCount];
+        private readonly double _memorySeconds;
+        private readonly ulong[] _pId;        // percept slots; id 0 is free
+        private readonly uint[] _pKind;
+        private readonly float[] _pX, _pY, _pZ;
+        private readonly double[] _pSalience;
+        private readonly double[] _pSince;
+        private readonly bool[] _pSensed;     // sensed this tick
         private long _tick;
 
         private const int ChannelCount = 3;
 
+        /// <summary>The top bit of an emitter id, reserved to Lodur's phantoms; <see cref="Sense"/> refuses a caller emitter that sets it.</summary>
+        public const ulong PhantomIdBit = 1UL << 63;
+
         /// <param name="senses">The nerve of the sensory channels; null for a body with no senses (the load stays zero).</param>
         /// <param name="senseRegion">The region whose point the emitters are sensed at.</param>
-        public Perception(NerveParameters parameters, double tickSeconds, int regionCount, NerveParameters? senses = null, int senseRegion = 0)
+        public Perception(NerveParameters parameters, double tickSeconds, int regionCount, NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null)
         {
             _p = parameters;
             _dt = tickSeconds;
@@ -129,10 +193,26 @@ namespace Lodur
                 _senseSlots = Math.Max(1, (int)Math.Round(senses.ConductionDelaySeconds / tickSeconds));
                 _senseRing = new double[ChannelCount * _senseSlots];
                 Array.Fill(_senseSens, 1.0);
+                var pp = percepts ?? new PerceptParameters();
+                pp.Validate();
+                _memorySeconds = pp.MemorySeconds;
+                _pId = new ulong[pp.Capacity];
+                _pKind = new uint[pp.Capacity];
+                _pX = new float[pp.Capacity];
+                _pY = new float[pp.Capacity];
+                _pZ = new float[pp.Capacity];
+                _pSalience = new double[pp.Capacity];
+                _pSince = new double[pp.Capacity];
+                _pSensed = new bool[pp.Capacity];
             }
             else
             {
                 _senseRing = Array.Empty<double>();
+                _pId = Array.Empty<ulong>();
+                _pKind = Array.Empty<uint>();
+                _pX = _pY = _pZ = Array.Empty<float>();
+                _pSalience = _pSince = Array.Empty<double>();
+                _pSensed = Array.Empty<bool>();
             }
         }
 
@@ -156,10 +236,18 @@ namespace Lodur
         /// </summary>
         public double ChannelAfferent(Channel channel) => _senseAfferent[(int)channel];
 
+        /// <summary>The number of percept slots: the capacity, or 0 with no senses. A slot is free when its percept's id is 0.</summary>
+        public int PerceptCount => _pId.Length;
+
+        /// <summary>The percept in the slot. A thing keeps its slot while it is remembered; a free slot reads as Id 0.</summary>
+        public Percept Percept(int slot) =>
+            new Percept(_pId[slot], _pKind[slot], _pX[slot], _pY[slot], _pZ[slot], _pSalience[slot], _pSince[slot]);
+
         /// <summary>
         /// Senses once per physics step. The spans are the caller's, one point per region. The sensory gain (default 1, the identity) multiplies the sense
         /// channels' afferents as they leave the conduction delay, so a change of gain reaches <see cref="Load"/> on the next call it is passed to; the nociceptive region
-        /// afferents are never gated. A gain outside [0, 1] (NaN and infinity included) is refused.
+        /// afferents are never gated. A gain outside [0, 1] (NaN and infinity included) is refused,
+        /// as is an emitter that sets <see cref="PhantomIdBit"/> and two emitters of one id with different kinds.
         /// </summary>
         public void Sense(ReadOnlySpan<float> x, ReadOnlySpan<float> y, ReadOnlySpan<float> z, ReadOnlySpan<BoxStimulus> sources,
             ReadOnlySpan<Emitter> emitters = default, double sensoryGain = 1.0)
@@ -182,6 +270,23 @@ namespace Lodur
                     if ((uint)emitters[i].Channel >= ChannelCount)
                     {
                         throw new ArgumentException($"Emitter {i} has channel {(int)emitters[i].Channel}; the channels are Audio, Visual and Interrupt.", nameof(emitters));
+                    }
+
+                    var id = emitters[i].Id;
+                    if ((id & PhantomIdBit) != 0)
+                    {
+                        throw new ArgumentException($"Emitter {i} sets the phantom id bit, which is reserved to Lodur.", nameof(emitters));
+                    }
+
+                    if (id != 0)
+                    {
+                        for (var j = 0; j < i; j++)
+                        {
+                            if (emitters[j].Id == id && emitters[j].Kind != emitters[i].Kind)
+                            {
+                                throw new ArgumentException($"Emitters {j} and {i} share id {id} with different kinds.", nameof(emitters));
+                            }
+                        }
                     }
                 }
             }
@@ -247,6 +352,140 @@ namespace Lodur
             }
 
             Load = 1.0 - quiet;
+            SensePercepts(x, y, z, emitters, gain);
+        }
+
+        // A thing is sensed when it has an id, the gain is above zero and the sense point is strictly inside the emitter's radius.
+        private void SensePercepts(float x, float y, float z, ReadOnlySpan<Emitter> emitters, double gain)
+        {
+            for (var s = 0; s < _pId.Length; s++)
+            {
+                if (_pId[s] == 0)
+                {
+                    continue;
+                }
+
+                _pSensed[s] = false;
+                _pSalience[s] = 0.0;
+                _pSince[s] += _dt;
+            }
+
+            if (gain > 0.0)
+            {
+                // Things already remembered first, so a newcomer can never evict one that is sensed this tick.
+                for (var i = 0; i < emitters.Length; i++)
+                {
+                    var slot = Reaches(emitters[i], x, y, z) ? SlotOf(emitters[i].Id) : -1;
+                    if (slot >= 0)
+                    {
+                        Touch(slot, emitters[i], x, y, z, gain);
+                    }
+                }
+            }
+
+            for (var s = 0; s < _pId.Length; s++)
+            {
+                if (_pId[s] != 0 && !_pSensed[s] && _pSince[s] > _memorySeconds)
+                {
+                    _pId[s] = 0;
+                }
+            }
+
+            if (gain > 0.0)
+            {
+                for (var i = 0; i < emitters.Length; i++)
+                {
+                    if (!Reaches(emitters[i], x, y, z))
+                    {
+                        continue;
+                    }
+
+                    var slot = SlotOf(emitters[i].Id);
+                    if (slot < 0)
+                    {
+                        slot = Admit(emitters[i].Id, emitters[i].Kind);
+                    }
+
+                    if (slot >= 0)
+                    {
+                        Touch(slot, emitters[i], x, y, z, gain);
+                    }
+                }
+            }
+        }
+
+        private static bool Reaches(in Emitter e, float x, float y, float z)
+        {
+            if (e.Id == 0 || !(e.Radius > 0f))
+            {
+                return false;
+            }
+
+            double dx = x - e.X, dy = y - e.Y, dz = z - e.Z;
+            return Math.Sqrt(dx * dx + dy * dy + dz * dz) < e.Radius;
+        }
+
+        private int SlotOf(ulong id)
+        {
+            for (var s = 0; s < _pId.Length; s++)
+            {
+                if (_pId[s] == id)
+                {
+                    return s;
+                }
+            }
+
+            return -1;
+        }
+
+        // The lowest free slot, else the unsensed slot longest unsensed (ties lowest slot); -1 when every slot was sensed this tick.
+        private int Admit(ulong id, uint kind)
+        {
+            var slot = -1;
+            for (var s = 0; s < _pId.Length; s++)
+            {
+                if (_pId[s] == 0)
+                {
+                    slot = s;
+                    break;
+                }
+            }
+
+            if (slot < 0)
+            {
+                for (var s = 0; s < _pId.Length; s++)
+                {
+                    if (!_pSensed[s] && (slot < 0 || _pSince[s] > _pSince[slot]))
+                    {
+                        slot = s;
+                    }
+                }
+            }
+
+            if (slot >= 0)
+            {
+                _pId[slot] = id;
+                _pKind[slot] = kind;
+                _pSensed[slot] = false;
+                _pSalience[slot] = 0.0;
+                _pSince[slot] = 0.0;
+            }
+
+            return slot;
+        }
+
+        // The first emitter of the tick fills the slot; a later one replaces it only by reaching him strictly harder.
+        private void Touch(int slot, in Emitter e, float x, float y, float z, double gain)
+        {
+            var salience = e.Received(x, y, z) * gain;
+            if (!_pSensed[slot] || salience > _pSalience[slot])
+            {
+                _pX[slot] = e.X; _pY[slot] = e.Y; _pZ[slot] = e.Z;
+                _pSalience[slot] = salience;
+            }
+
+            _pSensed[slot] = true;
+            _pSince[slot] = 0.0;
         }
     }
 }
