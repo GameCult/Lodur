@@ -52,7 +52,10 @@ namespace Lodur
         /// <summary>The game's tag for the thing (what kind it is). Lodur carries it and never interprets it; emitters sharing an id must share a kind.</summary>
         public uint Kind;
 
-        public Emitter(Channel channel, float x, float y, float z, float radius, double intensity = 0.0, ulong id = 0, uint kind = 0)
+        /// <summary>The thing's facts as the game sees them, bit i is fact i. The game owns every bit but <see cref="Perception.InReachFact"/> (63), which <see cref="Perception.Sense"/> refuses; emitters sharing an id must share facts.</summary>
+        public ulong Facts;
+
+        public Emitter(Channel channel, float x, float y, float z, float radius, double intensity = 0.0, ulong id = 0, uint kind = 0, ulong facts = 0)
         {
             Channel = channel;
             X = x; Y = y; Z = z;
@@ -60,6 +63,7 @@ namespace Lodur
             Intensity = intensity;
             Id = id;
             Kind = kind;
+            Facts = facts;
         }
 
         /// <summary>Intensity * max(0, 1 - distance / Radius) at the point; zero at and beyond the radius.</summary>
@@ -113,6 +117,9 @@ namespace Lodur
         public ulong Id { get; }
         public uint Kind { get; }
 
+        /// <summary>The thing's facts as last sensed; a thing changed out of sight keeps its old facts.</summary>
+        public ulong Facts { get; }
+
         /// <summary>Where the emitter that reached the puppet hardest was, the last tick the thing was sensed.</summary>
         public float X { get; }
         public float Y { get; }
@@ -124,9 +131,9 @@ namespace Lodur
         /// <summary>0 on a tick the thing is sensed.</summary>
         public double SecondsSinceSensed { get; }
 
-        public Percept(ulong id, uint kind, float x, float y, float z, double salience, double secondsSinceSensed)
+        public Percept(ulong id, uint kind, float x, float y, float z, double salience, double secondsSinceSensed, ulong facts = 0)
         {
-            Id = id; Kind = kind; X = x; Y = y; Z = z; Salience = salience; SecondsSinceSensed = secondsSinceSensed;
+            Id = id; Kind = kind; Facts = facts; X = x; Y = y; Z = z; Salience = salience; SecondsSinceSensed = secondsSinceSensed;
         }
     }
 
@@ -156,6 +163,7 @@ namespace Lodur
         private readonly double _memorySeconds;
         private readonly ulong[] _pId;        // percept slots; id 0 is free
         private readonly uint[] _pKind;
+        private readonly ulong[] _pFacts;
         private readonly float[] _pX, _pY, _pZ;
         private readonly double[] _pSalience;
         private readonly double[] _pSince;
@@ -166,6 +174,9 @@ namespace Lodur
 
         /// <summary>The top bit of an emitter id, reserved to Lodur's phantoms; <see cref="Sense"/> refuses a caller emitter that sets it.</summary>
         public const ulong PhantomIdBit = 1UL << 63;
+
+        /// <summary>The top fact bit, Lodur's own: whether the thing is within reach. The planner is its only writer, deriving it per call from distance; <see cref="Sense"/> refuses an emitter that sets it.</summary>
+        public const ulong InReachFact = 1UL << 63;
 
         /// <param name="senses">The nerve of the sensory channels; null for a body with no senses (the load stays zero).</param>
         /// <param name="senseRegion">The region whose point the emitters are sensed at.</param>
@@ -198,6 +209,7 @@ namespace Lodur
                 _memorySeconds = pp.MemorySeconds;
                 _pId = new ulong[pp.Capacity];
                 _pKind = new uint[pp.Capacity];
+                _pFacts = new ulong[pp.Capacity];
                 _pX = new float[pp.Capacity];
                 _pY = new float[pp.Capacity];
                 _pZ = new float[pp.Capacity];
@@ -210,6 +222,7 @@ namespace Lodur
                 _senseRing = Array.Empty<double>();
                 _pId = Array.Empty<ulong>();
                 _pKind = Array.Empty<uint>();
+                _pFacts = Array.Empty<ulong>();
                 _pX = _pY = _pZ = Array.Empty<float>();
                 _pSalience = _pSince = Array.Empty<double>();
                 _pSensed = Array.Empty<bool>();
@@ -244,13 +257,13 @@ namespace Lodur
 
         /// <summary>The percept in the slot. A thing keeps its slot while it is remembered; a free slot reads as Id 0.</summary>
         public Percept Percept(int slot) =>
-            new Percept(_pId[slot], _pKind[slot], _pX[slot], _pY[slot], _pZ[slot], _pSalience[slot], _pSince[slot]);
+            new Percept(_pId[slot], _pKind[slot], _pX[slot], _pY[slot], _pZ[slot], _pSalience[slot], _pSince[slot], _pFacts[slot]);
 
         /// <summary>
         /// Senses once per physics step. The spans are the caller's, one point per region. The sensory gain (default 1, the identity) multiplies the sense
         /// channels' afferents as they leave the conduction delay, so a change of gain reaches <see cref="Load"/> on the next call it is passed to; the nociceptive region
         /// afferents are never gated. A gain outside [0, 1] (NaN and infinity included) is refused,
-        /// as is an emitter that sets <see cref="PhantomIdBit"/> and two emitters of one id with different kinds.
+        /// as is an emitter that sets <see cref="PhantomIdBit"/> or <see cref="InReachFact"/> and two emitters of one id with different kinds or facts.
         /// </summary>
         public void Sense(ReadOnlySpan<float> x, ReadOnlySpan<float> y, ReadOnlySpan<float> z, ReadOnlySpan<BoxStimulus> sources,
             ReadOnlySpan<Emitter> emitters = default, double sensoryGain = 1.0)
@@ -281,6 +294,11 @@ namespace Lodur
                         throw new ArgumentException($"Emitter {i} sets the phantom id bit, which is reserved to Lodur.", nameof(emitters));
                     }
 
+                    if ((emitters[i].Facts & InReachFact) != 0)
+                    {
+                        throw new ArgumentException($"Emitter {i} sets the in-reach fact bit, which is reserved to Lodur.", nameof(emitters));
+                    }
+
                     if (id != 0)
                     {
                         for (var j = 0; j < i; j++)
@@ -288,6 +306,11 @@ namespace Lodur
                             if (emitters[j].Id == id && emitters[j].Kind != emitters[i].Kind)
                             {
                                 throw new ArgumentException($"Emitters {j} and {i} share id {id} with different kinds.", nameof(emitters));
+                            }
+
+                            if (emitters[j].Id == id && emitters[j].Facts != emitters[i].Facts)
+                            {
+                                throw new ArgumentException($"Emitters {j} and {i} share id {id} with different facts.", nameof(emitters));
                             }
                         }
                     }
@@ -392,6 +415,7 @@ namespace Lodur
                 {
                     _pId[s] = 0;
                     _pKind[s] = 0;
+                    _pFacts[s] = 0;
                     _pX[s] = 0f; _pY[s] = 0f; _pZ[s] = 0f;
                     _pSalience[s] = 0.0;
                     _pSince[s] = 0.0;
@@ -473,6 +497,7 @@ namespace Lodur
             {
                 _pId[slot] = id;
                 _pKind[slot] = kind;
+                _pFacts[slot] = 0;
                 _pSensed[slot] = false;
                 _pSalience[slot] = 0.0;
                 _pSince[slot] = 0.0;
@@ -492,6 +517,7 @@ namespace Lodur
             }
 
             _pKind[slot] = e.Kind;
+            _pFacts[slot] = e.Facts;
             _pSensed[slot] = true;
             _pSince[slot] = 0.0;
         }

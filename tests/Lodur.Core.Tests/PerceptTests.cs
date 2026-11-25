@@ -219,6 +219,72 @@ public sealed class PerceptTests
         Sense(p, new[] { At(0, kind: 1), At(0, kind: 2), At(4, kind: 3), At(4, kind: 3, channel: Channel.Visual) });
     }
 
+    private static Emitter Fact(ulong id, ulong facts, float x = 0f, double intensity = 0.5, Channel channel = Channel.Audio) =>
+        new Emitter(channel, x, 0f, 0f, 2f, intensity, id, 7, facts);
+
+    [Fact]
+    public void Facts_are_remembered_as_last_sensed_and_cleared_on_forgetting_and_admission()
+    {
+        var p = Make(capacity: 1, memory: 0.05);
+        Sense(p, new[] { Fact(1, 0b101UL) });
+        Assert.Equal(0b101UL, p.Percept(0).Facts);
+
+        // Out of sight the facts stay as last sensed.
+        Sense(p, Array.Empty<Emitter>());
+        Assert.Equal(1UL, p.Percept(0).Id);
+        Assert.Equal(0b101UL, p.Percept(0).Facts);
+
+        // A fresh sensing replaces them.
+        Sense(p, new[] { Fact(1, 0b010UL) });
+        Assert.Equal(0b010UL, p.Percept(0).Facts);
+
+        // Forgetting clears them.
+        for (var i = 0; i < 20; i++) Sense(p, Array.Empty<Emitter>());
+        Assert.Equal(0UL, p.Percept(0).Id);
+        Assert.Equal(0UL, p.Percept(0).Facts);
+
+        // Another id taking the slot starts from 0 and then its own facts; an emitter with no facts reads 0.
+        Sense(p, new[] { Fact(2, 0b1UL) });
+        Sense(p, new[] { Fact(3, 0UL) });
+        Assert.Equal(3UL, p.Percept(0).Id);
+        Assert.Equal(0UL, p.Percept(0).Facts);
+
+        // Two emitters of one id with the same facts, on two channels, are fine.
+        Sense(p, new[] { Fact(3, 0b11UL), Fact(3, 0b11UL, channel: Channel.Visual) });
+        Assert.Equal(0b11UL, p.Percept(0).Facts);
+
+        // Eviction by a newcomer replaces the evicted thing's facts.
+        Sense(p, Array.Empty<Emitter>());
+        Sense(p, new[] { Fact(4, 0b100UL) });
+        Assert.Equal(4UL, p.Percept(0).Id);
+        Assert.Equal(0b100UL, p.Percept(0).Facts);
+    }
+
+    [Fact]
+    public void Sense_refuses_the_reach_bit_and_a_fact_disagreement_before_stepping()
+    {
+        var p = Make();
+        Sense(p, new[] { Fact(1, 0b1UL, intensity: 0.6) });
+        var load = p.Load;
+        var since = p.Percept(0).SecondsSinceSensed;
+
+        Assert.Throws<ArgumentException>(() => Sense(p, new[] { Fact(1, 0b1UL), Fact(2, Perception.InReachFact) }));
+        Assert.Throws<ArgumentException>(() => Sense(p, new[] { Fact(2, Perception.InReachFact | 1UL) }));
+        Assert.Throws<ArgumentException>(() => Sense(p, new[] { Fact(0, Perception.InReachFact) }));
+        Assert.Throws<ArgumentException>(() => Sense(p, new[] { Fact(1, 0b1UL), Fact(3, 0UL), Fact(1, 0b11UL) }));
+        Assert.Equal(load, p.Load);
+        Assert.Equal(since, p.Percept(0).SecondsSinceSensed);
+        Assert.Equal(0b1UL, p.Percept(0).Facts);
+        Assert.Equal(1, Occupied(p));
+
+        // The state did not step: the next good tick is the second, not the fifth.
+        Sense(p, Array.Empty<Emitter>());
+        Assert.Equal(Dt, p.Percept(0).SecondsSinceSensed);
+
+        // Anonymous emitters may disagree freely on facts; the top fact bit below 63 is the game's.
+        Sense(p, new[] { Fact(0, 1UL), Fact(0, 2UL), Fact(5, 1UL << 62) });
+    }
+
     [Fact]
     public void Percept_parameters_are_validated()
     {
