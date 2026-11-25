@@ -70,14 +70,14 @@ internal sealed class PainBoxReplay
     private readonly double _intensity;
 
     public PainBoxReplay(ulong seed, double intensity = 0.8, double pull = 0.5, WithdrawalParameters? withdrawal = null,
-        DriveParameters? drive = null, double jitter = 0.2, Brain? brain = null)
+        DriveParameters? drive = null, double jitter = 0.2, Brain? brain = null, Physiology? physiology = null)
     {
         _rng = new SplitMix64(seed);
         _intensity = intensity;
         var gainTrait = 1.0 + jitter * _rng.NextSigned();
         var drainTrait = 1.0 + jitter * _rng.NextSigned();
         Actor = new Actor(Dt, 1, new NerveParameters { Gain = gainTrait }, withdrawal ?? new WithdrawalParameters(),
-            (drive ?? new DriveParameters()) with { DrainTrait = drainTrait }, brain ?? PainBoxBrain.Make(pull));
+            (drive ?? new DriveParameters()) with { DrainTrait = drainTrait }, brain ?? PainBoxBrain.Make(pull), physiology: physiology);
     }
 
     /// <summary>One tick of the replayed stimulus; the tick index is Actor.TickCount before the call.</summary>

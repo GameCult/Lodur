@@ -116,7 +116,7 @@ public sealed class SensoryGainTests
         {
             var actor = new Actor(Dt, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters() with { ResolveDrainPain = 0.0, ResolveDrainStrain = 0.0, ResolveDrainArousal = 0.0 },
                 GainGoal(gains[k]), new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0 }, 0);
-            actor.SetWillSlots(0.4, 1.0);   // a will that holds only part of the reflex down, so flinches leak
+            actor.SetAttention(0.4);   // a will that holds only part of the reflex down, so flinches leak
             Assert.Equal(gains[k], actor.Drive.SensoryGain);
             var strengths = new float[2];
             var targets = new Quat[2];

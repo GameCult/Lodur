@@ -213,7 +213,7 @@ follow-up `scenario-session-unify`).
 | Held object (grip) | (actor, hand side) → object stable id | grip begins on behaviour or level content → weld joint with threshold = grip strength → released by behaviour, reflex, unconsciousness or overload | Lodur grip state; Ymir weld executes | level may author "starts holding X" (content) |
 | Level / arena | content id | authored with player tools, saved, loaded by replaying commands | BDS | CultCache |
 | Contact / hit / overload / removal fact | (step, ordinal) | one step | Ymir | no |
-| Attention | (actor) scalar | 1.0, and nothing writes it yet but the test seam `Actor.SetWillSlots`; startle will drop it, recovering in under a second | Lodur drive | no |
+| Attention | (actor) scalar | 1.0, and nothing writes it yet but the test seam `Actor.SetAttention`; startle will drop it, recovering in under a second | Lodur drive | no |
 
 ## Questions for the operator and Deru (one batch; admitted as `question`s)
 

@@ -7,7 +7,7 @@
     <RootNamespace>Lodur</RootNamespace>
   </PropertyGroup>
 
-  <!-- The tests lower the Attention and Consciousness slots, which nothing in the core does yet. -->
+  <!-- The tests lower the Attention slot through an internal seam; nothing in the core writes it yet. -->
   <ItemGroup>
     <InternalsVisibleTo Include="Lodur.Core.Tests" />
   </ItemGroup>

@@ -13,6 +13,8 @@ namespace Lodur
         WillBroke = 2,
         /// <summary>The Brain's chosen goal took over, its deliberate latency after the choice.</summary>
         GoalChanged = 4,
+        /// <summary>The physiology died this tick (reported once, on the tick it died).</summary>
+        Died = 8,
     }
 
     /// <summary>
@@ -32,6 +34,8 @@ namespace Lodur
         private readonly long[] _entryTicks;
         private readonly Perception _perception;
         private readonly WithdrawalReflex[] _reflexes;
+        private readonly Physiology? _physiology;
+        private bool _diedReported;
         private DriveState _drive = DriveState.Fresh;
         private long _tick;
         private int _goal;
@@ -46,10 +50,16 @@ namespace Lodur
         public Actor(
             double tickSeconds, int regionCount,
             NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, Brain brain,
-            NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null)
+            NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null, Physiology? physiology = null)
         {
             brain.Validate();
             drive.Validate();
+            if (physiology != null && !physiology.TryBind())
+            {
+                throw new ArgumentException("this physiology is already bound to an actor; one actor steps one physiology.");
+            }
+
+            _physiology = physiology;
 
             _dt = tickSeconds;
             _driveP = drive;
@@ -97,11 +107,13 @@ namespace Lodur
         /// <summary>A snapshot of the drive; nothing but <see cref="Tick"/> writes it.</summary>
         public DriveState Drive => _drive;
 
-        /// <summary>Sets the drive's Attention and Consciousness slots; a seam for the tests until lodur-startle-attention and lodur-physiology drive them.</summary>
-        internal void SetWillSlots(double attention, double consciousness)
+        /// <summary>The physiology this actor steps and reads, null for an actor with none.</summary>
+        public Physiology? Physiology => _physiology;
+
+        /// <summary>Sets the drive's Attention slot; a seam for the tests until lodur-startle-attention writes it.</summary>
+        internal void SetAttention(double attention)
         {
             _drive.Attention = attention;
-            _drive.Consciousness = consciousness;
         }
 
         public Brain Brain => _brain;
@@ -139,6 +151,31 @@ namespace Lodur
             ReadOnlySpan<Emitter> emitters = default)
         {
             var events = TickEvents.None;
+            if (_physiology != null)
+            {
+                if (strengths.Length != _physiology.JointCount)
+                {
+                    throw new ArgumentException("strengths must have one entry per joint of the physiology's body.");
+                }
+
+                // The physiology steps first, on the drive as the last tick left it, and its consciousness is the slot's only writer.
+                if (!_physiology.Dead)
+                {
+                    _physiology.Step(_dt);
+                    _drive.Consciousness = _physiology.Consciousness;
+                }
+
+                if (_physiology.Dead)
+                {
+                    // Limp and permanent: the drive, goal and perception never change again; targets are left as they were.
+                    strengths.Clear();
+                    _tick++;
+                    if (_diedReported) return events;
+                    _diedReported = true;
+                    return TickEvents.Died;
+                }
+            }
+
             // A flinch is the leak of a suppressed reflex; with no will nothing is suppressed, so none is reported.
             var holding = _drive.Will > 0.0;
 
@@ -213,6 +250,15 @@ namespace Lodur
             var secondsInGoal = (_tick - _goalSince) * _dt;
             var weight = _tick - _goalSince >= _onset[_goal] ? Math.Pow(_drive.Will, _driveP.WillCurve) : 1.0;
             _brain.Goals[_goal].Behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets);
+            if (_physiology != null)
+            {
+                // The only scaling of strength: each muscle (plan joint m) is held to its ceiling.
+                for (var m = 0; m < strengths.Length; m++)
+                {
+                    strengths[m] *= (float)_physiology.MotorCeiling(m);
+                }
+            }
+
             _tick++;
             return events;
         }

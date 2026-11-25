@@ -93,7 +93,7 @@ namespace Lodur
         /// <summary>The fraction of resolve that attention lets through, 0..1. A slot, 1 until lodur-startle-attention fills it.</summary>
         public double Attention { get; internal set; }
 
-        /// <summary>The ceiling on the will that wakefulness sets, 0..1. A slot, 1 until lodur-physiology fills it.</summary>
+        /// <summary>The ceiling on the will that wakefulness sets, 0..1; written each tick by the Actor from its <see cref="Physiology"/> (the only writer), 1 for an Actor with no physiology.</summary>
         public double Consciousness { get; internal set; }
 
         /// <summary>The will that is available to hold reflexes down and to power voluntary behaviour: resolve through attention, capped by consciousness.</summary>

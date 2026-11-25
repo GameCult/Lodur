@@ -407,6 +407,26 @@ public sealed class PhysiologyTests
     }
 
     [Fact]
+    public void When_several_rules_hold_in_one_step_the_first_in_the_ruled_order_names_the_cause()
+    {
+        // One 3 s step: a 1 mL/s bleed loses 3 mL of a 5 mL body (past the lethal half) while the brain is wiped out.
+        var vitalBrain = new[] { new TissueDef("brain", 10, 1, Vital: true, Consciousness: 1), new TissueDef("heart", 10, 4, BloodPumping: 1), new TissueDef("muscle", 10, 1, Motor: 1) };
+        var vital = Make(root: vitalBrain);
+        Afflict(vital, "Bleeder", 1, 0, 1);
+        Afflict(vital, "Lesion", 0, 0, 10);
+        vital.Step(3.0);
+        Assert.True(vital.BloodLoss >= 1.0);
+        Assert.Equal(DeathCause.VitalTissue, vital.Cause);       // vital before blood
+
+        var plain = Make();
+        Afflict(plain, "Bleeder", 1, 0, 1);
+        Afflict(plain, "Lesion", 0, BrainLayer, 10);
+        plain.Step(3.0);
+        Assert.True(plain.BloodLoss >= 1.0 && plain.Consciousness == 0.0);
+        Assert.Equal(DeathCause.BloodLoss, plain.Cause);         // blood before consciousness
+    }
+
+    [Fact]
     public void Death_is_permanent_and_limp_and_nothing_changes_after_it_but_the_table_still_takes_wounds()
     {
         var p = Make();

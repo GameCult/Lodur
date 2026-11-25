@@ -417,13 +417,21 @@ public sealed class WillTests
         Assert.Equal(1.0, calm.Drive.Resolve);
     }
 
-    // The slots read 1 in the core today; these tests lower them through the internal seam and watch every consumer of Will move.
+    // The slots read 1 in the core today; these tests lower attention through the internal seam and consciousness through a physiology
+    // (a brain of 1 Hp lesioned by 1 - c), and watch every consumer of Will move.
 
     private static Actor Hold(double attention, double consciousness, DriveParameters? drive = null)
     {
         var brain = new Brain { Goals = new[] { new GoalSpec { Id = "g", Behaviour = new PoseBehaviour { Keys = new[] { PainBoxBrain.Hold }, FlinchPose = PainBoxBrain.Withdraw, Hold = Hold07 } } } };
-        var actor = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), drive ?? new DriveParameters(), brain);
-        actor.SetWillSlots(attention, consciousness);
+        var root = new[] { new TissueDef("brain", 1, 1, Consciousness: 1), new TissueDef("muscle", 10, 1, Motor: 1) };
+        var physiology = new Physiology(PhysioFixtures.Body3(), PhysioFixtures.Plan3(root: root), 20);
+        if (consciousness < 1.0)
+        {
+            Assert.True(physiology.Afflict(PhysioFixtures.Af("Lesion"), 0, 0, 1.0 - consciousness));
+        }
+
+        var actor = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), drive ?? new DriveParameters(), brain, physiology: physiology);
+        actor.SetAttention(attention);
         return actor;
     }
 
@@ -451,7 +459,8 @@ public sealed class WillTests
         {
             Step(a, 0.6, s, q);
             var d = a.Drive;
-            Assert.Equal(Math.Min(d.Resolve * attention, consciousness), d.Will);
+            Assert.Equal(consciousness, d.Consciousness, 12);   // 1 - (1 - c) is not c in doubles
+            Assert.Equal(Math.Min(d.Resolve * attention, d.Consciousness), d.Will);
         }
     }
 
@@ -464,8 +473,10 @@ public sealed class WillTests
             var a = Hold(attention, consciousness);
             var s = new float[2];
             var q = new Quat[2];
-            for (var i = 0; i < 100; i++) Step(a, 0.8, s, q);
+            var died = false;
+            for (var i = 0; i < 100; i++) died |= (Step(a, 0.8, s, q) & TickEvents.Died) != 0;
             Assert.True(a.Drive.Resolve > 0.9);
+            Assert.Equal(consciousness == 0.0, died);   // no consciousness is a death by the ruled rule, on the first tick
             return a.Drive.Strain;
         }
 
@@ -509,7 +520,9 @@ public sealed class WillTests
         for (var i = 0; i < 20; i++)
         {
             Step(a, 0.0, s, q);   // no stimulus, no leak
-            Assert.Equal(0.7f * (float)Math.Sqrt(Math.Min(a.Drive.Resolve * attention, consciousness)), s[0]);
+            var c = a.Drive.Consciousness;
+            Assert.Equal(consciousness, c, 12);
+            Assert.Equal(0.7f * (float)Math.Sqrt(Math.Min(a.Drive.Resolve * attention, c)) * (float)c, s[0]);   // the motor ceiling is the capacity times consciousness
         }
     }
 
