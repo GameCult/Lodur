@@ -151,6 +151,42 @@ public sealed class ActorPhysiologyTests
     }
 
     [Fact]
+    public void The_actor_steps_its_physiology_on_the_drives_arousal_and_the_strength_it_applied_after_the_ceiling()
+    {
+        Physiology Body()
+        {
+            var q = Make3();
+            Assert.True(q.Afflict(Af("Choke"), 0, 0, 1e9));      // the stores move every tick
+            Assert.True(q.Afflict(Af("MotorHalf"), 1, 0, 1));    // joint 0 at half: the ceiling makes the applied strength differ from the asked one
+            return q;
+        }
+
+        var p = Body();
+        var twin = Body();
+        var a = new Actor(0.01, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), HoldBrain(),
+            new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0 }, 0, physiology: p);
+        var loud = SensoryRig.One(0.55);
+        var s = new float[2];
+        var q = new Quat[2];
+        double arousalBefore = 0.0, effortBefore = 0.0, peakArousal = 0.0;
+        var peakEffort = 0.0;
+        for (var i = 0; i < 1500; i++)
+        {
+            twin.Step(0.01, new PhysiologyInput(arousalBefore, effortBefore));
+            a.Tick(NoPoint, NoPoint, NoPoint, ReadOnlySpan<BoxStimulus>.Empty, s, q, loud);
+            Assert.Equal(twin.BloodOxygen, p.BloodOxygen);
+            Assert.Equal(twin.BrainOxygen, p.BrainOxygen);
+            arousalBefore = a.Drive.Arousal;
+            effortBefore = ((double)s[0] + s[1]) / 2.0;
+            peakArousal = Math.Max(peakArousal, arousalBefore);
+            peakEffort = Math.Max(peakEffort, effortBefore);
+        }
+
+        Assert.True(peakArousal > 0.1, $"arousal never rose: {peakArousal}");
+        Assert.True(peakEffort > 0.1, $"no strength was applied: {peakEffort}");
+    }
+
+    [Fact]
     public void A_healthy_physiology_changes_nothing_bit_for_bit()
     {
         foreach (var seed in new ulong[] { 1, 2, 3 })

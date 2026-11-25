@@ -6,7 +6,7 @@ namespace Lodur
     /// <summary>Why a body died; the first rule that held at the end of the step that killed it (ruling bds-death).</summary>
     public enum DeathCause { None, VitalTissue, BloodLoss, Consciousness }
 
-    /// <summary>What the stepping Actor reports each step, each in [0, 1]: Arousal is the sensory load carried over time, Effort the mean strength it asked of the muscles. The default is rest.</summary>
+    /// <summary>What the stepping Actor reports each step, each in [0, 1]: Arousal is the sensory load carried over time, Effort the mean strength the muscles actually applied last tick, after each joint's motor ceiling (the Actor reports it so, not what the behaviour asked). The default is rest.</summary>
     public readonly record struct PhysiologyInput(double Arousal, double Effort);
 
     /// <summary>
