@@ -11,14 +11,27 @@ namespace Lodur
         // Vascularity is the blood a wound in the tissue loses relative to muscle (play-tuned placeholders): skin and bone are thin, organs rich.
         private const double SkinV = 0.2, MuscleV = 1.0, BoneV = 0.3, BrainV = 1.0, HeartV = 4.0, LungV = 2.0, LiverV = 3.0, KidneyV = 2.0, GutV = 1.0;
 
-        private static TissueDef Skin(double hp) => new TissueDef("Skin", hp, SkinV);
+        // Fat is thickness in the stack, not particles; its vascularity is a placeholder.
+        private const double FatV = 0.1;
+
+        // Shell thickness in m. Skin: mean dermis thickness of excised back skin (research tissue-tensile-strength.ts-skin-annaidh-2012). Fat and muscle sheet: (placeholder).
+        private const double SkinT = 0.00256, FatT = 0.005, MuscleSheetT = 0.015;
+
+        // Sheet material: spacing m, edge and attach compliance m/N, tensile strength Pa. Skin strength is the same study's ultimate stress (21.6 MPa);
+        // spacing and compliances are (placeholder) values the fella.c and sieve.c probes ran with (flesh-map P1, P2, P6). Muscle strength is (placeholder): no human failure value.
+        private static readonly SheetDef SkinSheet = new SheetDef(0.10, 2e-4, 1e-3, 21.6e6);
+        private static readonly SheetDef MuscleSheetMaterial = new SheetDef(0.14, 1e-4, 1e-4, 0.5e6);
+
+        private static TissueDef Skin(double hp) => new TissueDef("Skin", hp, SkinV) { Thickness = SkinT, Sheet = SkinSheet };
+        private static TissueDef Fat(double hp) => new TissueDef("Fat", hp, FatV) { Thickness = FatT };
         private static TissueDef Muscle(double hp) => new TissueDef("Muscle", hp, MuscleV, Motor: 1.0);
+        private static TissueDef MuscleSheet(double hp) => Muscle(hp) with { Thickness = MuscleSheetT, Sheet = MuscleSheetMaterial };
         private static TissueDef Bone(string label, double hp) => new TissueDef(label, hp, BoneV);
 
         private static Effect Curve(EffectTarget target, EffectOp op, EffectDriver driver, params (double X, double Y)[] curve) => new Effect(target, op, driver, curve);
 
         /// <summary>
-        /// The 19-part humanoid of <see cref="BodyPlans.Humanoid"/>: tissue stacks outside-in with RimWorld's human part HP, the
+        /// The 19-part humanoid of <see cref="BodyPlans.Humanoid"/>: tissue stacks outside-in with RimWorld's human part HP (fat and bone are stack thickness and core, not particles), the
         /// blood, the stages of blood loss, and the Cut and Bruise afflictions. Numbers not cited are play-tuned placeholders.
         /// </summary>
         public static PhysiologyPlan Humanoid()
@@ -26,20 +39,20 @@ namespace Lodur
             var parts = new List<PartTissuesDef>();
             void Stack(string part, Side side, params TissueDef[] tissues) => parts.Add(new PartTissuesDef(part, side, tissues));
 
-            Stack("Pelvis", Side.Center, Skin(10), Muscle(30), Bone("Pelvis", 25), new TissueDef("Gut", 20, GutV));
+            Stack("Pelvis", Side.Center, Skin(10), Fat(10), MuscleSheet(30), Bone("Pelvis", 25), new TissueDef("Gut", 20, GutV));
             Stack("Torso", Side.Center,
-                Skin(10), Muscle(40), Bone("Ribcage", 25),
+                Skin(10), Fat(10), MuscleSheet(40), Bone("Ribcage", 25),
                 new TissueDef("Heart", 15, HeartV, Vital: true, BloodPumping: 1.0),
                 new TissueDef("LungLeft", 15, LungV), new TissueDef("LungRight", 15, LungV),
                 new TissueDef("Liver", 20, LiverV), new TissueDef("KidneyLeft", 15, KidneyV), new TissueDef("KidneyRight", 15, KidneyV));
             // The neck's muscle carries the Neck joint's motor weight: the head has to be a joint child with a muscle (spec discrepancy, report deviation).
-            Stack("Head", Side.Center, Skin(5), Muscle(25), Bone("Skull", 25), new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0));
+            Stack("Head", Side.Center, Skin(5), Fat(5), Muscle(25), Bone("Skull", 25), new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0));
             foreach (var side in new[] { Side.Left, Side.Right })
             {
-                Stack("UpperArm", side, Skin(8), Muscle(30), Bone("Humerus", 25));
-                Stack("LowerArm", side, Skin(8), Muscle(25), Bone("Radius", 20));
-                Stack("Thigh", side, Skin(10), Muscle(30), Bone("Femur", 25));
-                Stack("Shin", side, Skin(8), Muscle(25), Bone("Tibia", 25));
+                Stack("UpperArm", side, Skin(8), Fat(8), MuscleSheet(30), Bone("Humerus", 25));
+                Stack("LowerArm", side, Skin(8), Fat(8), MuscleSheet(25), Bone("Radius", 20));
+                Stack("Thigh", side, Skin(10), Fat(10), MuscleSheet(30), Bone("Femur", 25));
+                Stack("Shin", side, Skin(8), Fat(8), MuscleSheet(25), Bone("Tibia", 25));
                 Stack("Foot", side, Skin(5), Muscle(20), Bone("Bones", 25));
                 Stack("Palm", side, Skin(5), Muscle(20), Bone("Metacarpals", 15));
                 Stack("Thumb", side, Skin(3), Muscle(8), Bone("Bone", 8));

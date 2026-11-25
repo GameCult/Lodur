@@ -69,6 +69,47 @@ public sealed class PhysiologyPlansTests
     }
 
     [Fact]
+    public void The_humanoid_stacks_carry_skin_everywhere_muscle_sheets_on_six_kinds_and_fat_as_thickness()
+    {
+        var plan = PhysiologyPlans.Humanoid();
+        var stacks = plan.Resolve(Body);
+        var sheetKinds = new[] { "Pelvis", "Torso", "UpperArm", "LowerArm", "Thigh", "Shin" };
+        var fatKinds = new HashSet<string>(sheetKinds) { "Head" };
+        var muscleSheets = 0;
+        var fats = 0;
+        for (var p = 0; p < Body.Parts.Count; p++)
+        {
+            var label = Body.Parts[p].Label;
+            var tissues = plan.Parts[stacks[p]].Tissues;
+            var skin = tissues[0];
+            Assert.Equal("Skin", skin.Label);
+            Assert.NotNull(skin.Sheet);
+            Assert.Equal(0.00256, skin.Thickness);
+            Assert.Equal(21.6e6, skin.Sheet!.Value.TensileStrength);
+
+            var fat = tissues.Count > 1 && tissues[1].Label == "Fat";
+            Assert.Equal(fatKinds.Contains(label), fat);
+            if (fat)
+            {
+                fats++;
+                Assert.True(tissues[1].Thickness > 0.0);
+                Assert.Null(tissues[1].Sheet);
+                Assert.Equal(skin.Hp, tissues[1].Hp);
+            }
+
+            var muscleSheet = tissues.Any(t => t.Label == "Muscle" && t.Sheet != null);
+            var shells = 1 + (fat ? 1 : 0) + (muscleSheet ? 1 : 0);
+            for (var l = shells; l < tissues.Count; l++) Assert.Equal(0.0, tissues[l].Thickness);   // cores only after the shells
+
+            Assert.Equal(Array.IndexOf(sheetKinds, label) >= 0, muscleSheet);
+            if (muscleSheet) muscleSheets++;
+        }
+
+        Assert.Equal(10, muscleSheets);
+        Assert.Equal(11, fats);
+    }
+
+    [Fact]
     public void Blood_loss_stages_drop_consciousness_by_the_ruled_steps()
     {
         var p = Spawn();
