@@ -432,4 +432,84 @@ public sealed class PlannerTests
         Assert.Equal(0, wrong);
         Assert.Equal(0L, allocated);
     }
+
+    [Fact]
+    public void A_chain_of_n_steps_is_found_at_depth_n_and_not_at_n_minus_one()
+    {
+        // Step k gives bit k on the target and needs bit k - 1: the want on bit n - 1 is exactly n steps away.
+        var chain = Enumerable.Range(0, 4).Select(k => new Verb { Id = "Link" + k, Needs = k == 0 ? Array.Empty<Fact>() : new[] { This(k - 1) }, Gives = new[] { This(k) } }).ToArray();
+        var p = Make();
+        Sense(p, Thing(1, 1, 0f));
+        var planner = new Planner(chain, 8, 8, 1.0);
+        for (var n = 1; n <= 4; n++)
+        {
+            var (found, steps) = Run(planner, p, 1, This(n - 1), n);
+            Assert.Equal(n, found);
+            for (var k = 0; k < n; k++) Assert.Equal(new PlanStep(k, 1, 0), steps[k]);
+
+            Assert.Equal(-1, Run(planner, p, 1, This(n - 1), n - 1).Length);
+            Assert.Equal(n, Run(planner, p, 1, This(n - 1), 8).Length);
+        }
+    }
+
+    [Fact]
+    public void Ties_in_a_longer_plan_go_to_the_last_step_first()
+    {
+        // Slots 0 and 1 are things 30 and 10, one kind. Grab gives a thing Held; Use takes Held in its tool and gives Self 1, on a different thing.
+        // The last step takes the lowest slot it can, which leaves slot 1 for Grab; taking the first step lowest would put Grab on slot 0.
+        var verbs = new[]
+        {
+            new Verb { Id = "Grab", This = Kinds(2), Gives = new[] { This(Held) } },
+            new Verb { Id = "Use", This = Kinds(2), Tool = Kinds(2), Needs = new[] { Tool(Held) }, Gives = new[] { Self(1) } },
+        };
+        var q = Make();
+        Sense(q, Thing(30, 2, 0f), Thing(10, 2, 0f));
+        var planner = new Planner(verbs, 8, 3, 1.0);
+        var steps = new PlanStep[3];
+        Assert.Equal(2, planner.Plan(q, 0UL, 0f, 0f, 0f, 0, Self(1), 3, steps));
+        Expect(steps, (0, 10, 0), (1, 30, 10));
+        Assert.Equal(-1, planner.Plan(q, 0UL, 0f, 0f, 0f, 0, Self(1), 1, steps));
+    }
+
+    [Fact]
+    public void A_want_that_cannot_be_reached_is_given_up_within_the_budget_at_any_depth()
+    {
+        var planner = Build();
+        var p = World();
+        var steps = new PlanStep[8];
+        foreach (var depth in new[] { 4, 5, 6 })
+        {
+            // The door cannot be opened in fewer than seven steps; relevance is what keeps the search from trying every verb on every thing.
+            Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, SlotOf(p, 5), This(Open), depth, steps));
+            Assert.True(planner.LastNodes < Planner.NodeBudget / 8, $"depth {depth} regressed {planner.LastNodes} groundings");
+        }
+
+        // The longest honest search in this world, the seven-step door, uses a fraction of the budget.
+        Assert.Equal(7, planner.Plan(p, 0UL, 0f, 0f, 0f, SlotOf(p, 5), This(Open), 8, steps));
+        Assert.True(planner.LastNodes < Planner.NodeBudget / 4, $"the door took {planner.LastNodes} groundings");
+    }
+
+    [Fact]
+    public void A_search_that_outgrows_the_budget_returns_no_plan_at_the_same_count_every_time()
+    {
+        // Two verbs ask each other's fact of any of eight things: every level is relevant and nothing ever grounds, so the tree is 16 wide.
+        var verbs = new[]
+        {
+            new Verb { Id = "A", This = Kinds(1), Needs = new[] { Self(2) }, Gives = new[] { Self(1) } },
+            new Verb { Id = "B", This = Kinds(1), Needs = new[] { Self(1) }, Gives = new[] { Self(2) } },
+        };
+        var p = Make();
+        Sense(p, Enumerable.Range(1, 8).Select(i => Thing((ulong)i, 1, 0f)).ToArray());
+        var planner = new Planner(verbs, 8, 8, 1.0);
+        var steps = new PlanStep[8];
+        for (var i = 0; i < 3; i++)
+        {
+            Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, 0, Self(1), 8, steps));
+            Assert.Equal(Planner.NodeBudget + 1, planner.LastNodes);
+        }
+
+        // A short plan in the same world is not touched by the budget the long one spent.
+        Assert.Equal(1, planner.Plan(p, 1UL << 2, 0f, 0f, 0f, 0, Self(1), 8, steps));
+        Assert.Equal(new PlanStep(0, 1, 0), steps[0]);
+    }
 }

@@ -259,6 +259,14 @@ namespace Lodur
         public Percept Percept(int slot) =>
             new Percept(_pId[slot], _pKind[slot], _pX[slot], _pY[slot], _pZ[slot], _pSalience[slot], _pSince[slot], _pFacts[slot]);
 
+        // The planner reads every slot each call; a Percept per slot would copy fields it never looks at.
+        internal ReadOnlySpan<ulong> PerceptIds => _pId;
+        internal ReadOnlySpan<uint> PerceptKinds => _pKind;
+        internal ReadOnlySpan<ulong> PerceptFacts => _pFacts;
+        internal ReadOnlySpan<float> PerceptX => _pX;
+        internal ReadOnlySpan<float> PerceptY => _pY;
+        internal ReadOnlySpan<float> PerceptZ => _pZ;
+
         /// <summary>
         /// Senses once per physics step. The spans are the caller's, one point per region. The sensory gain (default 1, the identity) multiplies the sense
         /// channels' afferents as they leave the conduction delay, so a change of gain reaches <see cref="Load"/> on the next call it is passed to; the nociceptive region

@@ -60,9 +60,19 @@ namespace Lodur
     {
         private const int MaxNeeds = 8;
 
+        /// <summary>
+        /// The most groundings one <see cref="Plan"/> call may regress, counted across all its depths. A counter, not a clock, so the cut-off is the same on every machine.
+        /// A call that spends it returns -1 as if no plan existed.
+        /// </summary>
+        public const int NodeBudget = 4096;
+
         private readonly Verb[] _verbs;
         private readonly Fact[][] _needs;
         private readonly Fact[][] _gives;
+        private readonly uint[]?[] _thisKinds;  // the kinds a verb's target may be; null accepts any
+        private readonly uint[]?[] _toolKinds;  // the kinds a verb's second thing may be; null when it takes none
+        private readonly ulong[] _givenBits;    // per verb, bit i set when one of its gives is on bit i of any subject
+        private readonly int _words;
         private readonly int _capacity;
         private readonly double _reach;
         private readonly int _stride;
@@ -74,6 +84,9 @@ namespace Lodur
         private readonly int[] _stepVerb;       // the step chosen with r steps left, at r - 1
         private readonly int[] _stepThis;
         private readonly int[] _stepTool;
+        private readonly ulong[] _meetsThis;    // per level, the slots whose literal a This give of the verb in hand meets, _words per level
+        private readonly ulong[] _meetsTool;
+        private int _nodes;
 
         public Planner(IReadOnlyList<Verb> verbs, int capacity, int maxDepth, double reachMeters)
         {
@@ -100,6 +113,9 @@ namespace Lodur
             _verbs = new Verb[verbs.Count];
             _needs = new Fact[verbs.Count][];
             _gives = new Fact[verbs.Count][];
+            _thisKinds = new uint[verbs.Count][];
+            _toolKinds = new uint[verbs.Count][];
+            _givenBits = new ulong[verbs.Count];
             for (var v = 0; v < _verbs.Length; v++)
             {
                 var verb = verbs[v] ?? throw new ArgumentException($"Verb {v} is null.", nameof(verbs));
@@ -107,6 +123,12 @@ namespace Lodur
                 _verbs[v] = verb;
                 _needs[v] = Copy(verb.Needs);
                 _gives[v] = Copy(verb.Gives);
+                _thisKinds[v] = Kinds(verb.This);
+                _toolKinds[v] = Kinds(verb.Tool);
+                foreach (var g in _gives[v])
+                {
+                    _givenBits[v] |= 1UL << g.Bit;
+                }
             }
 
             MaxDepth = maxDepth;
@@ -121,10 +143,16 @@ namespace Lodur
             _stepVerb = new int[Math.Max(1, maxDepth)];
             _stepThis = new int[Math.Max(1, maxDepth)];
             _stepTool = new int[Math.Max(1, maxDepth)];
+            _words = (capacity + 63) >> 6;
+            _meetsThis = new ulong[(maxDepth + 1) * _words];
+            _meetsTool = new ulong[(maxDepth + 1) * _words];
         }
 
         /// <summary>The deepest plan this planner can be asked for.</summary>
         public int MaxDepth { get; }
+
+        /// <summary>The groundings the last <see cref="Plan"/> call regressed; above <see cref="NodeBudget"/> means it ran out and returned -1.</summary>
+        public int LastNodes => _nodes;
 
         /// <summary>
         /// 0 when the want already holds, else the length of the shallowest plan of at most <paramref name="depth"/> steps, written into
@@ -134,16 +162,22 @@ namespace Lodur
         public int Plan(Perception perception, ulong selfFacts, float ox, float oy, float oz, int targetSlot, Fact want, int depth, Span<PlanStep> plan)
         {
             Check(perception, targetSlot, want, depth, plan.Length);
+            _nodes = 0;
 
             _facts[0] = selfFacts & ~Perception.InReachFact;
+            var ids = perception.PerceptIds;
+            var kinds = perception.PerceptKinds;
+            var facts = perception.PerceptFacts;
+            var xs = perception.PerceptX;
+            var ys = perception.PerceptY;
+            var zs = perception.PerceptZ;
+            var reachSquared = _reach * _reach;
+            ids.CopyTo(_slotId);
+            kinds.CopyTo(_slotKind);
             for (var s = 0; s < _capacity; s++)
             {
-                var p = perception.Percept(s);
-                _slotId[s] = p.Id;
-                _slotKind[s] = p.Kind;
-                double dx = p.X - ox, dy = p.Y - oy, dz = p.Z - oz;
-                var reach = dx * dx + dy * dy + dz * dz <= _reach * _reach;
-                _facts[s + 1] = (p.Facts & ~Perception.InReachFact) | (reach ? Perception.InReachFact : 0UL);
+                double dx = xs[s] - ox, dy = ys[s] - oy, dz = zs[s] - oz;
+                _facts[s + 1] = (facts[s] & ~Perception.InReachFact) | (dx * dx + dy * dy + dz * dz <= reachSquared ? Perception.InReachFact : 0UL);
             }
 
             var wantLit = Lit(want.Subject == FactSubject.Self ? 0 : targetSlot + 1, want.Bit, want.Value);
@@ -164,6 +198,11 @@ namespace Lodur
                     }
 
                     return d;
+                }
+
+                if (_nodes > NodeBudget)
+                {
+                    break;
                 }
             }
 
@@ -188,37 +227,61 @@ namespace Lodur
                 return true;
             }
 
+            var open = 0UL;
+            for (var i = 0; i < n; i++)
+            {
+                open |= 1UL << ((_set[cur + i] >> 1) & 63);
+            }
+
             for (var v = 0; v < _verbs.Length; v++)
             {
-                var verb = _verbs[v];
+                // Relevance, before any grounding: a step is only worth taking if it gives a literal still open.
+                if ((_givenBits[v] & open) == 0UL || !Meets(v, r, cur, n, out var meetsSelf))
+                {
+                    continue;
+                }
+
+                var thisKinds = _thisKinds[v];
+                var toolKinds = _toolKinds[v];
+                var m = r * _words;
                 for (var a = 0; a < _capacity; a++)
                 {
-                    if (_slotId[a] == 0 || (verb.This is not null && !verb.This.Accepts(_slotKind[a])))
+                    if (_slotId[a] == 0 || (thisKinds is not null && !Has(thisKinds, _slotKind[a])))
                     {
                         continue;
                     }
 
-                    var toolFrom = verb.Tool is null ? -1 : 0;
-                    var toolTo = verb.Tool is null ? -1 : _capacity - 1;
-                    for (var b = toolFrom; b <= toolTo; b++)
+                    var meetsA = meetsSelf || ((_meetsThis[m + (a >> 6)] >> (a & 63)) & 1UL) != 0UL;
+                    if (toolKinds is null)
                     {
-                        if (b >= 0 && (b == a || _slotId[b] == 0 || !verb.Tool!.Accepts(_slotKind[b])))
-                        {
-                            continue;
-                        }
-
-                        if (!Regress(v, a, b, cur, n, (r - 1) * _stride, out var count))
-                        {
-                            continue;
-                        }
-
-                        _setCount[r - 1] = count;
-                        _stepVerb[r - 1] = v;
-                        _stepThis[r - 1] = a;
-                        _stepTool[r - 1] = b;
-                        if (Search(r - 1))
+                        if (meetsA && Try(r, v, a, -1, cur, n))
                         {
                             return true;
+                        }
+
+                        if (_nodes > NodeBudget)
+                        {
+                            return false;
+                        }
+
+                        continue;
+                    }
+
+                    for (var b = 0; b < _capacity; b++)
+                    {
+                        if (b == a || _slotId[b] == 0 || !Has(toolKinds, _slotKind[b]) || !(meetsA || ((_meetsTool[m + (b >> 6)] >> (b & 63)) & 1UL) != 0UL))
+                        {
+                            continue;
+                        }
+
+                        if (Try(r, v, a, b, cur, n))
+                        {
+                            return true;
+                        }
+
+                        if (_nodes > NodeBudget)
+                        {
+                            return false;
                         }
                     }
                 }
@@ -227,13 +290,104 @@ namespace Lodur
             return false;
         }
 
+        // Takes the step v on (a, b) as the last of r: regress through it and search the rest.
+        private bool Try(int r, int v, int a, int b, int cur, int n)
+        {
+            _nodes++;
+            if (_nodes > NodeBudget || !Regress(v, a, b, cur, n, (r - 1) * _stride, out var count))
+            {
+                return false;
+            }
+
+            _setCount[r - 1] = count;
+            _stepVerb[r - 1] = v;
+            _stepThis[r - 1] = a;
+            _stepTool[r - 1] = b;
+            return Search(r - 1);
+        }
+
+        // Which groundings of the verb give a literal the set at r still needs: a Self give meets one whatever the grounding (meetsSelf),
+        // a This give meets the one on the slot it is grounded on, a Tool give likewise; those slots are left in the level's masks.
+        // False when no grounding of the verb meets anything.
+        private bool Meets(int v, int r, int cur, int n, out bool meetsSelf)
+        {
+            meetsSelf = false;
+            var m = r * _words;
+            for (var w = 0; w < _words; w++)
+            {
+                _meetsThis[m + w] = 0UL;
+                _meetsTool[m + w] = 0UL;
+            }
+
+            var any = false;
+            var gives = _gives[v];
+            for (var g = 0; g < gives.Length; g++)
+            {
+                var gf = gives[g];
+                for (var i = 0; i < n; i++)
+                {
+                    var l = _set[cur + i];
+                    if (((l >> 1) & 63) != gf.Bit || (l & 1) != (gf.Value ? 1 : 0))
+                    {
+                        continue;
+                    }
+
+                    var thing = l >> 7;
+                    if (gf.Subject == FactSubject.Self)
+                    {
+                        if (thing == 0)
+                        {
+                            meetsSelf = true;
+                            any = true;
+                        }
+                    }
+                    else if (thing > 0)
+                    {
+                        var mask = gf.Subject == FactSubject.This ? _meetsThis : _meetsTool;
+                        mask[m + ((thing - 1) >> 6)] |= 1UL << ((thing - 1) & 63);
+                        any = true;
+                    }
+                }
+            }
+
+            return any;
+        }
+
+        private static bool Has(uint[] kinds, uint kind)
+        {
+            for (var i = 0; i < kinds.Length; i++)
+            {
+                if (kinds[i] == kind)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static uint[]? Kinds(TargetFilter? filter)
+        {
+            if (filter is null)
+            {
+                return null;
+            }
+
+            var kinds = new uint[filter.Kinds.Count];
+            for (var i = 0; i < kinds.Length; i++)
+            {
+                kinds[i] = filter.Kinds[i];
+            }
+
+            return kinds;
+        }
+
         // The set before the step: what the step gives that is needed is met, what it needs is added. False when the
-        // step meets nothing needed, undoes something needed, or leaves a literal and its negation.
+        // step undoes something needed or leaves a literal and its negation. That it meets something is Search's relevance check.
         private bool Regress(int v, int a, int b, int cur, int n, int next, out int count)
         {
             count = 0;
             var gives = _gives[v];
-            var met = false;
             for (var g = 0; g < gives.Length; g++)
             {
                 var lit = Ground(gives[g], a, b);
@@ -249,14 +403,7 @@ namespace Lodur
                     {
                         return false;
                     }
-
-                    met = true;
                 }
-            }
-
-            if (!met)
-            {
-                return false;
             }
 
             for (var i = 0; i < n; i++)
