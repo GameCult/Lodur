@@ -31,6 +31,8 @@ internal static class PhysioFixtures
         Def("Clot", 0, false, PhysiologyClock.Acute,
             Const(EffectTarget.Bleed, EffectOp.Offset, 1e-3),
             new Effect(EffectTarget.Bleed, EffectOp.Factor, EffectDriver.Age, new[] { (0.0, 1.0), (60.0, 0.5), (300.0, 0.1) })),
+        Def("MotorDim", 0, false, PhysiologyClock.Acute, Const(EffectTarget.Motor, EffectOp.Offset, -0.2)),
+        Def("Staunch", 0, false, PhysiologyClock.Acute, Const(EffectTarget.Bleed, EffectOp.Offset, -1e-3)),
         Def("Fading", -0.1, false, PhysiologyClock.Acute, new Effect(EffectTarget.Bleed, EffectOp.Offset, EffectDriver.Severity, new[] { (0.0, 0.0), (1.0, 1e-5) })),
         Def("SlowBleeder", 0, false, PhysiologyClock.Slow, new Effect(EffectTarget.Bleed, EffectOp.Offset, EffectDriver.Severity, new[] { (0.0, 0.0), (1.0, 1e-3) })),
     };
@@ -44,7 +46,7 @@ internal static class PhysioFixtures
     public static BloodDef DefaultBlood => new(0.005, 0.5, 0.0);
 
     /// <summary>Root: brain (weight 1), heart (pumping 1, vital unless asked otherwise), a muscle; A and B: a muscle each. Every tissue has Hp 10.</summary>
-    public static PhysiologyPlan Plan3(bool heartVital = true, BloodDef? blood = null, int slots = 8, IReadOnlyList<Effect>? organism = null, TissueDef[]? root = null)
+    public static PhysiologyPlan Plan3(bool heartVital = true, BloodDef? blood = null, int slots = 8, IReadOnlyList<Effect>? organism = null, TissueDef[]? root = null, TissueDef[]? limbA = null)
     {
         var stack = root ?? new[]
         {
@@ -54,12 +56,12 @@ internal static class PhysioFixtures
         };
         var limb = new[] { new TissueDef("muscle", 10, 1, Motor: 1) };
         return new PhysiologyPlan(
-            new[] { new PartTissuesDef("Root", Side.Center, stack), new PartTissuesDef("A", Side.Center, limb), new PartTissuesDef("B", Side.Center, limb) },
+            new[] { new PartTissuesDef("Root", Side.Center, stack), new PartTissuesDef("A", Side.Center, limbA ?? limb), new PartTissuesDef("B", Side.Center, limb) },
             Defs, organism ?? Array.Empty<Effect>(), blood ?? DefaultBlood, slots);
     }
 
-    public static Physiology Make(double slowScale = 20.0, bool heartVital = true, BloodDef? blood = null, int slots = 8, IReadOnlyList<Effect>? organism = null, TissueDef[]? root = null) =>
-        new(Body3(), Plan3(heartVital, blood, slots, organism, root), slowScale);
+    public static Physiology Make(double slowScale = 20.0, bool heartVital = true, BloodDef? blood = null, int slots = 8, IReadOnlyList<Effect>? organism = null, TissueDef[]? root = null, TissueDef[]? limbA = null) =>
+        new(Body3(), Plan3(heartVital, blood, slots, organism, root, limbA), slowScale);
 
     public static int Live(Physiology p)
     {

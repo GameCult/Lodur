@@ -66,10 +66,13 @@ public sealed class ActorPhysiologyTests
         Assert.Same(p, a.Physiology);
         Assert.Throws<ArgumentException>(() => Make(p));
 
+        Assert.True(p.Afflict(Af("Bleeder"), 1, 0, 1));
         var q = new Quat[2];
         Assert.Throws<ArgumentException>(() => Tick(a, 0.0, new float[1], q));
         Assert.Throws<ArgumentException>(() => Tick(a, 0.0, new float[3], q));
-        Assert.Equal(0, a.TickCount);   // a refused call changes nothing
+        Assert.Equal(0, a.TickCount);   // a refused call changes nothing, the physiology included
+        Assert.Equal(0.0, p.SlotAge(0));
+        Assert.Equal(0.005, p.BloodVolume);
     }
 
     [Fact]

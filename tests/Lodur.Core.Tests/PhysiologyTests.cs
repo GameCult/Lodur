@@ -217,6 +217,22 @@ public sealed class PhysiologyTests
         Assert.Equal(1.0, p.Consciousness);
     }
 
+    [Fact]
+    public void A_motor_ceiling_is_the_motor_weighted_mean_then_offsets_then_factors()
+    {
+        var a = new[] { new TissueDef("light", 10, 1, Motor: 1), new TissueDef("heavy", 10, 1, Motor: 3) };
+        var p = Make(limbA: a);
+        Afflict(p, "Lesion", 1, 0, 10);            // the light layer is gone: (1 x 0 + 3 x 1) / 4
+        p.Step(0.01);
+        Assert.Equal(0.75, p.MotorCeiling(0), 12);
+
+        Afflict(p, "MotorDim", 1, 0, 1);           // offset -0.2
+        Afflict(p, "MotorHalf", 1, 0, 1);          // factor 0.5
+        p.Step(0.01);
+        Assert.Equal((0.75 - 0.2) * 0.5, p.MotorCeiling(0), 12);   // offsets before factors
+        Assert.Equal(1.0, p.MotorCeiling(1));
+    }
+
     // Clocks.
 
     [Fact]
@@ -309,6 +325,56 @@ public sealed class PhysiologyTests
         Assert.Equal(1e-3, p.Bleed(1), 15);                       // severity 1 x vascularity 1 x pumping 1
         Assert.Equal(1e-3 * 0.5, p.Bleed(2), 15);
         Assert.Equal(1e-3 * 0.25, p.Bleed(0), 15);
+    }
+
+    [Fact]
+    public void Bleeding_goes_through_the_tissues_vascularity()
+    {
+        var p = Make();
+        Afflict(p, "Bleeder", 0, Heart, 1);        // the heart's vascularity is 4
+        Afflict(p, "Bleeder", 0, RootMuscle, 1);   // the muscle's is 1
+        p.Step(0.01);
+        Assert.Equal(1e-3 * 4 + 1e-3, p.Bleed(0), 15);
+    }
+
+    [Fact]
+    public void An_affliction_never_bleeds_negatively_nor_cancels_another_afflictions_bleed()
+    {
+        var p = Make();
+        Afflict(p, "Staunch", 1, 0, 1);
+        p.Step(0.01);
+        Assert.Equal(0.0, p.Bleed(1));
+        Assert.Equal(0.005, p.BloodVolume);
+
+        Afflict(p, "Bleeder", 1, 0, 1);
+        p.Step(0.01);
+        Assert.Equal(1e-3, p.Bleed(1), 15);        // the staunch slot clamps at 0 on its own; it does not subtract from the bleeder
+    }
+
+    [Fact]
+    public void A_dead_body_reads_no_bleed_whatever_it_was_bleeding()
+    {
+        var p = Make();
+        Afflict(p, "Bleeder", 1, 0, 1);
+        Afflict(p, "Lesion", 0, BrainLayer, 10);   // consciousness 0: dead on this step, the heart still pumping
+        p.Step(0.01);
+        Assert.True(p.Dead);
+        Assert.Equal(DeathCause.Consciousness, p.Cause);
+        Assert.Equal(0.0, p.Bleed(1));
+    }
+
+    [Fact]
+    public void A_reused_slot_starts_at_age_zero()
+    {
+        var p = Make();
+        Afflict(p, "Heal", 1, 0, 0.5);             // slot 0, healed away in one second
+        p.Step(1.0);
+        Assert.Equal(0, Live(p));
+        Afflict(p, "Clot", 1, 0, 1);               // reuses slot 0
+        Assert.Equal(Af("Clot"), p.SlotDef(0));
+        Assert.Equal(0.0, p.SlotAge(0));
+        p.Step(0.01);
+        Assert.Equal(0.01, p.SlotAge(0), 15);
     }
 
     [Fact]
