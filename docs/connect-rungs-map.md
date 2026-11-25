@@ -68,6 +68,21 @@ All probes in detached worktrees `F:\aeth-wt\connect\{Ymir,Lodur,BadDaySimulator
     inside a tick matters: suppression reads last tick's resolve (gain set ahead of time); the Flinch row is
     logged after pain but before strain and resolve update (lines 83, 85, 94).
 
+## Body plan authority (cut `lodur:cut_spec:cut-body-plan-data.r2`, `cut-bds-body-plan-labels.r1`)
+
+The body's structure is data in one place; the hard-coded `HumanoidRagdoll`, `Limb`, `Muscle` and `Region` enums are deleted.
+
+- **Owner:** `BodyPlan` (`src/Lodur.Core/BodyPlan.cs`), built by a plan factory (`BodyPlans.Humanoid()`, a quadruped in `QuadrupedPlanTests`). Immutable after construction.
+- **Inputs:** `PartDef` (label, side, shape, size, creation pose, density, friction), `JointDef` (label, side, kind, parent and child part ordinals, anchor, axis, limits, `MuscleGains`), `SensePointDef` (label, side, part, offset).
+- **The tree is the joint list.** No part carries a parent field. `ParentOf(part)` is derived at construction from the one joint that has the part as child; part 0 is the root. A part is the child of exactly one joint and a parent precedes its child, so the tree is acyclic and creation order is part order.
+- **Names are `(label, side)`**, unique per list (parts, joints, sense points), resolved by `PartIndex`, `JointIndex`, `SenseIndex`; an unknown name throws. Ordinals are plan order and are not a contract between repos; labels are.
+- **Validate** (in the constructor, refuses): rule 1 unique non-empty labels; 2 joint ends are parts and parent precedes child; 3 a root exists and every other part has exactly one attaching joint; 4 sense points sit on parts; 5 finite numbers, positive sizes and density, and no field the shape cannot carry (sphere rotation, box rolling resistance, unused size components), limits ordered, cone non-negative.
+- **Derived state:** `ParentOf`, the three label indexes, and in `Ragdoll` the part-to-lane and joint-to-lane maps (`BodyLane`, `JointLane`; the parent lane comes from `ParentOf`, the limb lane is the part ordinal). Nothing derived is persisted.
+- **Output:** `Ragdoll.Build(world, plan, origin, firstStableId)` adds bodies in part order, then joints in joint order, to the caller's world; `Drive` takes one strength and one target per plan joint; `ReadSensePoints` writes one point per plan sense point. The binding holds no body numbers.
+- **Forbidden writers:** the binding, perception, reflex and BDS never add, reorder or alter parts, joints or labels after construction; no code outside `BodyPlan` derives a part's parent; no consumer hard-codes a part or joint ordinal (resolve by label at build).
+- **Consumers:** `Ragdoll` (Lodur.Body.Ymir); BDS `SeatedPuppet.Plan` is the one plan instance, passed to `Ragdoll.Build` and therefore the same object as `ragdoll.Plan`; `OfficeBody` and `BodyPainBox` resolve joint, part and sense-point labels against it once at build and index arrays by the resulting ordinals thereafter.
+- **Verification layer:** `tests/Lodur.Core.Tests/BodyPlanTests.cs` (each Validate rule, label resolution, derived tree), `tests/Lodur.Tests/QuadrupedPlanTests.cs` (a second morphology builds through the same binding), `RagdollTests.cs` (stand, fall, per-joint strength, torque equal and opposite), BDS tests against the label-resolved humanoid.
+
 ## The model page (step 0b)
 
 No persistent content is introduced by these cuts: every parameter stays a code default or a CLI argument,
@@ -77,7 +92,7 @@ so `content-is-cultcache` is not engaged yet (follow-up `lodur:follow_up:drive-p
 |---|---|---|---|
 | Nerve, reflex and drive parameters (`NerveParameters`, `WithdrawalParameters`, `DriveParameters`) | Nothing persistent: C# records with defaults in Lodur.Core; a per-actor instance is a value | Built once when the consumer creates an actor (per-seed traits folded in as `Gain`, `DrainTrait`), immutable for the actor's life | Lodur owns the schema and defaults; the consumer (BDS scenario) owns per-actor values and the trait draw |
 | Actor (nervous state: afferent rings, drive state, goal) | The consumer's handle; no id inside Lodur | Created with the scenario, ticked once per physics step, never persisted, dies with the scenario | Lodur.Core alone writes it; nothing else writes drive state |
-| Puppet definition (the 19-body humanoid: shapes, joints, gains, regions) | `BodyPlan` data in Lodur.Core (`BodyPlans.Humanoid`), built by `Ragdoll` in Lodur.Body.Ymir; world stable ids `firstStableId..+18` passed by the caller | Built into the caller's world once; no removal (Ymir has none) | `BodyPlan` owns geometry, joints and gains, `Ragdoll` builds them; BDS owns placement and stable-id allocation |
+| Puppet definition (the 19-body humanoid: shapes, joints, gains, sense points) | `BodyPlan` data in Lodur.Core (`BodyPlans.Humanoid()`), built by `Ragdoll` in Lodur.Body.Ymir; world stable ids `firstStableId + part ordinal` passed by the caller | Built into the caller's world once; no removal (Ymir has none) | `BodyPlan` owns geometry, joints, gains and labels, `Ragdoll` builds them; BDS owns placement and stable-id allocation (see "Body plan authority") |
 | Stimulus source (the pain box) | BDS object, scenario-local; not a world body | Placed by the scenario; intensity written every tick from its schedule (ramp, noise, disable time) | BDS writes intensity and on/off; Lodur perception only reads it and decides containment and transduction |
 | Restraint (stool weld) | BDS scene object: one static box + one weld joint in the world | Created with the scenario | BDS (a game object acting on the body through the world, like a grab; not a layer above Lodur) |
 | Scenario run | (seed, parameters) | One run, headless or on the body | BDS; the timeline is output, not content |

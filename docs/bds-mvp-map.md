@@ -88,7 +88,7 @@ against Ymir's pinned Box3D, sphere r 0.1 m, density 1000, 1/120 s, 4 substeps, 
 8. **Lodur today.** Perception senses named box volumes at points only (`Perception.cs:82-113`); regions are two
    sense points read by `Ragdoll.ReadSensePoints`; one reflex kind (`WithdrawalReflex.cs`); drive is pain,
    strain, resolve, `WillBroken` (`DriveState.cs`); behaviour blends two poses by leak and shake
-   (`PoseBehaviour.cs:87-115`); the body takes 12 strengths and 12 joint-space targets
+   (`PoseBehaviour.cs:87-115`); the body takes one strength and one joint-space target per plan joint
    (`Ragdoll.Drive`). No IK, no clips, no physiology, no grip; the part tree is `BodyPlan` (parts, joints that are the tree,
    sense points), without HP, coverage or vital flags. Rung 3 adds emitters and arousal; rung 4 the goal flip and `PoseBehaviour`.
 9. **BDS today.** Headless and body pain box only (`src/BadDay.Ymir/BodyPainBox.cs`); the world is built per run
@@ -190,7 +190,7 @@ a torn limb and a cut limb go through the same physiology severing decision; rel
 same commands as building it.
 
 **Deletion lines:** `PoseBehaviour.Blend` as the motor owner (in `lodur-will-mix`, landed: `Blend` now only mixes the hold layer's flinch pose, the strength is the will mix); hand-only `Region`
-enum and `ReadRegions` as perception's body model (in `lodur-touch`, replaced by parts); the per-run world in
+enum and `ReadRegions` as perception's body model (landed: deleted with `Limb` and `Muscle` in `lodur:cut_spec:cut-body-plan-data.r2`; `lodur-touch` reads parts and sense points by plan label); the per-run world in
 `BodyPainBox.Run` as BDS's only world (in `bds-sandbox-session`, scenario runs become sessions,
 follow-up `scenario-session-unify`).
 
