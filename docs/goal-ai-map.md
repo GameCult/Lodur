@@ -87,6 +87,22 @@ order per round, paired medians against a utility-only Select in the same round.
     nothing carries a fact about the thing (open, locked, on). Interactions do not exist (follow-up
     `lodur-interactions`); a verb today has neither preconditions nor effects.
 
+Pass `goal-planner-cut`, Lodur `419d454` (`nibu/brain-goal-targets` head, in Soul review), 2026-11-25.
+
+16. **Baseline.** `dotnet test tests/Lodur.Core.Tests -c Release` at `419d454`: 278 tests. The first run after a
+    fresh build failed one test in a reflection-invoked path; four reruns passed 278/278. The failing test was not
+    named in the output kept; a Hands pass that sees it names it.
+17. **Facts have no home at base.** `Emitter` carries channel, position, radius, intensity, `Id`, `Kind`;
+    `Percept` carries id, kind, position, salience, seconds since sensed (`Perception.cs` `Emitter`, `Percept`).
+    A thing's kind may change between ticks (`PerceptTests` "takes the new kind"), so facts follow the same rule:
+    the slot takes what it was last sensed with, and `Sense` refuses two emitters of one id that disagree.
+18. **Overlap.** Cut 2b is split. Part 1 (`lodur:cut_spec:cut-lodur-goal-planner.r1`) touches only
+    `Perception.cs`, a new `Planner.cs`, tests and `docs/lodur-target.md` (its row lands after line 115, not
+    adjacent to `lodur-tissue-sheet-material`'s edit at 112). Part 2 (follow-up `lodur-planner-select`) edits
+    `Brain.Select` and `Actor`, where `lodur-orient-goals` (ctor `BodyPlan?`, Tick `parts`, the commit block) and
+    the oxygen cut (`Physiology.Step` input, the ceiling loop) also edit; it runs after whichever of them is in
+    flight and adds only trailing optional parameters.
+
 ## Prior art (research pass `goal-ai-prior-art`)
 
 - The Sims: needs-based utility; objects advertise what they offer, so the data lives on the object and new
@@ -207,7 +223,8 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 |---|---|---|---|---|---|
 | 1 | `lodur-percepts` | Lodur | emitter id and kind, percept memory, phantom id bit | none | S, specced |
 | 2 | `brain-goal-targets` | Lodur | target filters, (goal, percept) utility, commitment | 1 | M |
-| 2b | `lodur-goal-planner` | Lodur | wants, percept facts, verbs with preconditions and effects, depth-limited regressive planner, plan on the Actor | 2 | M |
+| 2b | `lodur-goal-planner` | Lodur | percept facts, verbs with needs and gives, depth-limited regressive planner (core, no caller) | 2 | M, specced |
+| 2c | `lodur-planner-select` | Lodur | wants, Select admission, direct tries at a discount and frustration (`bds-unplannable-tries-direct`), plan on the Actor | 2b, Actor.cs cuts in flight | M |
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
 | 3b | `lodur-reach-tracking` | Lodur | reach under gravity: feedforward or a damped error loop | 3 | S-M |
 | 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off, recoil, fetal and stare-at-hands as layers; seated Fella demo | 2, 3 | M |
@@ -244,6 +261,18 @@ dulling the puppet. MCTS is not taken: it needs a forward simulator and is stoch
 gives up: verbs now need preconditions and effects authored as facts (the cost the first pass named), a failed
 plan has to be read by a debug view of the plan, and facts on emitters widen the game's interface to Lodur by
 one field.
+
+**Planner cut rationale (pass `goal-planner-cut`).** Facts are one `ulong` per thing, the game's bits; bit 63 is
+Lodur's in-reach, derived per call from the sense point and the percept's position and refused from the game, as
+`PhantomIdBit` is (idea `goal-planner-cut.rejected-reach-as-game-fact`: a game-supplied near goes stale as soon as
+he moves; what it gives up is one bit). Verbs are the world's list, given to the planner, not each Brain's
+(`rejected-verbs-on-brain`, ruling `bds-lures-tagged-props`). Verbs carry only needs and gives now; the interaction
+point and toil steps join the same record in `lodur-interaction-steps`, which waits on locomotion
+(`rejected-interaction-steps-first`). Plan steps name percept ids, not slots. Movement does not take other things
+out of reach in the planner's model, so plans are optimistic about reach; replanning every Select corrects them.
+Intelligence 0 is read as: want goals go direct at the discount and still end in frustration, and every Brain
+without wants selects exactly as `brain-goal-targets` (idea `depth-zero-is-direct-with-frustration`, in force for
+the part-2 mapper).
 
 ## Mind stats
 
