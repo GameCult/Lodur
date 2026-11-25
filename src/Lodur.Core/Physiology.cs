@@ -56,29 +56,13 @@ namespace Lodur
             _organism = new Effect[plan.OrganismEffects.Count];
             for (var i = 0; i < _organism.Length; i++) _organism[i] = plan.OrganismEffects[i];
 
-            // Resolve: every body part has exactly one stack and every stack names a body part, by (label, side).
             var parts = body.Parts.Count;
-            var stackOf = new int[parts];
-            for (var p = 0; p < parts; p++) stackOf[p] = -1;
-            for (var s = 0; s < plan.Parts.Count; s++)
-            {
-                var def = plan.Parts[s];
-                var part = -1;
-                for (var p = 0; p < parts; p++)
-                {
-                    if (body.Parts[p].Label == def.PartLabel && body.Parts[p].Side == def.Side) part = p;
-                }
-
-                if (part < 0) throw new ArgumentException($"a tissue stack names no body part: '{def.PartLabel}' {def.Side}.");
-                if (stackOf[part] >= 0) throw new ArgumentException($"body part '{def.PartLabel}' {def.Side} has two tissue stacks.");
-                stackOf[part] = s;
-            }
+            var stackOf = plan.Resolve(body);
 
             _partStart = new int[parts + 1];
             var total = 0;
             for (var p = 0; p < parts; p++)
             {
-                if (stackOf[p] < 0) throw new ArgumentException($"body part '{body.Parts[p].Label}' {body.Parts[p].Side} has no tissue stack.");
                 _partStart[p] = total;
                 total += plan.Parts[stackOf[p]].Tissues.Count;
             }

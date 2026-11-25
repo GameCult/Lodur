@@ -46,6 +46,36 @@ public sealed class PhysiologyTests
     }
 
     [Fact]
+    public void Resolve_maps_each_body_part_to_its_stack()
+    {
+        Assert.Equal(new[] { 1, 0 }, Over(Stack("Kid", MuscleT), Stack("Root", BrainT)).Resolve(Tiny()));
+    }
+
+    [Fact]
+    public void Resolve_refuses_the_join_rules_itself()
+    {
+        var body = Tiny();
+        Assert.Throws<ArgumentException>(() => Over(Stack("Root", BrainT)).Resolve(body));
+        Assert.Throws<ArgumentException>(() => Over(Stack("Root", BrainT), Stack("Kid", MuscleT), Stack("Ghost", MuscleT)).Resolve(body));
+        Assert.Throws<ArgumentException>(() => Over(Stack("Root", BrainT), Stack("Kid", MuscleT), Stack("Kid", MuscleT)).Resolve(body));
+    }
+
+    [Fact]
+    public void Shells_must_fit_inside_the_part_by_its_smallest_half_extent()
+    {
+        PhysiologyPlan Shelled(double t) => Over(Stack("Root", BrainT with { Thickness = t }), Stack("Kid", MuscleT));
+        Assert.Throws<ArgumentException>(() => Shelled(0.1).Resolve(Tiny()));
+        Assert.Throws<ArgumentException>(() => Shelled(0.2).Resolve(Tiny()));
+        Shelled(0.0999).Resolve(Tiny());
+
+        PartDef Slab(string label) => new(label, Side.Center, PartShape.Box, (0.1f, 0.02f, 0.1f), (0f, 0f, 0f), Quat.Identity, 1000f, 0.8f, 0f);
+        var joint = new JointDef("J", Side.Center, JointKind.Spherical, 0, 1, (0f, 0f, 0f), (0f, 1f, 0f), 0f, 0f, 0f, new MuscleGains(1f, 1f, 1f, 1f));
+        var slab = new BodyPlan(new[] { Slab("Root"), Slab("Kid") }, new[] { joint }, Array.Empty<SensePointDef>());
+        Assert.Throws<ArgumentException>(() => Shelled(0.03).Resolve(slab));
+        Shelled(0.019).Resolve(slab);
+    }
+
+    [Fact]
     public void A_physiology_refuses_a_body_with_no_consciousness_tissue_or_a_joint_child_with_no_motor_tissue()
     {
         Assert.Throws<ArgumentException>(() => new Physiology(Tiny(), Over(Stack("Root", MuscleT), Stack("Kid", MuscleT)), 20));

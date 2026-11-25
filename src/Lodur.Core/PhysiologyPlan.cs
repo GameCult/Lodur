@@ -117,6 +117,43 @@ namespace Lodur
         public int AfflictionIndex(string label) =>
             _afflictionIndex.TryGetValue(label, out var i) ? i : throw new ArgumentException($"no affliction labelled '{label}'.");
 
+        /// <summary>
+        /// The one (label, side) join of stacks to a body: element p is the index in <see cref="Parts"/> of body part p's stack. Refuses a
+        /// stack naming no part, a part with two stacks, a part with no stack, and shells that do not fit (a stack's summed Thickness must be
+        /// below the part's inscribed half extent, compared at the shape's float precision). Physiology and the sheet builder call it; it allocates, at construction only.
+        /// </summary>
+        public int[] Resolve(BodyPlan body)
+        {
+            var parts = body.Parts.Count;
+            var stackOf = new int[parts];
+            for (var p = 0; p < parts; p++) stackOf[p] = -1;
+            for (var s = 0; s < Parts.Count; s++)
+            {
+                var def = Parts[s];
+                var part = -1;
+                for (var p = 0; p < parts; p++)
+                {
+                    if (body.Parts[p].Label == def.PartLabel && body.Parts[p].Side == def.Side) part = p;
+                }
+
+                if (part < 0) throw new ArgumentException($"a tissue stack names no body part: '{def.PartLabel}' {def.Side}.");
+                if (stackOf[part] >= 0) throw new ArgumentException($"body part '{def.PartLabel}' {def.Side} has two tissue stacks.");
+                stackOf[part] = s;
+            }
+
+            for (var p = 0; p < parts; p++)
+            {
+                var d = body.Parts[p];
+                if (stackOf[p] < 0) throw new ArgumentException($"body part '{d.Label}' {d.Side} has no tissue stack.");
+                var shells = 0.0;
+                foreach (var t in Parts[stackOf[p]].Tissues) shells += t.Thickness;
+                var half = d.Shape == PartShape.Box ? Math.Min(d.Size.X, Math.Min(d.Size.Y, d.Size.Z)) : d.Size.X;
+                if (!((float)shells < half)) throw new ArgumentException($"body part '{d.Label}' {d.Side}: the shells ({shells} m) do not fit inside its inscribed half extent ({half} m).");
+            }
+
+            return stackOf;
+        }
+
         private static IReadOnlyList<Effect> Own(IReadOnlyList<Effect> effects)
         {
             var list = new List<Effect>(effects.Count);
