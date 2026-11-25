@@ -37,7 +37,8 @@ Signal flows one way per tick, in this order; each layer has one owner. Layers 1
    Perception keeps a bounded percept memory (`PerceptParameters`, `Percept`): one slot per identified thing
    strictly inside an emitter's radius, with its kind, the position of the emitter that reached it hardest,
    salience (that reach times the sensory gain) and seconds since sensed, forgotten after a memory time. The top
-   id bit (`PhantomIdBit`) is reserved to Lodur's phantoms and `Sense` refuses it from the game. Output per region: the stimulus, and
+   id bit (`PhantomIdBit`) is reserved to Lodur's phantoms and `Sense` refuses it from the game. Percepts also remember the thing's `Facts`
+   (a `ulong`, bit i is fact i) as last sensed; the game owns every bit but 63 (`InReachFact`), which is Lodur's and which `Sense` refuses, like `PhantomIdBit`. Output per region: the stimulus, and
    the afferent signal after threshold, sensitisation and conduction delay; and the load, and the percepts. A poke that barely moves the body
    is still a stimulus.
 2. **Reflex** (`WithdrawalReflex`, `WithdrawalParameters`). Fast, local responses to afferent signals
@@ -113,6 +114,7 @@ commits a goal already writes under it.
 | Brain (`Brain`, `GoalSpec`) | the drive state it reads through conditions | the wanted goal; each goal's pull, priority, dwell, entry effects (`EntryResolve`, `EntryArousal`, `SensoryGain`, `EntrySeconds`), `Effort`, `InvoluntarySeconds` and behaviour | none: it is data, copied at build and read back read-only | a flip rule anywhere else (`lodur:ruling:npc-brain-authors-goals`) |
 | `Actor` | all of the above, one tick | the committed goal; `DriveState.SensoryGain`; arousal during a goal's `EntrySeconds`; the events | the pending decision and its tick, the dwell, the ramp's start values, the onset in whole ticks | a consumer setting the goal or the gain from outside |
 | Behaviour (`PoseBehaviour`) | the weight (the will's `Will^WillCurve` once the goal's involuntary onset is over, else 1), the leak, strain, time | strengths and targets into caller arrays: `HoldStrength x min(1, weight + leak x FlinchGain)` | none | writing a joint or a force (`body-one-interface`); any strength not under the will mix |
+| `Planner` | percept facts and positions, self facts, the verb list (`Verb`: kind filters, needs, gives), a depth, the reach | `Plan`'s length (0 holds, n steps, -1 none within depth) and the steps as (verb index, This id, Tool id) in the caller's buffer | reach (bit 63) from distance, per call; the plan, per call | reading phantom-ness or a kind's or fact's meaning; storing a plan; the game supplying bit 63; allocating after construction |
 
 ## Invariants
 
