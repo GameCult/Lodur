@@ -191,6 +191,83 @@ public sealed class BodyPlanTests
         Assert.Equal(2, plan.Parts.Count);
     }
 
+    // Airway openings: rules 1, 4, 5, 6.
+    private static BodyPlan WithAirway(PartDef part, params AirwayOpeningDef[] openings) =>
+        new(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), openings);
+
+    private static PartDef Shaped(PartShape shape, (float, float, float) size) =>
+        new("P", Side.Center, shape, size, (0f, 0f, 0f), Quat.Identity, 1000f, 0.8f, 0f);
+
+    private static AirwayOpeningDef Opening((float, float, float) offset, float radius = 0.025f, string label = "O") =>
+        new(label, Side.Center, 0, offset, radius);
+
+    [Fact]
+    public void Rule1_a_repeated_airway_label_and_side_is_refused_and_another_side_is_not()
+    {
+        var part = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
+        Refuses(() => WithAirway(part, Opening((0f, 0f, 0.11f)), Opening((0f, 0.05f, 0.1f))), "two airway openings are labelled 'O'");
+        var plan = WithAirway(part, Opening((0f, 0f, 0.11f)), Opening((0f, 0.05f, 0.1f), label: "O") with { Side = Side.Left });
+        Assert.Equal(1, plan.AirwayIndex("O", Side.Left));
+        Refuses(() => plan.AirwayIndex("O", Side.Right), "no airway opening labelled 'O' on side Right");
+    }
+
+    [Fact]
+    public void Rule4_an_airway_opening_on_no_part_is_refused()
+    {
+        var part = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
+        Refuses(() => WithAirway(part, Opening((0f, 0f, 0.11f)) with { Part = 1 }), "part 1 is not a part");
+        Refuses(() => WithAirway(part, Opening((0f, 0f, 0.11f)) with { Part = -1 }), "part -1 is not a part");
+    }
+
+    [Fact]
+    public void Rule5_a_non_finite_offset_or_radius_and_a_radius_not_above_zero_are_refused()
+    {
+        var part = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
+        Refuses(() => WithAirway(part, Opening((0f, float.NaN, 0.11f))), "non-finite");
+        Refuses(() => WithAirway(part, Opening((float.PositiveInfinity, 0f, 0.11f))), "non-finite");
+        Refuses(() => WithAirway(part, Opening((0f, 0f, 0.11f), float.NaN)), "non-finite");
+        Refuses(() => WithAirway(part, Opening((0f, 0f, 0.11f), 0f)), "radius is not positive");
+        Refuses(() => WithAirway(part, Opening((0f, 0f, 0.11f), -0.01f)), "radius is not positive");
+    }
+
+    [Fact]
+    public void Rule6_an_opening_wholly_inside_its_part_is_refused_and_one_straddling_the_surface_is_accepted_for_each_shape()
+    {
+        // sphere r 0.11: centre at 0.05 with radius 0.025 is wholly inside (distance -0.06); at the surface it straddles.
+        var sphere = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
+        Refuses(() => WithAirway(sphere, Opening((0f, 0f, 0.05f))), "lies inside its part");
+        WithAirway(sphere, Opening((0f, 0f, 0.11f)));
+        WithAirway(sphere, Opening((0f, 0f, 0.12f)));
+
+        // capsule r 0.05, half length 0.2 along y: past the cap is measured from the end of the segment, beside the side from the axis.
+        var capsule = Shaped(PartShape.Capsule, (0.05f, 0.2f, 0f));
+        Refuses(() => WithAirway(capsule, Opening((0f, 0.1f, 0.01f))), "lies inside its part");
+        Refuses(() => WithAirway(capsule, Opening((0f, 0.2f, 0f))), "lies inside its part");
+        Refuses(() => WithAirway(capsule, Opening((0f, 0.22f, 0f))), "lies inside its part"); // 0.02 past the segment end, r 0.05: inside by 0.03, more than the radius 0.025
+        WithAirway(capsule, Opening((0.05f, 0.1f, 0f)));
+        WithAirway(capsule, Opening((0f, 0.25f, 0f)));
+        WithAirway(capsule, Opening((0f, 0.3f, 0f)));
+
+        // box half extents (0.1, 0.05, 0.2): the signed distance is the box's, so a point deep in one axis is not rescued by another.
+        var box = Shaped(PartShape.Box, (0.1f, 0.05f, 0.2f));
+        Refuses(() => WithAirway(box, Opening((0f, 0f, 0f))), "lies inside its part");
+        Refuses(() => WithAirway(box, Opening((0.05f, 0.01f, 0.1f))), "lies inside its part");
+        WithAirway(box, Opening((0.1f, 0f, 0f)));
+        WithAirway(box, Opening((0f, 0.05f, 0f)));
+        WithAirway(box, Opening((0.11f, 0.06f, 0.21f)));
+    }
+
+    [Fact]
+    public void The_airway_opening_list_is_copied_and_null_means_none()
+    {
+        var part = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
+        var list = new List<AirwayOpeningDef> { Opening((0f, 0f, 0.11f)) };
+        var plan = new BodyPlan(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), list);
+        list.Add(Opening((0f, 0f, 0.12f), label: "P"));
+        Assert.Single(plan.AirwayOpenings);
+        Assert.Empty(Valid().AirwayOpenings);
+    }
+
     // The humanoid.
     [Fact]
     public void The_humanoid_has_19_parts_18_joints_and_3_sense_points_labelled_in_build_order()
@@ -213,6 +290,19 @@ public sealed class BodyPlanTests
         }, plan.Joints.Select(j => Name(j.Label, j.Side)).ToArray());
         Assert.Equal(new[] { "HandLeft", "HandRight", "Head" }, plan.SensePoints.Select(s => Name(s.Label, s.Side)).ToArray());
         Assert.Equal(new[] { plan.PartIndex("Palm", Side.Left), plan.PartIndex("Palm", Side.Right), plan.PartIndex("Head") }, plan.SensePoints.Select(s => s.Part).ToArray());
+    }
+
+    [Fact]
+    public void The_humanoid_has_a_mouth_and_a_nose_on_the_head_each_on_its_surface()
+    {
+        var plan = BodyPlans.Humanoid();
+        Assert.Equal(new[] { "Mouth", "Nose" }, plan.AirwayOpenings.Select(a => a.Label).ToArray());
+        foreach (var a in plan.AirwayOpenings)
+        {
+            Assert.Equal(plan.PartIndex("Head"), a.Part);
+            var o = a.Offset;
+            Assert.InRange(MathF.Sqrt(o.X * o.X + o.Y * o.Y + o.Z * o.Z), 0.109f, 0.111f);
+        }
     }
 
     [Fact]
