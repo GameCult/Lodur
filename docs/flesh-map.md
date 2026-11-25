@@ -99,16 +99,35 @@ The body-backed skin does not sieve: it holds its place within 0.1 mm and stretc
 bone surface between skin particles, which is where the drawn skin is; none enters the bone. The corner-pinned tarp's sieve
 is a limit of loose cloth, not of BDS skin.
 
+P7 Solid grid sized by its members (pass ymir-dormant-map; `probes/flesh/grid-mask.probe.patch` on top of the P2 probe,
+`grid-mask.fella.patch` adds `MASKSIZED` and an FNV hash of the pos_x, pos_y and vel_z lanes; runs `grid-mask-h.out`,
+`grid-mask-k.out`). grid_sort's solid pass uses a mask from the member count (16 or more buckets, at least twice the count,
+capped at the table) and walk_half hashes with the same mask. The hash is equal with and without it on a live Fella plus
+self-colliding gut (961 live) and on 4 skip-flag Fellas, because walk_half reads a cell's particles in lane order whatever
+the bucket count. The fluid grid is left full size: fluid_density sums in bucket order. Paired interleaved medians, 5 runs of
+600 ticks:
+
+| Scene | Full table | Sized | Particle-free (bones only) |
+| --- | --- | --- | --- |
+| 4 Fellas pinned by skip flags | 0.988 | 0.486 | 0.096 |
+| 1 live Fella out of contact + gut, 3 Fellas' bones (K) | 3.975 | 3.464 | |
+
+Phase split of the sized 4-Fella run, ms per tick: grid 0.056, particle contacts 0.087, attachments 0.021, distances 0.123,
+bends 0.028, bodies 0.014. Those are walks over dormant lanes that active lists remove.
+
 ## Cut order
 
 1. cut-ymir-skin-sieve-test (Ymir, test and doc). Beside it: 2. cut-ymir-particle-limb-contact (Ymir: held list derived at
-   command time, LIMB attachment flag skips the attached body's limb tree).
-3. ymir-particle-pinning, revised: dormant particles out of every loop through command-time active lists; pinned particles
-   bordering live ones are kinematic per substep; one-way attachment flag; wake writes position and velocity from the target.
-4. ymir-attach-batch (spawn) and, after question ymir-flesh-particle-contact, ymir-flesh-no-particle-contact.
-5. lodur-tissue-stack (plan data and the deterministic sheet builder; can start any time).
-6. lodur-body-sheets-graph (binding: build dormant, wake per part, re-pin, wounds and severs as commands), after lodur-physiology.
-7. bds-flesh-render-embedding; then lodur-organ-release-rope and lodur-exposed-tube-chains.
+   command time, LIMB attachment flag skips the attached body's limb tree) and 3. cut-ymir-flesh-no-particle-contact
+   (NO_PARTICLE_CONTACT phase bit, solid grid sized by its members; no ABI number).
+4. cut-ymir-attach-batch (ABI 17): attach takes n descs and ends in one derivation; the ONE_WAY attachment flag. After
+   ymir-break-and-remove (ABI 16) and limb-contact.
+5. cut-ymir-particle-pinning-dormant (ABI 18): set_pinned; dormant particles out of every substep walk through command-time
+   active lists and a derived solve inverse mass; pinned particles bordering live ones are kinematic per substep; wake writes
+   position and velocity from the anchor. After 2, 3 and 4.
+6. lodur-tissue-stack (plan data and the deterministic sheet builder; can start any time).
+7. lodur-body-sheets-graph (binding: build dormant, wake per part, re-pin, wounds and severs as commands), after lodur-physiology.
+8. bds-flesh-render-embedding; then lodur-organ-release-rope and lodur-exposed-tube-chains.
 
 Budget reading: at rest flesh must cost nothing per tick (P2 B, H); one hurt part costs about 0.2 ms; a whole live Fella about
 1 ms alone and 2.3 ms in a 4-Fella world; an eviscerated gut adds 1.3 to 2 ms. The rope scene already takes about 2 ms, so a

@@ -1,0 +1,27 @@
+--- fella.c
++++ fella.c
+@@ -15,7 +15,7 @@
+ extern uint8_t* probe_pinned;
+ extern int32_t* probe_body_group;
+ extern double probe_t[8];
+-extern int probe_nocontact;
++extern int probe_nocontact; extern int probe_mask_sized;
+ 
+ typedef struct { float x, y, z; } v3;
+ typedef struct { float x, y, z, w; } q4;
+@@ -410,6 +410,7 @@
+     }
+     if (pinmode) probe_pinned = pinned;
+     if (getenv("NOCONTACT")) probe_nocontact = 1;
++    if (getenv("MASKSIZED")) probe_mask_sized = 1;
+     if (filter) probe_body_group = bgroup;
+     if (filter && ngut) bgroup[0] = 0; // the gut (group 99) collides with every bone; nothing to do
+     // per-Fella counts
+@@ -496,6 +497,7 @@
+     printf("FELLA F=%d skin=%.3f muscle=%.3f live=%d pinmode=%d filter=%d gut=%d | per Fella: skin %d muscle %d particles, %d distances (%d stitches), bends total %d, attachments total %d | live particles %d | ms/tick median %.3f mean %.3f p95 %.3f max %.3f | max live deviation %.3f m",
+            F, s, sm, live, pinmode, filter, gut, per_layer[0], per_layer[1], fd, fs, nbend, natt, livec, tk[nt / 2], mean, tk[(int)(nt * 0.95)], tk[nt - 1], maxdev);
+     printf(" | phases ms/tick grid %.3f pcontact %.3f att %.3f dist %.3f bend %.3f tether %.3f body %.3f", probe_t[0]/(warm+ticks), probe_t[1]/(warm+ticks), probe_t[2]/(warm+ticks), probe_t[3]/(warm+ticks), probe_t[4]/(warm+ticks), probe_t[5]/(warm+ticks), probe_t[6]/(warm+ticks));
++    { uint64_t hh = 1469598103934665603ull; for (int i = 0; i < W->particle_count; i++) { const unsigned char* b; b=(const unsigned char*)&W->pos_x[i]; for(int c=0;c<4;c++){hh^=b[c];hh*=1099511628211ull;} b=(const unsigned char*)&W->pos_y[i]; for(int c=0;c<4;c++){hh^=b[c];hh*=1099511628211ull;} b=(const unsigned char*)&W->vel_z[i]; for(int c=0;c<4;c++){hh^=b[c];hh*=1099511628211ull;} } printf(" | HASH %016llx", (unsigned long long)hh); }
+     if (cut) printf(" | cut %.3f ms sever %.3f ms wake %.4f ms", cut_ms, sever_ms, wake_ms);
+     printf("\n");
+     printf("BUILD %.1f ms;", build_ms); return 0;

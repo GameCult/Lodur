@@ -1,0 +1,135 @@
+--- ymir_particles.c
++++ ymir_particles.c
+@@ -5,6 +5,16 @@
+ // every sum in a fixed order. See ymir_particles.h.
+ 
+ #include "ymir_particles.h"
++#include <stdint.h>
++uint8_t* probe_pinned = 0; int32_t* probe_body_group = 0;
++#include <windows.h>
++double probe_t[8];
++static double pnow(void){LARGE_INTEGER c,f;QueryPerformanceCounter(&c);QueryPerformanceFrequency(&f);return 1000.0*(double)c.QuadPart/(double)f.QuadPart;}
++#define T(k,x) do{double _t=pnow(); x; probe_t[k]+=pnow()-_t;}while(0)
++int probe_nocontact = 0;
++#define PIN(i) ((probe_pinned && probe_pinned[i]) || (probe_nocontact && !(p->phase[i] & (YMIR_PHASE_SELF_COLLIDE|YMIR_PHASE_FLUID)) && grid_ctx))
++static int grid_ctx = 0;
++
+ 
+ #include <math.h>
+ #include <stdlib.h>
+@@ -1358,20 +1368,24 @@
+ 
+ // Counting sort into a hash grid of cell 1 / inv_cell: the live particles' predicted positions, fluid lanes left out when
+ // `solids` is set. Within a bucket particles keep index order, so every neighbour walk is the same on every run.
++int probe_mask_sized = 0; static uint32_t g_mask;
+ static void grid_sort(ymir_particles* p, float inv_cell, int solids)
+ {
+-    int32_t buckets = (int32_t)p->table_mask + 1;
++    uint32_t mask = p->table_mask;
++    if (solids && probe_mask_sized) { int32_t n = 0; for (int32_t i = 0; i < p->particle_count; ++i) n += p->particle_live[i] && !PIN(i) && !(p->phase[i] & YMIR_PHASE_FLUID); uint32_t t = 16; while (t < 2u * (uint32_t)n) t <<= 1; if (t - 1 < mask) mask = t - 1; }
++    g_mask = mask;
++    int32_t buckets = (int32_t)mask + 1;
+     memset(p->cell_start, 0, sizeof(int32_t) * (size_t)(buckets + 1));
+     for (int32_t i = 0; i < p->particle_count; ++i)
+     {
+-        if (!p->particle_live[i] || (solids && (p->phase[i] & YMIR_PHASE_FLUID)))
++        if (!p->particle_live[i] || PIN(i) || (solids && (p->phase[i] & YMIR_PHASE_FLUID)))
+         {
+             continue;
+         }
+         p->cell_x[i] = cell_of(p->pp_x[i], inv_cell);
+         p->cell_y[i] = cell_of(p->pp_y[i], inv_cell);
+         p->cell_z[i] = cell_of(p->pp_z[i], inv_cell);
+-        p->cell_start[cell_hash(p->cell_x[i], p->cell_y[i], p->cell_z[i], p->table_mask) + 1]++;
++        p->cell_start[cell_hash(p->cell_x[i], p->cell_y[i], p->cell_z[i], mask) + 1]++;
+     }
+     for (int32_t c = 0; c < buckets; ++c)
+     {
+@@ -1380,9 +1394,9 @@
+     }
+     for (int32_t i = 0; i < p->particle_count; ++i)
+     {
+-        if (p->particle_live[i] && !(solids && (p->phase[i] & YMIR_PHASE_FLUID)))
++        if (p->particle_live[i] && !PIN(i) && !(solids && (p->phase[i] & YMIR_PHASE_FLUID)))
+         {
+-            uint32_t c = cell_hash(p->cell_x[i], p->cell_y[i], p->cell_z[i], p->table_mask);
++            uint32_t c = cell_hash(p->cell_x[i], p->cell_y[i], p->cell_z[i], mask);
+             p->sorted[p->cell_start[c] + p->cell_fill[c]++] = i;
+         }
+     }
+@@ -1461,7 +1475,7 @@
+ {
+     for (int32_t i = 0; i < p->particle_count; ++i)
+     {
+-        if (!p->particle_live[i] || (p->phase[i] & YMIR_PHASE_FLUID)) // the grid holds no fluid lane
++        if (!p->particle_live[i] || PIN(i) || (p->phase[i] & YMIR_PHASE_FLUID)) // the grid holds no fluid lane
+         {
+             continue;
+         }
+@@ -1469,7 +1483,7 @@
+         {
+             int32_t o = cell == 0 ? 13 : 13 + cell, da = o / 9 - 1, db = o / 3 % 3 - 1, dc = o % 3 - 1;
+             int32_t ca = p->cell_x[i] + da, cb = p->cell_y[i] + db, cc = p->cell_z[i] + dc;
+-            uint32_t bucket = cell_hash(ca, cb, cc, p->table_mask);
++            uint32_t bucket = cell_hash(ca, cb, cc, g_mask);
+             for (int32_t q = p->cell_start[bucket]; q < p->cell_start[bucket + 1]; ++q)
+             {
+                 int32_t j = p->sorted[q];
+@@ -1979,7 +1993,7 @@
+             {
+                 continue;
+             }
+-            if (held_by(p, i, k))
++            if (probe_body_group ? probe_body_group[k] == (int32_t)(p->phase[i] & YMIR_PHASE_GROUP_MASK) : held_by(p, i, k))
+             {
+                 continue;
+             }
+@@ -2056,6 +2070,7 @@
+             continue;
+         }
+         int32_t i = p->att_particle[a];
++        if (PIN(i)) continue;
+         v3 at = end_point(p, a);
+         v3 d = vsub(P(p, p->pp_x, p->pp_y, p->pp_z, i), at);
+         float len = vlen(d);
+@@ -2088,6 +2103,7 @@
+             continue;
+         }
+         int32_t i = p->dist_a[e], j = p->dist_b[e];
++        if (PIN(i) && PIN(j)) continue;
+         float wi = p->inv_mass[i], wj = p->inv_mass[j], alpha = p->dist_compliance[e] / (f->h * f->h);
+         v3 d = vsub(P(p, p->pp_x, p->pp_y, p->pp_z, j), P(p, p->pp_x, p->pp_y, p->pp_z, i));
+         float len = vlen(d);
+@@ -2117,6 +2133,7 @@
+             continue;
+         }
+         int32_t a = p->bend_a[k], b = p->bend_b[k], c = p->bend_c[k];
++        if (PIN(a) && PIN(b) && PIN(c)) continue;
+         float wa = p->inv_mass[a], wb = p->inv_mass[b], wc = p->inv_mass[c];
+         v3 ja = {0.0f, 0.0f, 0.0f}, jc = {0.0f, 0.0f, 0.0f};
+         for (int pass = 0; pass < 2; ++pass)
+@@ -2320,17 +2337,17 @@
+         }
+         put(p->pp_x, p->pp_y, p->pp_z, i, x);
+     }
+-    build_grid(p);
+-    particle_contacts(p);
++    grid_ctx = 1; T(0, build_grid(p););
++    T(1, particle_contacts(p);); grid_ctx = 0;
+     if (p->live_fluid > 0)
+     {
+         fluid_density(p);
+     }
+-    solve_attachments(&f);
+-    solve_distances(&f);
+-    solve_bends(&f);
+-    solve_tethers(&f);
+-    body_contacts(&f);
++    T(2, solve_attachments(&f););
++    T(3, solve_distances(&f););
++    T(4, solve_bends(&f););
++    T(5, solve_tethers(&f););
++    T(6, body_contacts(&f););
+     for (int32_t i = 0; i < p->particle_count; ++i)
+     {
+         if (!p->particle_live[i])
