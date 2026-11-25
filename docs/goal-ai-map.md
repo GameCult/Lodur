@@ -29,6 +29,36 @@ Lodur `fbc3501`, BDS `3d6e735`, Ymir `d82da6d` (origin mains, fetched 2026-11-25
    `Setting.cs` and `StressSession.cs` with no id.
 6. `dotnet test tests/Lodur.Core.Tests` at base: 188 passed, 0 failed (2026-11-25).
 
+Pass `goal-targets-ik-map`, Lodur `4118b47` (percepts landed), Ymir `d82da6d`, 2026-11-25. Probes in the
+scratch project `imag-goals/probe` (not committed); humanoid, 120 Hz, 4 substeps.
+
+7. **Joint target convention (probe).** Ymir's joint frame lane at build is the shortest arc from +z to the
+   plan's axis: Shoulder `(-0.707, 0, 0, 0.707)` (z to up), Elbow `(0, 0.707, 0, 0.707)` (z to across). A target
+   q makes the child's rotation relative to the parent, from the creation pose, `F q F^-1`: at gravity 0 the
+   measured upper-arm direction in the torso frame for shoulder `x -1.0` was `(0.14, -0.55, 0.83)` against
+   predicted `(0, -0.54, 0.84)`, the forearm for elbow `z -1.2` `(0.00, -0.36, 0.93)` against `(0, -0.36, 0.93)`.
+   Spherical Lower/Upper bound twist (about frame z, the bone axis) and Cone bounds swing (Ymir
+   `AddJoint` summary). Shoulder twist tracks weakly: a combined target `z +0.6` then `x -0.8` reached joint
+   rotation `(-0.385, -0.065, 0.157, 0.907)` against `(-0.372, -0.115, 0.272, 0.880)` (twist kp 1, swing kp 20).
+   Swinging the right arm toward +x hits the torso: the arm collides with its own trunk.
+8. **Zero-twist two-bone solve (probe).** Choosing the elbow swivel so the shoulder target has no twist is
+   closed form: `R = Rot(v, phi) * Arc(p, v)`, `phi/2 = atan2(-Q.y, w v.y + (v x Q).y)` with `(Q, w) = Arc(p, v)`
+   and y the creation-pose bone axis; the result is unique. Arm lengths: L1 0.310 m, L2 0.265 m (anchors).
+9. **Reach on the ragdoll (probe).** Solving each step from the measured torso frame, wrist error after 4 s,
+   right arm, targets at shoulder plus an offset. Gravity 0, free-floating: `(0,-0.25,0.35)` 3.0 cm,
+   `(0.12,-0.1,0.4)` 11.1 cm (swing 1.22 near the 1.5 cone, across the body), `(-0.15,-0.3,0.25)` 2.3 cm,
+   `(0,0.05,0.45)` 1.0 cm. Gravity on, pelvis welded to a static box: 13.6, 17.9, 10.2 and 23.9 cm: PD sag
+   under gravity, not IK error. A naive task-space integrator on the target (2 and 4 per second, 0.3 m cap)
+   made it worse (2 to 38 cm, swing past the cone); see follow-up `lodur-reach-tracking`.
+10. **Select's one caller** is `Actor.Tick` (`Actor.cs:173`); BDS never calls it (grep at BDS origin/main).
+    Every authored priority is >= 0 (BDS OfficeBrain 0, 1, 2; ChamberBrain 0, 1; PainBoxBrain 0).
+11. **Percept slots are reused** by another id after eviction (`Perception.Admit`), so a target is tracked by
+    Id. Sense runs before Select within a tick (`Actor.cs:145`, `:173`).
+12. **In-flight overlap.** `lodur-physiology-core.r1` changes `Actor.cs` 5-16, 46-90, 100-105, 131-140 and
+    207-213, `DriveState.cs`, `WillTests.cs`, `CalmSensesTests.cs`; `lodur-airway-openings` changes `BodyPlan.cs`,
+    `BodyPlans.cs`, `Ragdoll.cs`. `brain-goal-targets` touches `Actor.cs` only at 36-40, 126-129 and 169-194;
+    `lodur-ik-goals` touches none of these files.
+
 ## Prior art (research pass `goal-ai-prior-art`)
 
 - The Sims: needs-based utility; objects advertise what they offer, so the data lives on the object and new
@@ -102,7 +132,8 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 |---|---|---|---|---|---|
 | 1 | `lodur-percepts` | Lodur | emitter id and kind, percept memory, phantom id bit | none | S, specced |
 | 2 | `brain-goal-targets` | Lodur | target filters, (goal, percept) utility, commitment | 1 | M |
-| 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR (legs later) in the body interface | none (parallel to 1-2) | M |
+| 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
+| 3b | `lodur-reach-tracking` | Lodur | reach under gravity: feedforward or a damped error loop | 3 | S-M |
 | 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off, recoil, fetal and stare-at-hands as layers; seated Fella demo | 2, 3 | M |
 | 5 | `lodur-phantom-percepts` + `bds-thought-bubble` | Lodur, BDS | phantom things by hallucination type; the bubble reads their kinds | 1, 4 | M, S |
 | 6 | `lodur-assist-pin` | Lodur | upright assist | none | S |
@@ -112,7 +143,20 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 10 | `lodur-grip`, then `lodur-interactions` | Lodur + BDS | advertised verbs as step lists | 9, Q `bds-sandbox-lures` | M each |
 | 11 | `lodur-intelligence` | Lodur | what intelligence scales | 2, Q `bds-intelligence-in-goal-ai` | S |
 
-Cut 1 is `lodur:cut_spec:cut-lodur-percepts.r1`; the rest are follow-ups.
+Cut 1 is `lodur:cut_spec:cut-lodur-percepts.r1` (landed). Cuts 2 and 3 are
+`lodur:cut_spec:cut-brain-goal-targets.r1` and `lodur:cut_spec:cut-lodur-ik-goals.r1`; they touch disjoint files.
+The rest are follow-ups.
+
+**IK rationale (pass `goal-targets-ik-map`, research `ik-prior-art`).** IK is a producer of joint targets in
+Lodur.Core, as Final IK feeds PuppetMaster's target pose, not a solver in the binding: the binding stays the
+muscle layer and the will mix and graft mask see IK like any other layer. Arms are two-bone with a hinge elbow,
+so the analytic solve is exact; FABRIK and CCD wait for graft chains that are not two-bone. The elbow swivel is
+the one needing no shoulder twist, because the shoulder's twist muscle cannot hold one (fact 7); what this gives
+up is an authored elbow direction. Reach under gravity lands short by PD sag (fact 9); that is its own cut.
+
+**Goal-target rationale.** A target is tracked by percept Id (fact 11), selection scores (goal, percept) pairs,
+and a retarget inside the goal waits the deliberate latency but not the dwell, held only by the commitment
+multiplier. No `TargetChanged` event: nothing reads one.
 
 ## What intelligence changes
 
