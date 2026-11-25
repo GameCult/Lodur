@@ -100,7 +100,7 @@ goes limp and ends the tick) → Perception senses (with the sensory gain in for
 afferent (gain from the previous tick's drive) → the drive steps (pain, strain, arousal, resolve, the break and
 the mend; the goal's effort is paid here) → the Brain decides (a decision is pending for the deliberate latency)
 and a due decision commits (entry resolve is set) → the entry ramp assigns gain and arousal → the goal's
-behaviour writes strengths and targets at the will's weight, and the strengths are scaled by the motor ceiling. The tick that
+behaviour writes strengths and targets at the will's weight (the key pose, then the orient layers (recoil, look, arms) toward the committed target from the caller's part poses, then the flinch blend over every joint), and the strengths are scaled by the motor ceiling. The tick that
 commits a goal already writes under it.
 
 | Owner | Inputs | Outputs | Derived state | Forbidden writers |
@@ -114,6 +114,7 @@ commits a goal already writes under it.
 | Brain (`Brain`, `GoalSpec`) | the drive state it reads through conditions | the wanted goal; each goal's pull, priority, dwell, entry effects (`EntryResolve`, `EntryArousal`, `SensoryGain`, `EntrySeconds`), `Effort`, `InvoluntarySeconds` and behaviour | none: it is data, copied at build and read back read-only | a flip rule anywhere else (`lodur:ruling:npc-brain-authors-goals`) |
 | `Actor` | all of the above, one tick | the committed goal; `DriveState.SensoryGain`; arousal during a goal's `EntrySeconds`; the events | the pending decision and its tick, the dwell, the ramp's start values, the onset in whole ticks | a consumer setting the goal or the gain from outside |
 | Behaviour (`PoseBehaviour`) | the weight (the will's `Will^WillCurve` once the goal's involuntary onset is over, else 1), the leak, strain, time | strengths and targets into caller arrays: `HoldStrength x min(1, weight + leak x FlinchGain)` | none | writing a joint or a force (`body-one-interface`); any strength not under the will mix |
+| Orient layers (`LookLayer`, `ArmLayer`, `RecoilLayer` on the goal's `PoseBehaviour`; solved by the Actor's `OrientRig`) | the committed target (`Actor.Target`), the caller's part poses (`Ragdoll.ReadPartPoses`), the `BodyPlan` at construction | joint targets only: the neck, the shoulders and elbows, and the recoil poses' joints, blended in before the flinch | the Nearer arm side, set when a (goal, target) pair commits and held until the next commit; layer targets are recomputed each tick and never stored | a layer writing strength; the game solving IK around the Actor or overwriting targets after `Tick`; IK in the Ymir binding; a layer reading `PhantomIdBit`; a mid-pair arm-side flip; an arm the closed form cannot solve (bent at creation, an elbow range straddling zero) is refused at construction, naming the goal and side |
 | `Planner` | percept facts and positions, self facts, the verb list (`Verb`: kind filters, needs, gives), a depth, the reach | `Plan`'s length (0 holds, n steps, -1 none within depth or within the 4096-grounding `NodeBudget`, a counter) and the steps as (verb index, This id, Tool id) in the caller's buffer | reach (bit 63) from distance, per call; the plan, per call | reading phantom-ness or a kind's or fact's meaning; storing a plan; the game supplying bit 63; allocating after construction |
 
 ## Invariants
