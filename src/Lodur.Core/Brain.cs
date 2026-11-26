@@ -328,7 +328,7 @@ namespace Lodur
         /// <summary>The factor on a pair's score when its goal's want has no plan within <see cref="PlanDepth"/> (or the think budget ran out): he goes at the target directly, in [0, 1], default 0.5 (a placeholder).</summary>
         public double DirectDiscount { get; init; } = 0.5;
 
-        /// <summary>The most groundings one Select may regress across all its plans, at least 1, default 4096: one budget per decision, spent on the best raw pairs first (lodur:question:bds-think-budget-per-decision).</summary>
+        /// <summary>The most groundings one Select may regress across all its plans, at least 1, default 4096: one budget per decision, spent by deepening across the want pairs, short plans first (lodur:question:bds-think-budget-per-decision).</summary>
         public int ThinkBudget { get; init; } = Planner.NodeBudget;
 
         /// <summary>How close a thing must be to be in reach, in meters, finite and above 0, default 0.6 (an arm's length, 0.575 m, as a placeholder).</summary>
@@ -371,9 +371,11 @@ namespace Lodur
 
         /// <summary>
         /// <see cref="Select(in DriveState, Perception, float, float, float, Choice)"/> with the want gate. Pass 1 scores every pair raw (commitment applied) and offers
-        /// the untargeted-by-want pairs; a want pair whose want holds is not offered, the rest wait in the Deliberation. Pass 2 takes them by raw, best first, plans each with what is
-        /// left of <see cref="ThinkBudget"/>, and offers raw times the plan-length factor, or raw times the factor at PlanDepth + 1 times <see cref="DirectDiscount"/> when no plan was found
-        /// or the budget is gone; it stops once no remaining raw can beat or tie-win the best (every factor is at most 1).
+        /// the untargeted-by-want pairs; a want pair whose want holds is not offered, the rest wait in the Deliberation. Pass 2 deepens across the waiting pairs: round k takes them by
+        /// bound (raw times the best factor any plan longer than k - 1 steps, or going direct, could earn), asks each for a plan of exactly k steps with what is left of <see cref="ThinkBudget"/>,
+        /// and offers raw times the plan-length factor for one found; a pair with none of k steps waits for round k + 1, and one with no plan within PlanDepth (or the budget gone) is offered
+        /// at raw times the factor at PlanDepth + 1 times <see cref="DirectDiscount"/>. A round ends when no remaining bound can beat or tie-win the best, so short plans are found
+        /// first and one pair's dead end cannot starve the rest.
         /// </summary>
         internal Choice Select(in DriveState drive, Perception perception, float ox, float oy, float oz, Choice current, Deliberation? d)
         {
@@ -406,17 +408,36 @@ namespace Lodur
                 }
             }
 
-            while (d is not null && d.TryPop(out var pair))
+            if (d is not null)
             {
-                if (best.Found && pair.Raw < best.Score)
+                for (var k = PlanDepth == 0 ? 0 : 1; ; k++)
                 {
-                    break;
-                }
+                    while (d.TryPop(out var pair))
+                    {
+                        if (best.Found && pair.Bound < best.Score)
+                        {
+                            d.ClearRound();
+                            break;
+                        }
 
-                var goal = Goals[pair.Goal];
-                var length = d.Plan(pair.Goal, goal.Want!.Value, pair.Slot);
-                var factor = length > 0 ? goal.PlanFactor(length) : goal.PlanFactor(PlanDepth + 1) * DirectDiscount;
-                Offer(pair.Goal, pair.Slot, pair.Target, pair.Raw * factor, pair.Current, ref best);
+                        var goal = Goals[pair.Goal];
+                        var length = d.PlanAt(pair.Goal, goal.Want!.Value, pair.Slot, k);
+                        if (length == 0)
+                        {
+                            pair.Bound = pair.Raw * d.BoundFactor(pair.Goal, k);
+                            d.Defer(pair);
+                            continue;
+                        }
+
+                        var factor = length > 0 ? goal.PlanFactor(length) : goal.PlanFactor(PlanDepth + 1) * DirectDiscount;
+                        Offer(pair.Goal, pair.Slot, pair.Target, pair.Raw * factor, pair.Current, ref best);
+                    }
+
+                    if (!d.NextRound())
+                    {
+                        break;
+                    }
+                }
             }
 
             return best.Found ? Pair(best.Goal, best.Target) : Pair(current.Goal, 0UL);

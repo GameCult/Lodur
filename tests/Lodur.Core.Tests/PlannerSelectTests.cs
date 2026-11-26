@@ -209,36 +209,81 @@ public sealed class PlannerSelectTests
     }
 
     [Fact]
-    public void One_budget_serves_the_whole_select_and_is_spent_best_raw_first()
+    public void Deepening_finds_short_plans_first()
     {
-        // One want goal on two doors at equal raw: the bolted door (slot 0, four steps) is planned first, then the plain one (two steps).
+        // One want goal on two doors at equal raw 4: the bolted door (slot 0, four steps) and the plain one (slot 1, two steps).
         var percepts = See(4, BoltedDoor(1), PlainDoor(2, 9f));
         var probe = new Planner(Catalogue(), 4, 4, 0.6);
         var steps = new PlanStep[4];
-        Assert.Equal(4, probe.Plan(percepts, 0UL, 0f, 0f, 0f, 0, This(Open), 4, steps));
-        var boltedNodes = probe.LastNodes;
-        Assert.Equal(2, probe.Plan(percepts, 0UL, 0f, 0f, 0f, 1, This(Open), 4, steps));
-        var plainNodes = probe.LastNodes;
+        var rounds = 0;
+        for (var k = 1; k <= 2; k++)
+        {
+            for (var slot = 0; slot < 2; slot++)
+            {
+                probe.Plan(percepts, 0UL, 0f, 0f, 0f, slot, This(Open), k, steps, Planner.NodeBudget, k);
+                rounds += probe.LastNodes;
+            }
+        }
 
-        (Choice Pick, int Spent) Select(int budget)
+        (Choice Pick, int Spent) Select(int budget, double idle = 1.5)
         {
             var brain = new Brain
             {
                 PlanDepth = 4, ThinkBudget = budget, DirectDiscount = 0.5,
-                Goals = new[] { Goal("idle", 1.5), Goal("open", 4.0, Kinds(Door), This(Open), Shorter()) },
+                Goals = new[] { Goal("idle", idle), Goal("open", 4.0, Kinds(Door), This(Open), Shorter()) },
             };
             var d = new Deliberation(brain, Catalogue(), 4);
             return (brain.Select(default, percepts, 0f, 0f, 0f, new Choice(0, 0), d), d.Spent);
         }
 
-        // Both plans fit: bolted 4 x 0.625 = 2.5, plain 4 x 0.875 = 3.5 wins.
-        Assert.Equal((new Choice(1, 2), boltedNodes + plainNodes), Select(boltedNodes + plainNodes));
-        // The plain plan runs one short: it goes direct (4 x 0.5 x 0.5 = 1 < idle), the planned bolted pair wins.
-        Assert.Equal((new Choice(1, 1), boltedNodes + plainNodes - 1), Select(boltedNodes + plainNodes - 1));
-        // Exactly the bolted plan: the plain pair finds the budget gone, and goes direct.
-        Assert.Equal((new Choice(1, 1), boltedNodes), Select(boltedNodes));
-        // One short of it: both go direct at 1, which loses to idle.
-        Assert.Equal((new Choice(0, 0), boltedNodes - 1), Select(boltedNodes - 1));
+        // The plain door (4 x 0.875 = 3.5) wins in round 2 and the bolted door, bounded by 4 x 0.75 after it, is pruned before round 3:
+        // the budget paid for round 1 and round 2 of both pairs and nothing more, not the four-step search.
+        Assert.Equal((new Choice(1, 2), rounds), Select(rounds));
+        Assert.Equal((new Choice(1, 2), rounds), Select(int.MaxValue));
+        // One grounding short, the plain door's round 2 runs the budget out: it goes direct (4 x 0.25 = 1 < idle), and so does the bolted one.
+        Assert.Equal((new Choice(0, 0), rounds - 1), Select(rounds - 1));
+        Assert.Equal(new Choice(1, 1), Select(rounds - 1, idle: 0.5).Pick);
+    }
+
+    [Fact]
+    public void A_dead_end_does_not_starve_a_short_plan()
+    {
+        // Two doors with four bolts (approach, four unbolts, open: six steps, past PlanDepth 4) at raw 6, a knife with a two-step want (approach, calm) at raw 3.
+        const int Barred = 5, Chained = 6;
+        var verbs = new[]
+        {
+            Catalogue()[0], Catalogue()[1], Catalogue()[2],
+            new Verb { Id = "Unbar", This = Kinds(Door), Needs = new[] { This(Reach), This(Barred) }, Gives = new[] { This(Barred, false) } },
+            new Verb { Id = "Unchain", This = Kinds(Door), Needs = new[] { This(Reach), This(Chained) }, Gives = new[] { This(Chained, false) } },
+            new Verb { Id = "Open", This = Kinds(Door), Needs = new[] { This(Reach), This(Locked, false), This(Latched, false), This(Barred, false), This(Chained, false) }, Gives = new[] { This(Open) } },
+            Catalogue()[5],
+        };
+        const ulong Bolts = (1UL << Locked) | (1UL << Latched) | (1UL << Barred) | (1UL << Chained);
+        var percepts = See(4, Thing(1, Door, 6f, Bolts), Thing(2, Door, 8f, Bolts), Thing(3, Knife, 3f));
+        var probe = new Planner(verbs, 4, 4, 0.6);
+        var steps = new PlanStep[4];
+        var rounds = 0;
+        for (var k = 1; k <= 2; k++)
+        {
+            for (var slot = 0; slot < 3; slot++)
+            {
+                probe.Plan(percepts, 0UL, 0f, 0f, 0f, slot == 2 ? 0 : slot, slot == 2 ? Self(Fed) : This(Open), k, steps, Planner.NodeBudget, k);
+                rounds += probe.LastNodes;
+            }
+        }
+
+        Assert.Equal(-1, probe.Plan(percepts, 0UL, 0f, 0f, 0f, 0, This(Open), 4, steps));
+        Assert.True(probe.LastNodes > rounds, $"one full dead-end search ({probe.LastNodes}) must cost more than rounds 1 and 2 of all three pairs ({rounds})");
+
+        var brain = new Brain
+        {
+            PlanDepth = 4, ThinkBudget = rounds, DirectDiscount = 0.5,
+            Goals = new[] { Goal("idle", 0.5), Goal("dead", 6.0, Kinds(Door), This(Open), Shorter()), Goal("calm", 3.0, Kinds(Knife), Self(Fed), Shorter()) },
+        };
+        var d = new Deliberation(brain, verbs, 4);
+        // The doors go direct at 6 x 0.25 = 1.5; the knife's plan, 3 x 0.875 = 2.625, wins. Best raw first would have spent the whole budget on the first door.
+        Assert.Equal(new Choice(2, 3), brain.Select(default, percepts, 0f, 0f, 0f, new Choice(0, 0), d));
+        Assert.Equal(rounds, d.Spent);
     }
 
     [Fact]
@@ -534,9 +579,13 @@ public sealed class PlannerSelectTests
     [Fact]
     public void A_crowded_room_changes_few_decisions()
     {
-        Assert.Equal(0, Differing(48, 4, 100));
-        Assert.Equal(CrowdedDepth6Differing, Differing(48, 6, 100));
+        foreach (var depth in new[] { 4, 5, 6, 8 })
+        {
+            Assert.Equal(0, Differing(48, depth, 100));
+        }
+
+        Assert.Equal(CrowdedDepth6At64Differing, Differing(64, 6, 100));
     }
 
-    private const int CrowdedDepth6Differing = 59;
+    private const int CrowdedDepth6At64Differing = 2;
 }
