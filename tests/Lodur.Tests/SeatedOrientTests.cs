@@ -23,8 +23,16 @@ public sealed class SeatedOrientTests
     /// <summary>
     /// A lower sound to the left, whose ward goals the near (left) arm reaches with zero shoulder twist. The far arm's goal crosses the midline, and
     /// its swing toward it drives the forearm into the side of the trunk, where it wedges (44.6 cm off, gravity or not): the far arm is not claimed here.
+    /// Owner: ruling lodur:ruling:reach-clears-body-by-via-point gives the fix (a hand path through a clearance via point) to the follow-up cut
+    /// lodur-reach-tracking, which claims the far arm with a bound and retires <see cref="FarArmWedgedFloor"/>.
     /// </summary>
     private static readonly (float X, float Y, float Z) LowSound = (0.4f, 1.2f, 0.9f);
+
+    /// <summary>
+    /// Tripwire on the unclaimed far arm at the low sound, metres: the geometric midpoint of the wedged reading, 44.6 cm, and the near-arm bound, 7.04 cm.
+    /// Below it the far arm has started to reach, so whoever made it reach claims it with a bound here and deletes this floor.
+    /// </summary>
+    private const float FarArmWedgedFloor = 0.177f;
 
     /// <summary>
     /// Head forward error bound after 2 s, degrees, at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 1.030 deg over the two
@@ -191,6 +199,8 @@ public sealed class SeatedOrientTests
         var low = Run(LowSound, gravity: 0f);
         _out.WriteLine($"low sound: wrists to their goals {low.Left * 100f:F2} and {low.Right * 100f:F2} cm");
         Assert.True(low.Left < NearWardBound, $"the near wrist is {low.Left * 100f:F1} cm from its goal, bound {NearWardBound * 100f:F1} cm");
+        Assert.True(low.Right > FarArmWedgedFloor,
+            $"the far wrist now reaches its goal ({low.Right * 100f:F1} cm): claim it with a bound (lodur-reach-tracking) and delete FarArmWedgedFloor");
     }
 
     [Fact]
