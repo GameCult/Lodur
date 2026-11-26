@@ -143,6 +143,38 @@ Probes in the scratch project `nibu-imagination-select/probe` (not committed): `
     A grounding costs about 0.2 us here, not the 35 ns fact 13's world implied, and pairs multiply it: the 8.5 us of
     fact 13 was six wants, not a want per thing. At 120 Hz, 1.1 ms per Select is 13% of a core per Fella.
 
+Pass `reach-tracking-map` (its records cite these facts as 19-23; here they are 23-27), Lodur `77d00d3`, Ymir `e51cf76`, 2026-11-26. Probes in a scratch test class (not committed)
+in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; errors after 2 s (seated) or 4 s (reach).
+
+23. **Gravity sag is PD sag, and feedforward removes it (probe).** At base the seated head-height wards read 16.0-17.8
+    cm under gravity against 2.8-7.0 cm without; the welded reach targets 10.2-24.0 cm against 0.25-0.89 cm. Adding,
+    after `Ragdoll.Drive`, each joint's subtree gravity load times the muscle's strength (`-(sum m_b (x_b - a_j)) x g`,
+    masses from the plan's shape and density, which Box3D also uses) brings the reach targets to 0.88, 0.11, 0.55 cm and
+    the seated wards to 3.95-5.51 cm. At half strength it still sags (12.0-22.9 cm), as a weak will must: the torque
+    and the stiffness scale together. Cost, an O(parts) bottom-up form, 41 paired interleaved rounds: +0.79 us per
+    `Drive` (0.89 to 1.66 us) against 89.4 us per `world.Step`.
+24. **Feedforward on every muscle moves 13 of 60 `Lodur.Tests` (probe, also projected onto each muscle's gain
+    axes).** ConnectedPainBoxTests (5): the held arm no longer sags into the box, the will never breaks, the replay
+    golden changes; HandTests (7): thumbs keep turning at rest (0.2-1.2 rad/s), the wrist overshoots its cone to
+    1.069, the finger rest reads 0.29 against 0.35; RagdollTests hinge-axis torque (1). Content and tuning were set
+    against sagging muscles. Question `gravity-feedforward-scope`.
+25. **The far-arm wedge is cleared by a via point ahead of the wrist's own side (probe).** Seated low sound, right
+    wrist from (-0.21, 0.975, 0) to its ward goal (-0.04, 1.60, 0.24) in the torso's creation frame: the straight
+    wrist segment touches the trunk (distance 0.0 to the torso and pelvis boxes); for the head-height sound on the
+    right it clears by 6.6 cm, on the left it touches (0.0). Minimum-jerk path, two 0.3 s segments, via point
+    `(wrist x, mid y, trunk front + c)`, under gravity with feedforward: low far arm 9.9, 7.6, 6.0 cm at c = 0.15,
+    0.2, 0.3 (zero gravity, c 0.2: 7.8); the left head-height sound's right arm 2.2-3.2 cm. A via point at the
+    midpoint's x needs c 0.3 and fails at 0.15-0.2 (38-40 cm); at the goal's or shoulder's height 8.2-16.6 cm. A
+    straight path with no via: 47.5 cm.
+26. **A hand path costs where nothing blocks (probe).** The straight minimum-jerk path on the unblocked right-side
+    ward ends 12.8 cm off (gravity, feedforward) against 5.5 cm for the direct solve; on the left-side ward without a
+    via, 9.7 against 3.95 (zero gravity 28.2 against 2.8). The final IK targets are the same; the shoulder twist is
+    not: 0.84 rad off its target after the path against 0.06 direct, no contacts at the end. The twist muscle (kp 1,
+    fact 7) cannot pull the twist back once the path leaves it elsewhere. Question `reach-path-unblocked`.
+27. **The hand-off jump.** `OrientRig.Compose` runs only while the goal in force has layers (`Actor.Tick`,
+    `PoseBehaviour.Write`), and an arm not driven keeps its slewed output, so engaging slews from stale targets and
+    disengaging writes the base pose at once (Soul s4 on `lodur-orient-goals`: 0.65 rad in a tick).
+
 ## Prior art (research pass `goal-ai-prior-art`)
 
 - The Sims: needs-based utility; objects advertise what they offer, so the data lives on the object and new
@@ -266,7 +298,8 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 2b | `lodur-goal-planner` | Lodur | percept facts, verbs with needs and gives, depth-limited regressive planner (core, no caller) | 2 | M, specced |
 | 2c | `lodur-planner-select` | Lodur | wants, Select admission, direct tries at a discount and frustration (`bds-unplannable-tries-direct`), plan on the Actor | 2b, Actor.cs cuts in flight | M |
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
-| 3b | `lodur-reach-tracking` | Lodur | reach under gravity: feedforward or a damped error loop | 3 | S-M |
+| 3b | `lodur-reach-path` | Lodur | hand path through a clearance via point when blocked; arm hand-off slewed both ways | 3, 4 | M, specced |
+| 3c | `ymir-world-gravity`, then `lodur-gravity-feedforward` | Ymir, Lodur (+ BDS content) | the world reports its gravity; muscles carry their subtree's weight times strength | Q `gravity-feedforward-scope` | S, M |
 | 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off and recoil as layers; fetal (a key-pose goal) and stare-at-hands (Look and Reach on a phantom) are data; seated Fella demo | 2, 3 | M |
 | 5 | `lodur-phantom-percepts` + `bds-thought-bubble` | Lodur, BDS | phantom things by hallucination type; the bubble reads their kinds | 1, 4 | M, S |
 | 6 | `lodur-assist-pin` | Lodur | upright assist | none | S |
@@ -297,8 +330,25 @@ so it must jump somewhere on the tie set. Ruling `ik-swivel-temporal-coherence` 
 across ticks: it holds the previous swivel's basin, takes the stateless choice only when that is better by
 `BasinMargin` (less violation, or less twist when both are feasible), and turns the swivel no faster than
 `SwivelRate`; the first solve after construction or `Reset` is stateless. Both constants are placeholders. What it
-gives up: IK is no longer a pure function of the goal. Not covered: near a half-turn swing the swing-twist split in
-the clamp is singular, so the clamped target can still jump while the held swivel moves smoothly. Reach under gravity lands short by PD sag (fact 9); that is its own cut.
+gives up: IK is no longer a pure function of the goal. Near a half-turn swing the swing-twist split in the clamp is
+singular, so the clamped solution can still jump; ruling `ik-output-slew-limit` covers it at the output: the returned
+shoulder and elbow targets move toward the solution no faster than `MaxAngularRate` (a placeholder near human peak
+arm speed), everywhere, and the singular-band special case is deleted. What that gives up: a leaping goal is followed
+at the rate, not at once. The slew holds only while the Arms layer drives; the hand-off into and out of the layer is
+cut `lodur-reach-path` (facts 19-23). Reach under gravity lands short by PD sag (facts 9, 19); that is follow-up
+`lodur-gravity-feedforward`.
+
+**Reach rationale (pass `reach-tracking-map`, ruling `reach-clears-body-by-via-point`).** One owner of an arm's motion
+across ticks: `ArmChain` holds the held swivel, the slewed output and now the hand path and the hand-off state, so a
+teleport's `Reset` forgets all of it at once. The path is minimum-jerk (Flash and Hogan 1985) in the arm parent's creation
+frame, where the chain already solves; it starts at the measured wrist when the arm engages or the Actor commits a (goal,
+target) pair, and it is taken only when the straight wrist segment is blocked by the trunk (fact 21; whether unblocked
+reaches also take a path is question `reach-path-unblocked`, fact 22). The via point sits ahead of the wrist's own side,
+not of the midpoint: the arm comes forward first, then across, as a person reaching across their body does. Gravity is a
+muscle-layer term, not a reach-layer correction (fact 19): computed-torque practice (PD plus gravity compensation,
+Takegaki and Arimoto 1981; Coros et al. 2010 for simulated characters) puts it in the torque, scaled here by strength so a
+failing will still sags; a task-space loop on the target was unstable (fact 9) and fights a weak will. PuppetMaster's
+alternative, pin forces pulling bodies to the target pose, is an external force and breaks `body-one-interface`.
 
 **Goal-target rationale.** A target is tracked by percept Id (fact 11), selection scores (goal, percept) pairs,
 and a retarget inside the goal waits the deliberate latency but not the dwell, held only by the commitment
