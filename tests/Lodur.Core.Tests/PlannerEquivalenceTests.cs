@@ -32,7 +32,7 @@ public sealed class PlannerEquivalenceTests
 
     private static Fact Fact(FactSubject s, int bit, bool v) => new(s, bit, v);
 
-    private static Fact[] RandomFacts(Random rng, int count, bool hasTool, bool selfAllowed)
+    private static Fact[] RandomFacts(Random rng, int count, bool hasTool, bool selfAllowed, int reachOneIn)
     {
         var chosen = new List<Fact>();
         for (var i = 0; i < count; i++)
@@ -43,7 +43,7 @@ public sealed class PlannerEquivalenceTests
                 subject = FactSubject.This;
             }
 
-            var bit = subject != FactSubject.Self && rng.Next(4) == 0 ? Reach : rng.Next(4);
+            var bit = subject != FactSubject.Self && rng.Next(reachOneIn) == 0 ? Reach : rng.Next(4);
             if (chosen.Any(f => f.Subject == subject && f.Bit == bit))
             {
                 continue;
@@ -81,7 +81,7 @@ public sealed class PlannerEquivalenceTests
         {
             var kind = (uint)(1 + rng.Next(3));
             var facts = (ulong)rng.Next(16);
-            var x = rng.Next(2) == 0 ? 0.5f : 5f;
+            var x = rng.Next(3) switch { 0 => 0.5f, 1 => 1.2f, _ => 5f };
             emitters.Add(new Emitter(Channel.Visual, x, 0f, 0f, 100f, 1.0, (ulong)(10 + i), kind, facts));
         }
 
@@ -108,8 +108,8 @@ public sealed class PlannerEquivalenceTests
                 Id = "v" + v,
                 This = RandomFilter(rng, 60),
                 Tool = tool,
-                Needs = RandomFacts(rng, rng.Next(4), tool is not null, true),
-                Gives = RandomFacts(rng, 1 + rng.Next(3), tool is not null, false).DefaultIfEmpty(Fact(FactSubject.This, 0, true)).ToArray(),
+                Needs = RandomFacts(rng, rng.Next(4), tool is not null, true, 3),
+                Gives = RandomFacts(rng, 1 + rng.Next(3), tool is not null, false, 4).DefaultIfEmpty(Fact(FactSubject.This, 0, true)).ToArray(),
             });
         }
 
@@ -124,7 +124,7 @@ public sealed class PlannerEquivalenceTests
         else
         {
             w.WantThing = 1 + occupied[rng.Next(occupied.Length)];
-            w.WantBit = rng.Next(4) == 0 ? Reach : rng.Next(4);
+            w.WantBit = rng.Next(2) == 0 ? Reach : rng.Next(4);
         }
 
         w.WantValue = rng.Next(2) == 0;
@@ -164,7 +164,16 @@ public sealed class PlannerEquivalenceTests
 
     private static int ThingOf(Fact f, Step s) => f.Subject == FactSubject.Self ? 0 : 1 + (f.Subject == FactSubject.This ? s.This : s.Tool);
 
-    private static ulong[]? Apply(World w, ulong[] state, Step s)
+    // The reach test of the start state and of a move alike: squared distance of the remembered positions against reach squared.
+    private static bool Near(World w, int a, int b)
+    {
+        Percept pa = w.Perception.Percept(a), pb = w.Perception.Percept(b);
+        double dx = pa.X - pb.X, dy = pa.Y - pb.Y, dz = pa.Z - pb.Z;
+        return dx * dx + dy * dy + dz * dz <= 1.0;
+    }
+
+    // moves: a verb with a This give of reach true takes every other thing out of reach unless it is near the verb's This.
+    private static ulong[]? Apply(World w, ulong[] state, Step s, bool moves = true)
     {
         var verb = w.Verbs[s.Verb];
         foreach (var n in verb.Needs)
@@ -176,6 +185,18 @@ public sealed class PlannerEquivalenceTests
         }
 
         var next = (ulong[])state.Clone();
+        // The move first, then the verb's own gives: a give of reach on a thing is a literal and stands.
+        if (moves && verb.Gives.Any(g => g.Subject == FactSubject.This && g.Bit == Reach && g.Value))
+        {
+            for (var o = 0; o < Slots; o++)
+            {
+                if (o != s.This && w.Perception.Percept(o).Id != 0)
+                {
+                    next[o + 1] = Near(w, o, s.This) ? next[o + 1] | Perception.InReachFact : next[o + 1] & ~Perception.InReachFact;
+                }
+            }
+        }
+
         foreach (var g in verb.Gives)
         {
             var thing = ThingOf(g, s);
@@ -188,7 +209,7 @@ public sealed class PlannerEquivalenceTests
     private static string Key(ulong[] state) => string.Join(",", state);
 
     // The shallowest plan length by breadth-first search over states, or -1 past the depth.
-    private static int Shallowest(World w, List<Step> all)
+    private static int Shallowest(World w, List<Step> all, bool moves = true)
     {
         var frontier = new List<ulong[]> { w.Start };
         var seen = new HashSet<string> { Key(w.Start) };
@@ -204,7 +225,7 @@ public sealed class PlannerEquivalenceTests
             {
                 foreach (var step in all)
                 {
-                    var n = Apply(w, state, step);
+                    var n = Apply(w, state, step, moves);
                     if (n is not null && seen.Add(Key(n)))
                     {
                         next.Add(n);
@@ -219,7 +240,7 @@ public sealed class PlannerEquivalenceTests
     }
 
     // The first plan of exactly n steps in the spec's order: the last step's (verb, This, Tool) ascending first, then the step before it.
-    private static Step[]? First(World w, List<Step> all, int n)
+    private static Step[]? First(World w, List<Step> all, int n, bool moves = true)
     {
         var chosen = new Step[n];
         return Choose(n) ? chosen : null;
@@ -232,7 +253,7 @@ public sealed class PlannerEquivalenceTests
                 var state = w.Start;
                 foreach (var step in chosen)
                 {
-                    var next = Apply(w, state, step);
+                    var next = Apply(w, state, step, moves);
                     if (next is null)
                     {
                         return false;
@@ -257,23 +278,32 @@ public sealed class PlannerEquivalenceTests
         }
     }
 
+    private static string Dump(World w, PlanStep[] plan, int n) =>
+        Environment.NewLine + string.Join(Environment.NewLine, w.Verbs.Select(v => $"{v.Id} this={(v.This is null ? "-" : string.Join(",", v.This.Kinds))} tool={(v.Tool is null ? "-" : string.Join(",", v.Tool.Kinds))} needs={string.Join(",", v.Needs.Select(f => $"{f.Subject}{f.Bit}{f.Value}"))} gives={string.Join(",", v.Gives.Select(f => $"{f.Subject}{f.Bit}{f.Value}"))}"))
+        + $"{Environment.NewLine}start={Key(w.Start)} kinds={string.Join(",", w.Kind)} want={w.WantThing}/{w.WantBit}/{w.WantValue} plan={string.Join(" ", plan.Take(Math.Max(n, 0)))} xs={string.Join(",", Enumerable.Range(0, Slots).Select(q => w.Perception.Percept(q).X))}";
+
     [Fact]
     public void The_plan_is_sound_complete_and_shallowest_against_a_forward_search_on_4000_random_worlds()
     {
         var rng = new Random(20261125);
-        int solved = 0, none = 0, ordered = 0;
+        int solved = 0, none = 0, ordered = 0, changed = 0;
         var plan = new PlanStep[Depth];
         for (var i = 0; i < 4000; i++)
         {
             var w = Generate(rng);
             var all = Groundings(w).ToList();
             var expected = Shallowest(w, all);
+            if (expected != Shallowest(w, all, moves: false))
+            {
+                changed++;
+            }
+
             var planner = new Planner(w.Verbs, Slots, Depth, 1.0);
             var targetSlot = w.WantThing == 0 ? 0 : w.WantThing - 1;
             var want = new Fact(w.WantThing == 0 ? FactSubject.Self : FactSubject.This, w.WantBit, w.WantValue);
             var n = planner.Plan(w.Perception, w.SelfFacts, 0f, 0f, 0f, targetSlot, want, Depth, plan);
-            Assert.True(n == expected, $"world {i}: planner {n}, forward search {expected}");
-            Assert.True(planner.LastNodes <= Planner.NodeBudget, $"world {i} spent the budget");
+            Assert.True(n == expected, $"world {i}: planner {n}, forward search {expected}{Dump(w, plan, n)}");
+            Assert.True(planner.LastNodes <= Planner.NodeBudget, $"world {i} spent the budget{Dump(w, plan, n)}");
 
             if (n < 0)
             {
@@ -300,9 +330,14 @@ public sealed class PlannerEquivalenceTests
                 ordered++;
                 var first = First(w, all, n)!;
                 Assert.True(first.SequenceEqual(steps), $"world {i}: tie order, planner {string.Join(" ", steps)} against {string.Join(" ", first)}");
+                if (expected == Shallowest(w, all, moves: false) && First(w, all, n, moves: false) is { } without && !without.SequenceEqual(first))
+                {
+                    changed++;
+                }
             }
         }
 
         Assert.True(solved > 1000 && none > 500 && ordered > 100, $"the worlds are too one-sided: {solved} solved, {none} none, {ordered} ordered");
+        Assert.True(changed > 50, $"the move rule changes the plan or verdict of only {changed} worlds");
     }
 }

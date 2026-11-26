@@ -533,4 +533,70 @@ public sealed class PlannerTests
         Assert.Equal(4, catalogue.Plan(world, 0UL, 0f, 0f, 0f, SlotOf(world, 3), This(Off), 8, run));
         Assert.False(catalogue.LastExhausted);
     }
+
+    // The test world's verbs but for what a test needs: Approach with no needs and Use of a Switch with a Knife that needs both in reach.
+    private static Verb[] Movers() => new[]
+    {
+        new Verb { Id = "Approach", This = Kinds(Switch, Knife), Gives = new[] { This(Reach) } },
+        new Verb { Id = "Use", This = Kinds(Switch), Tool = Kinds(Knife), Needs = new[] { This(Reach), Tool(Reach) }, Gives = new[] { This(Cut) } },
+    };
+
+    [Fact]
+    public void A_move_takes_reach_of_far_things_away()
+    {
+        var planner = Build(Movers());
+        var far = Make();
+        Sense(far, Thing(1, Switch, 5f), Thing(2, Knife, -5f));
+        Assert.Equal(-1, Run(planner, far, 1, This(Cut), 8).Length);
+        Assert.False(planner.LastExhausted);
+
+        var close = Make();
+        Sense(close, Thing(1, Switch, 5f), Thing(2, Knife, 5.5f));
+        var (n, steps) = Run(planner, close, 1, This(Cut), 8);
+        Assert.Equal(2, n);
+        Expect(steps, (0, 1, 0), (1, 1, 2));
+    }
+
+    [Fact]
+    public void A_move_brings_near_things_into_reach()
+    {
+        // The key is not a thing Approach accepts, but a switch beside it is.
+        var planner = Build(new[] { new Verb { Id = "Approach", This = Kinds(Switch), Gives = new[] { This(Reach) } } });
+        var p = Make();
+        Sense(p, Thing(1, Key, 5f), Thing(2, Switch, 5.3f));
+        var (n, steps) = Run(planner, p, 1, This(Reach), 4);
+        Assert.Equal(1, n);
+        Expect(steps, (0, 2, 0));
+
+        // Far from the key it brings nothing.
+        var apart = Make();
+        Sense(apart, Thing(1, Key, 5f), Thing(2, Switch, -5f));
+        Assert.Equal(-1, Run(planner, apart, 1, This(Reach), 4).Length);
+
+        // And out of reach is wanted just the same: going to the switch takes the key out of reach.
+        var kept = Make();
+        Sense(kept, Thing(1, Key, 0.5f), Thing(2, Switch, 5f));
+        (n, steps) = Run(planner, kept, 1, This(Reach, false), 4);
+        Assert.Equal(1, n);
+        Expect(steps, (0, 2, 0));
+    }
+
+    [Fact]
+    public void A_move_away_leaves_the_start_reach_behind()
+    {
+        var verbs = new[]
+        {
+            new Verb { Id = "Approach", This = Kinds(Switch, Knife), Gives = new[] { This(Reach) } },
+            new Verb { Id = "SwitchOff", This = Kinds(Switch), Needs = new[] { This(Reach) }, Gives = new[] { This(Off) } },
+            new Verb { Id = "Pry", This = Kinds(Knife), Tool = Kinds(Switch), Needs = new[] { Tool(Off), This(Reach) }, Gives = new[] { This(Cut) } },
+        };
+        var planner = Build(verbs);
+        var p = Make();
+        Sense(p, Thing(1, Knife, 0.5f), Thing(2, Switch, 5f));
+
+        // The knife is in reach at the start, but not after going to the switch: a second Approach.
+        var (n, steps) = Run(planner, p, 1, This(Cut), 8);
+        Assert.Equal(4, n);
+        Expect(steps, (0, 2, 0), (1, 2, 0), (0, 1, 0), (2, 1, 2));
+    }
 }

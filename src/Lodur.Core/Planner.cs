@@ -72,6 +72,10 @@ namespace Lodur
         private readonly uint[]?[] _thisKinds;  // the kinds a verb's target may be; null accepts any
         private readonly uint[]?[] _toolKinds;  // the kinds a verb's second thing may be; null when it takes none
         private readonly ulong[] _givenBits;    // per verb, bit i set when one of its gives is on bit i of any subject
+        private readonly bool[] _moves;         // per verb, a This give of bit 63 true: the step brings its This into reach
+        private readonly float[] _px;           // the slots' remembered positions, copied per call
+        private readonly float[] _py;
+        private readonly float[] _pz;
         private readonly int _words;
         private readonly int _capacity;
         private readonly double _reach;
@@ -118,6 +122,7 @@ namespace Lodur
             _thisKinds = new uint[verbs.Count][];
             _toolKinds = new uint[verbs.Count][];
             _givenBits = new ulong[verbs.Count];
+            _moves = new bool[verbs.Count];
             for (var v = 0; v < _verbs.Length; v++)
             {
                 var verb = verbs[v] ?? throw new ArgumentException($"Verb {v} is null.", nameof(verbs));
@@ -130,6 +135,7 @@ namespace Lodur
                 foreach (var g in _gives[v])
                 {
                     _givenBits[v] |= 1UL << g.Bit;
+                    _moves[v] |= g.Subject == FactSubject.This && g.Bit == 63 && g.Value;
                 }
             }
 
@@ -140,6 +146,9 @@ namespace Lodur
             _facts = new ulong[capacity + 1];
             _slotId = new ulong[capacity];
             _slotKind = new uint[capacity];
+            _px = new float[capacity];
+            _py = new float[capacity];
+            _pz = new float[capacity];
             _set = new int[(maxDepth + 1) * _stride];
             _setCount = new int[maxDepth + 1];
             _stepVerb = new int[Math.Max(1, maxDepth)];
@@ -163,6 +172,7 @@ namespace Lodur
         /// 0 when the want already holds, else the length of the shallowest plan of at most <paramref name="depth"/> steps, written into
         /// <paramref name="plan"/> in execution order, else -1. The want is about self or about the percept in <paramref name="targetSlot"/>.
         /// A thing's facts are those it was last sensed with, bit 63 replaced by whether it is within reach of the point.
+        /// A step that gives its This reach (bit 63 true) is a move: after it, another thing is in reach exactly when it is within reach of that This.
         /// <paramref name="budget"/> is the most groundings the call may regress, at least 1; a call that spends it returns -1 and sets <see cref="LastExhausted"/>.
         /// </summary>
         public int Plan(Perception perception, ulong selfFacts, float ox, float oy, float oz, int targetSlot, Fact want, int depth, Span<PlanStep> plan, int budget = NodeBudget)
@@ -182,6 +192,9 @@ namespace Lodur
             var reachSquared = _reach * _reach;
             ids.CopyTo(_slotId);
             kinds.CopyTo(_slotKind);
+            xs.CopyTo(_px);
+            ys.CopyTo(_py);
+            zs.CopyTo(_pz);
             for (var s = 0; s < _capacity; s++)
             {
                 double dx = xs[s] - ox, dy = ys[s] - oy, dz = zs[s] - oz;
@@ -336,6 +349,22 @@ namespace Lodur
                 for (var i = 0; i < n; i++)
                 {
                     var l = _set[cur + i];
+                    if (_moves[v] && gf.Subject == FactSubject.This && gf.Bit == 63 && gf.Value && ((l >> 1) & 63) == 63 && (l >> 7) > 0)
+                    {
+                        // A move: the literal on slot o holds after it for every This slot a with o near a exactly as the literal says (a == o is near).
+                        var o = (l >> 7) - 1;
+                        for (var a = 0; a < _capacity; a++)
+                        {
+                            if (_slotId[a] != 0 && Near(o, a) == ((l & 1) != 0))
+                            {
+                                _meetsThis[m + (a >> 6)] |= 1UL << (a & 63);
+                                any = true;
+                            }
+                        }
+
+                        continue;
+                    }
+
                     if (((l >> 1) & 63) != gf.Bit || (l & 1) != (gf.Value ? 1 : 0))
                     {
                         continue;
@@ -424,6 +453,17 @@ namespace Lodur
                     given = Ground(gives[g], a, b) == l;
                 }
 
+                if (!given && _moves[v] && ((l >> 1) & 63) == 63 && (l >> 7) > 0 && (l >> 7) - 1 != a)
+                {
+                    // After a move to a, every other thing is in reach exactly when it is near a: that literal is met or the step is refused.
+                    if (Near((l >> 7) - 1, a) != ((l & 1) != 0))
+                    {
+                        return false;
+                    }
+
+                    given = true;
+                }
+
                 if (!given)
                 {
                     _set[next + count++] = l;
@@ -455,6 +495,13 @@ namespace Lodur
             }
 
             return true;
+        }
+
+        // The one reach test: squared distance of remembered positions against reach squared. The start state applies it to the observer point.
+        private bool Near(int o, int a)
+        {
+            double dx = _px[o] - _px[a], dy = _py[o] - _py[a], dz = _pz[o] - _pz[a];
+            return dx * dx + dy * dy + dz * dz <= _reach * _reach;
         }
 
         private bool Holds(int lit) => (int)((_facts[lit >> 7] >> ((lit >> 1) & 63)) & 1UL) == (lit & 1);
