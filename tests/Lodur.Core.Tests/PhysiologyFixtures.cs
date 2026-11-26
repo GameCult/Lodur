@@ -51,7 +51,7 @@ internal static class PhysioFixtures
     public static RespirationDef DefaultRespiration => PhysiologyPlans.Humanoid().Respiration;
 
     /// <summary>No liquid ever counts as at the airway: the airway stays empty and the hold is never wanted.</summary>
-    public static AirwayDef InertAirway => new(150e-6, 1.0, 1.0, 1.0, 1e9, 2.0, new[] { (0.3, 0.0), (0.6, 1.0) }, 0.1, 0.0);
+    public static AirwayDef InertAirway => new(150e-6, 1.0, 1.0, 1.0, 1e9, 2.0, new[] { (0.3, 0.0), (0.6, 1.0) }, 0.1, 0.05);
 
     /// <summary>The humanoid's hypoxia curve: brain oxygen to consciousness, flat 1 above 0.70.</summary>
     public static Effect Hypoxia => new(EffectTarget.Consciousness, EffectOp.Factor, EffectDriver.BrainOxygen, new[] { (0.10, 0.0), (0.35, 0.1), (0.70, 1.0) });

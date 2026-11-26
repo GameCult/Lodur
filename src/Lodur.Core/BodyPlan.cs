@@ -31,12 +31,15 @@ namespace Lodur
 
     /// <summary>
     /// Where the airway opens to the outside: a sphere of <see cref="Radius"/> m centred at <see cref="Offset"/> in the part's frame; liquid inside it is liquid
-    /// at the airway. The sphere must reach outside the part's shape, since liquid never enters a body.
+    /// at the airway. The sphere must reach outside the part's shape, since liquid never enters a body. Its Radius is also its rim: the opening's half-width.
     /// </summary>
     public readonly record struct AirwayOpeningDef(string Label, Side Side, int Part, (float X, float Y, float Z) Offset, float Radius);
 
+    /// <summary>A point inside the airway, at <see cref="Offset"/> in the part's frame, where liquid pools behind the openings (the oropharynx, the glottis). Nothing reads one by label.</summary>
+    public readonly record struct AirwaySumpDef(string Label, int Part, (float X, float Y, float Z) Offset);
+
     /// <summary>
-    /// A body as data: parts, the joints that are also its tree, sense points and airway openings, each named by label and side.
+    /// A body as data: parts, the joints that are also its tree, sense points, airway openings and the sumps behind them, each named by label and side.
     /// Engine-free; a physics binding builds it into a world. Validated at construction.
     /// </summary>
     public sealed class BodyPlan
@@ -48,12 +51,13 @@ namespace Lodur
         private readonly Dictionary<(string, Side), int> _airway = new Dictionary<(string, Side), int>();
 
         public BodyPlan(IReadOnlyList<PartDef> parts, IReadOnlyList<JointDef> joints, IReadOnlyList<SensePointDef> sensePoints,
-            IReadOnlyList<AirwayOpeningDef>? airwayOpenings = null)
+            IReadOnlyList<AirwayOpeningDef>? airwayOpenings = null, IReadOnlyList<AirwaySumpDef>? airwaySumps = null)
         {
             Parts = new List<PartDef>(parts).AsReadOnly();
             Joints = new List<JointDef>(joints).AsReadOnly();
             SensePoints = new List<SensePointDef>(sensePoints).AsReadOnly();
             AirwayOpenings = new List<AirwayOpeningDef>(airwayOpenings ?? Array.Empty<AirwayOpeningDef>()).AsReadOnly();
+            AirwaySumps = new List<AirwaySumpDef>(airwaySumps ?? Array.Empty<AirwaySumpDef>()).AsReadOnly();
             _parentOf = Validate();
         }
 
@@ -61,6 +65,7 @@ namespace Lodur
         public IReadOnlyList<JointDef> Joints { get; }
         public IReadOnlyList<SensePointDef> SensePoints { get; }
         public IReadOnlyList<AirwayOpeningDef> AirwayOpenings { get; }
+        public IReadOnlyList<AirwaySumpDef> AirwaySumps { get; }
 
         /// <summary>The part ordinal a part hangs from (the parent of the one joint that attaches it), -1 for the root.</summary>
         public int ParentOf(int part) => _parentOf[part];
@@ -128,6 +133,14 @@ namespace Lodur
                 if (a.Part < 0 || a.Part >= Parts.Count) throw new ArgumentException($"airway opening '{a.Label}' {a.Side}: part {a.Part} is not a part.");
             }
 
+            foreach (var a in AirwaySumps)
+            {
+                if (a.Part < 0 || a.Part >= Parts.Count) throw new ArgumentException($"airway sump '{a.Label}': part {a.Part} is not a part.");
+            }
+
+            // An opening's drop is measured below the deepest sump: openings with none would have nothing to fall below.
+            if (AirwayOpenings.Count > 0 && AirwaySumps.Count == 0) throw new ArgumentException("airway openings need at least one airway sump to drain below.");
+
             // 5. Numbers a physics world can take.
             foreach (var p in Parts)
             {
@@ -172,6 +185,11 @@ namespace Lodur
             {
                 if (!Finite(a.Offset) || !IsFinite(a.Radius)) throw new ArgumentException($"airway opening '{a.Label}' {a.Side} has a non-finite number.");
                 if (!(a.Radius > 0f)) throw new ArgumentException($"airway opening '{a.Label}' {a.Side}: radius is not positive.");
+            }
+
+            foreach (var a in AirwaySumps)
+            {
+                if (!Finite(a.Offset)) throw new ArgumentException($"airway sump '{a.Label}' has a non-finite number.");
             }
 
             // 6. An opening's sphere reaches outside its part: liquid never enters a body, so a sphere wholly inside reads nothing.

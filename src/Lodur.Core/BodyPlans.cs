@@ -108,7 +108,15 @@ namespace Lodur
                 new AirwayOpeningDef("Mouth", Side.Center, head, (0f, -0.04f, 0.1025f), 0.025f),
                 new AirwayOpeningDef("Nose", Side.Center, head, (0f, 0.01f, 0.1095f), 0.025f),
             };
-            return new BodyPlan(parts, joints, senses, airway);
+            // Liquid pools behind the openings at the airway's deepest points: the oropharynx 8 cm behind the lips lying on the back, the glottis 7 cm below the mouth upright (placeholders).
+            // An opening drains by gravity when its lowest rim point lies below the deepest of them: the principle of the recovery position, the mouth dependent so fluid runs out
+            // (ERC 2021 BLS, Resuscitation 161:98-114), and of postural drainage, the outlet below the reservoir.
+            var sumps = new[]
+            {
+                new AirwaySumpDef("Pharynx", head, (0f, -0.06f, 0.02f)),
+                new AirwaySumpDef("Glottis", head, (0f, -0.11f, 0.04f)),
+            };
+            return new BodyPlan(parts, joints, senses, airway, sumps);
         }
 
         private static int Add(List<PartDef> parts, PartDef part)

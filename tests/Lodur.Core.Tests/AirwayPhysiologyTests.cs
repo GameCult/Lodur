@@ -109,7 +109,7 @@ public sealed class AirwayPhysiologyTests
 
     private readonly record struct Hold(double FirstLiquid, double MaxBeforeGasp, double Gasp, double WillAtGasp, double After, double Window);
 
-    /// <summary>A real Actor, calm and awake, with liquid at the airway openings from the first tick on, facing down.</summary>
+    /// <summary>A real Actor, calm and awake, with liquid at the airway openings from the first tick on, no opening below the sump.</summary>
     private static Hold HoldUnderLiquid(double slowScale, WithdrawalParameters? breath = null, double attention = 1.0)
     {
         var p = Breather(slowScale);
@@ -117,7 +117,7 @@ public sealed class AirwayPhysiologyTests
         a.SetAttention(attention);
         var s = new float[2];
         var q = new Quat[2];
-        var liquid = new AirwaySample(2.0 * HoldAt, 0.0, -1.0);
+        var liquid = new AirwaySample(2.0 * HoldAt, 0.0, 0.0);
         double first = -1, max = 0, gasp = -1, will = -1, after = -1, window = -1;
         for (long i = 0; i < (long)(200.0 / Dt); i++)
         {
@@ -188,7 +188,7 @@ public sealed class AirwayPhysiologyTests
         a.SetAttention(0.0);
         var s = new float[2];
         var q = new Quat[2];
-        var liquid = new AirwaySample(2.0 * HoldAt, 0.0, -1.0);
+        var liquid = new AirwaySample(2.0 * HoldAt, 0.0, 0.0);
         for (long i = 0; i < (long)(5.0 / Dt); i++)
         {
             Assert.Equal(TickEvents.None, a.Tick(NoPoint, NoPoint, NoPoint, default, s, q, default, liquid) & TickEvents.Gasp);
@@ -204,30 +204,30 @@ public sealed class AirwayPhysiologyTests
     private static Physiology Drowned()
     {
         var p = Breather(20.0);
-        var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, -1.0));
+        var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, 0.0));
         for (long i = 0; i < (long)(600.0 / Dt) && p.Consciousness > 0.1; i++) p.Step(Dt, flood);
         Assert.True(p.Consciousness <= 0.1 && !p.Dead, $"consciousness {p.Consciousness}");
         Assert.Equal(Capacity, p.AirwayLiquid);
         return p;
     }
 
-    /// <summary>The unconscious Fella, liquid no longer at the airway, with his face this way; steps for the given seconds.</summary>
-    private static Physiology Rolled(double facing, double seconds)
+    /// <summary>The unconscious Fella, liquid no longer at the airway, with his lowest opening rim this far (m) below the deepest sump; steps for the given seconds.</summary>
+    private static Physiology Rolled(double drop, double seconds)
     {
         var p = Drowned();
-        var rolled = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, facing));
+        var rolled = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, drop));
         for (long i = 0; i < (long)(seconds / Dt) && !p.Dead; i++) p.Step(Dt, rolled);
         return p;
     }
 
     [Theory]
-    [InlineData(1.0)]
-    [InlineData(0.5)]
-    public void Face_down_or_on_his_side_the_airway_drains_and_he_lives(double facing)
+    [InlineData(0.05)]
+    [InlineData(0.025)]
+    public void Face_down_or_on_his_side_the_airway_drains_and_he_lives(double drop)
     {
         // Placeholders: Drain decides nothing here but whether it is above zero (a tiny drain restarts ventilation and the awake cough then clears the airway: probed at 0.1, 0.01, 0.001); Cough decides the recovery once he wakes.
-        // Out at 0.1 with the airway full, then drained at 0.1 (facing 1) or 0.05 (facing 0.5) per second: back above 0.5 in 7.0 and 8.5 s (the bound is the 200 s simulated; a drain that waits on consciousness never comes). Face up it never drains and he dies (below).
-        var p = Rolled(facing, 200.0);
+        // Out at 0.1 with the airway full, then drained at 0.1 (drop 0.05, face down) or 0.05 (drop 0.025, on his side) per second: back above 0.5 in 7.0 and 8.5 s (the bound is the 200 s simulated; a drain that waits on consciousness never comes). Face up it never drains and he dies (below).
+        var p = Rolled(drop, 200.0);
         Assert.False(p.Dead);
         Assert.True(p.Consciousness > 0.5, $"consciousness {p.Consciousness}");
         Assert.True(p.AirwayLiquid < 1e-6, $"airway liquid {p.AirwayLiquid}");
@@ -236,8 +236,8 @@ public sealed class AirwayPhysiologyTests
     [Fact]
     public void Face_up_the_airway_stays_full_and_he_dies_through_consciousness()
     {
-        // Decided by the Cough curve (zero below 0.3 consciousness) and by facing; Drain and Draw decide nothing here (nothing drains face up, nothing is drawn, none at the openings).
-        var p = Rolled(-1.0, 600.0);
+        // Decided by the Cough curve (zero below 0.3 consciousness) and by drop (0 face up: no opening rim lies below the sump); Drain and Draw decide nothing here (nothing drains face up, nothing is drawn, none at the openings).
+        var p = Rolled(0.0, 600.0);
         Assert.True(p.Dead);
         Assert.Equal(DeathCause.Consciousness, p.Cause);
         Assert.Equal(Capacity, p.AirwayLiquid);
@@ -248,7 +248,7 @@ public sealed class AirwayPhysiologyTests
     {
         var p = Breather(20.0);
         for (var d = 0; d < dims; d++) Assert.True(p.Afflict(Af("Dim"), 0, BrainLayer, 1.0));
-        var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, -1.0));
+        var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, 0.0));
         for (long i = 0; i < (long)(2.0 / Dt); i++) p.Step(Dt, flood);
         Assert.Equal(Capacity, p.AirwayLiquid);
         return p;
@@ -257,12 +257,12 @@ public sealed class AirwayPhysiologyTests
     [Fact]
     public void An_awake_Fella_coughs_his_airway_clear()
     {
-        // Placeholders deciding this: Cough (2.2 s to clear half, and every bound below); Draw only fills the half airway first and decides no outcome; Drain is 0 facing up and decides nothing.
+        // Placeholders deciding this: Cough (2.2 s to clear half, and every bound below); Draw only fills the half airway first and decides no outcome; Drain is 0 face up and decides nothing.
         // Half the airway, awake, face up, nothing at the openings: gone (below 1e-6, a 75-fold fall) in 10 s; shipped it takes 2.2 s. Without the cough (or with one gated by something else) it never falls.
         var p = Breather(20.0);
-        var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, -1.0));
+        var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, 0.0));
         while (p.AirwayLiquid < 0.5 * Capacity) p.Step(Dt, flood);
-        var clear = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, -1.0));
+        var clear = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, 0.0));
         double coughed = 0.0;
         for (long i = 0; i < (long)(10.0 / Dt); i++)
         {
@@ -278,10 +278,10 @@ public sealed class AirwayPhysiologyTests
     [Fact]
     public void A_stuporous_Fella_cannot_cough()
     {
-        // Consciousness held at 0.2 by eight Dim afflictions, below the cough's 0.3: the Cough curve's knee (a placeholder) decides this; Drain decides nothing (facing up).
+        // Consciousness held at 0.2 by eight Dim afflictions, below the cough's 0.3: the Cough curve's knee (a placeholder) decides this; Drain decides nothing (face up).
         var p = Flooded(8);
         Assert.Equal(0.2, p.Consciousness, 9);
-        var clear = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, -1.0));
+        var clear = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, 0.0));
         for (long i = 0; i < (long)(10.0 / Dt); i++)
         {
             p.Step(Dt, clear);
@@ -333,7 +333,7 @@ public sealed class AirwayPhysiologyTests
         var a = Real(p, StruggleBrain());
         var s = new float[2];
         var q = new Quat[2];
-        var low = new AirwaySample(0.5 * HoldAt, 0.0, -1.0);
+        var low = new AirwaySample(0.5 * HoldAt, 0.0, 0.0);
         for (long i = 0; i < (long)(5.0 / Dt); i++)
         {
             Assert.Equal(TickEvents.None, a.Tick(NoPoint, NoPoint, NoPoint, default, s, q, default, low) & TickEvents.Gasp);
@@ -350,7 +350,7 @@ public sealed class AirwayPhysiologyTests
         {
             var p = Breather(20.0);
             if (lungLost) Assert.True(p.Afflict(Af("Lesion"), 0, 2, 5.0));
-            p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.5 * HoldAt, 0.0, -1.0)));
+            p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.5 * HoldAt, 0.0, 0.0)));
             Assert.Equal(lungLost ? 0.5 : 1.0, p.Breathing);
             return p.AirwayLiquid;
         }
@@ -376,25 +376,26 @@ public sealed class AirwayPhysiologyTests
     }
 
     [Fact]
-    public void An_airway_sample_is_the_sum_of_what_is_live_and_pooled_and_the_greatest_facing()
+    public void An_airway_sample_is_the_sum_of_what_is_live_and_pooled_and_the_greatest_drop()
     {
         var s = AirwaySample.Of(new[] { 1f, 2f }, new[] { 0.5f }, new[] { -0.5f, 0.25f, -1f });
         Assert.Equal(new AirwaySample(3.0, 0.5, 0.25), s);
-        Assert.Equal(new AirwaySample(0.0, 0.0, -1.0), AirwaySample.Of(default, default, default));
+        Assert.Equal(new AirwaySample(1.0, 1.0, 0.0), AirwaySample.Of(new[] { 1f }, new[] { 1f }, new[] { -0.5f, -1f }));
+        Assert.Equal(new AirwaySample(0.0, 0.0, 0.0), AirwaySample.Of(default, default, default));
     }
 
     [Fact]
     public void A_sample_outside_its_range_is_refused_before_anything_changes()
     {
         var p = Breather(20.0);
-        foreach (var bad in new[] { new AirwaySample(-1e-9, 0, 0), new AirwaySample(0, double.NaN, 0), new AirwaySample(double.PositiveInfinity, 0, 0), new AirwaySample(0, 0, 1.01), new AirwaySample(0, 0, -1.01), new AirwaySample(0, 0, double.NaN) })
+        foreach (var bad in new[] { new AirwaySample(-1e-9, 0, 0), new AirwaySample(0, double.NaN, 0), new AirwaySample(double.PositiveInfinity, 0, 0), new AirwaySample(0, 0, -1e-9), new AirwaySample(0, 0, double.NaN), new AirwaySample(0, 0, double.PositiveInfinity) })
         {
             Assert.Throws<ArgumentException>(() => p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, bad)));
         }
 
         Assert.Equal(1.0, p.BloodOxygen);
         Assert.Equal(0.0, p.AirwayLiquid);
-        p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(1.0, 1.0, 1.0)));
+        p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(1.0, 1.0, 0.05)));
     }
 
     [Fact]
@@ -409,7 +410,7 @@ public sealed class AirwayPhysiologyTests
         foreach (var bad in new[]
         {
             ok with { Capacity = 0.0 }, ok with { Capacity = double.NaN }, ok with { DrawPerSecond = -1.0 }, ok with { HoldAt = double.PositiveInfinity },
-            ok with { CoughPerSecond = -0.1 }, ok with { DrainPerSecond = double.NaN }, ok with { DrainFacingStart = 1.0 }, ok with { DrainFacingStart = -1.5 },
+            ok with { CoughPerSecond = -0.1 }, ok with { DrainPerSecond = double.NaN }, ok with { DrainDrop = 0.0 }, ok with { DrainDrop = -0.01 }, ok with { DrainDrop = double.NaN },
             ok with { CoughByConsciousness = Array.Empty<(double X, double Y)>() }, ok with { CoughByConsciousness = new[] { (1.0, 0.0), (0.0, 1.0) } },
             ok with { LiveWeight = -1.0 }, ok with { PooledWeight = double.NaN },
         })

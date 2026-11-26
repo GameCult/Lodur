@@ -93,8 +93,8 @@ namespace Lodur
                     new[] { (0.5, 0.0), (1.3, 1.0) }, new[] { (0.5, 0.0), (1.0, 0.6) }),
                 // The airway (placeholders). Capacity 150 mL is 2 mL/kg at 75 kg (an upper-airway and bronchial volume, the lung's own is far larger: the airway fills before the lung); it holds the breath from 15.6 mL
                 // of liquid at the openings (a mouthful, a tenth of the capacity). A free breath draws the liquid at the airway in at 1 per second, an awake cough clears 2 per second of what is there and fails below 0.3
-                // consciousness, and the airway drains at 0.1 per second once the face points down (facing from 0: on his side halves it). Liquid and pooled liquid count alike.
-                new AirwayDef(150e-6, 1.0, 1.0, 1.0, 15.6e-6, 2.0, new[] { (0.3, 0.0), (0.6, 1.0) }, 0.1, 0.0), 64);
+                // consciousness, and the airway drains at 0.1 per second once the lowest rim of an opening lies 5 cm below the deepest sump (a true side pose, drop 0.025 m the mouth's half-width, halves it; side-lying falls measure a median 0.043 m, upright -0.047 m, so he drains nothing standing). Liquid and pooled liquid count alike.
+                new AirwayDef(150e-6, 1.0, 1.0, 1.0, 15.6e-6, 2.0, new[] { (0.3, 0.0), (0.6, 1.0) }, 0.1, 0.05), 64);
         }
     }
 }

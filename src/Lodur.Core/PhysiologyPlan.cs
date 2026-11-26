@@ -67,12 +67,12 @@ namespace Lodur
     /// <paramref name="LiveWeight"/> x the live liquid plus <paramref name="PooledWeight"/> x the pooled; at <paramref name="HoldAt"/> or more it is "at the airway"
     /// and the Actor holds the breath. A free breath draws <paramref name="DrawPerSecond"/> x Breathing x (liquid at the airway) per second into it; a cough
     /// removes <paramref name="CoughPerSecond"/> x <paramref name="CoughByConsciousness"/>(consciousness) x contents per second; and it drains at
-    /// <paramref name="DrainPerSecond"/> x clamp01((facing - <paramref name="DrainFacingStart"/>) / (1 - DrainFacingStart)) x contents, facing being the cosine of an
-    /// opening's outward direction with down, -1..1.
+    /// <paramref name="DrainPerSecond"/> x clamp01(drop / <paramref name="DrainDrop"/>) x contents, drop being how far (m) the lowest opening's rim lies below the deepest airway sump along
+    /// gravity: <paramref name="DrainDrop"/> m of drop drains at the full rate.
     /// </summary>
     public readonly record struct AirwayDef(
         double Capacity, double DrawPerSecond, double LiveWeight, double PooledWeight, double HoldAt, double CoughPerSecond,
-        IReadOnlyList<(double X, double Y)> CoughByConsciousness, double DrainPerSecond, double DrainFacingStart);
+        IReadOnlyList<(double X, double Y)> CoughByConsciousness, double DrainPerSecond, double DrainDrop);
 
     /// <summary>
     /// A piecewise-linear curve in its driver, clamped at the ends. An equal-x pair is a step: at that x the later value holds
@@ -298,7 +298,7 @@ namespace Lodur
                 throw new ArgumentException("airway: a number is not finite and at least 0.");
             }
 
-            if (!(w.DrainFacingStart >= -1.0 && w.DrainFacingStart < 1.0)) throw new ArgumentException("airway: DrainFacingStart is not in [-1, 1).");
+            if (!(w.DrainDrop > 0.0 && w.DrainDrop < double.PositiveInfinity)) throw new ArgumentException("airway: DrainDrop is not finite and above 0.");
             ValidateCurve(w.CoughByConsciousness, "airway: the cough curve");
             if (AfflictionSlots < 1) throw new ArgumentException("the affliction table needs at least one slot.");
         }

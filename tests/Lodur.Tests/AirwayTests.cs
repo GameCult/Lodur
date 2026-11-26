@@ -12,6 +12,17 @@ public sealed class AirwayTests
     private const float DropVolume = (2f * R) * (2f * R) * (2f * R);
     private static readonly uint FluidPhase = Box3DSoaPhase.Of(0, fluid: true);
 
+    // Bounds, from deterministic-bound-margin (readings are identical run to run). Side-lying falls (12 seeds): shipped worst drop 0.0132 m, least mutant (a head read from the pelvis's lane)
+    // reads at or below 0 on 5 of 12, counted as one unit of 1 mm by the zero-reading convention: bound sqrt(0.0132 x 0.001) = 0.0036 m, separation 13.
+    private const float SideDropBound = 0.0036f;
+
+    // Upright (creation pose -0.0467, welded stool at full strength -0.0461 m): least mutant, the shallowest sump, reads +0.005. A bound across zero has no geometric midpoint: the
+    // arithmetic one, -0.0206 m, sits 0.0255 m from each side.
+    private const float UprightBound = -0.0206f;
+
+    // Limp seated falls (40 seeds): shipped 31 drain, the pelvis-lane mutant 0 (counted as 1): bound sqrt(31 x 1) = 5.6, so at least 6 drain.
+    private const int SeatedDraining = 6;
+
     private static readonly BodyPlan Plan = BodyPlans.Humanoid();
     private static readonly int Mouth = Plan.AirwayIndex("Mouth");
     private static readonly int Nose = Plan.AirwayIndex("Nose");
@@ -46,11 +57,11 @@ public sealed class AirwayTests
         return (live, pooled);
     }
 
-    private static float[] Facing(Ragdoll doll, (float X, float Y, float Z) down)
+    private static float[] DropOf(Ragdoll doll, (float X, float Y, float Z) down)
     {
-        var facing = new float[Plan.AirwayOpenings.Count];
-        doll.ReadAirway(new float[facing.Length], new float[facing.Length], facing, down);
-        return facing;
+        var drop = new float[Plan.AirwayOpenings.Count];
+        doll.ReadAirway(new float[drop.Length], new float[drop.Length], drop, down);
+        return drop;
     }
 
     [Fact]
@@ -124,40 +135,173 @@ public sealed class AirwayTests
         world.Step(Dt, 4);
         var live = new[] { 7f, 7f };
         var pooled = new[] { 7f, 7f };
-        var facing = new[] { 7f, 7f };
-        doll.ReadAirway(live, pooled, facing, (0f, 0f, 1f));
+        var drop = new[] { 7f, 7f };
+        doll.ReadAirway(live, pooled, drop, (0f, 0f, 1f));
         Assert.Equal(new[] { 0f, 0f }, live);
         Assert.Equal(new[] { 0f, 0f }, pooled);
-        Assert.True(facing[Nose] > 0.9f && facing[Mouth] > 0.8f);
+        Assert.Equal(0.0716f, drop[Mouth], 0.002f);
+        Assert.Equal(0.0718f, drop[Nose], 0.002f);
+    }
+
+    /// <summary>The drop at the creation pose for each down, metres: Mouth, Nose.</summary>
+    [Theory]
+    [InlineData(0f, -1f, 0f, -0.0467f, -0.0951f)] // upright: the glottis is the deepest sump, both rims above it
+    [InlineData(0f, 0f, -1f, -0.0734f, -0.0872f)] // on his back: the oropharynx is the deepest, the lips above it
+    [InlineData(0f, 0f, 1f, 0.0716f, 0.0718f)]    // face down
+    [InlineData(1f, 0f, 0f, 0.0250f, 0.0250f)]    // on his side: the rim, the half-width, lies below the sumps on the midline
+    [InlineData(-1f, 0f, 0f, 0.0250f, 0.0250f)]
+    [InlineData(0f, 1f, 0f, 0.0433f, 0.0949f)]    // inverted
+    public void Drop_at_the_creation_pose_follows_down(float x, float y, float z, float mouth, float nose)
+    {
+        // Each within 0.002 m. Kills: the offset ignored (nose and mouth swap), the rim ignored (the side poses read 0), the rim taken as a sphere (face down reads 0.094),
+        // the shallowest sump (upright reads +0.005), and a drop cosine restored (the side poses read 0).
+        using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        var drop = DropOf(doll, (x, y, z));
+        Assert.Equal(mouth, drop[Mouth], 0.002f);
+        Assert.Equal(nose, drop[Nose], 0.002f);
     }
 
     [Fact]
-    public void Facing_at_the_creation_pose_follows_down()
+    public void The_length_of_down_does_not_matter()
     {
         using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
         var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
-        var toward = Facing(doll, (0f, 0f, 1f));
-        Assert.True(toward[Nose] > 0.9f && toward[Mouth] > 0.8f);
-        var away = Facing(doll, (0f, 0f, -1f));
-        Assert.True(away[Nose] < -0.8f && away[Mouth] < -0.8f);
-        var side = Facing(doll, (0f, -1f, 0f));
-        Assert.True(MathF.Abs(side[Nose]) < 0.2f);
+        var unit = DropOf(doll, (0f, -1f, 0f));
+        var weight = DropOf(doll, (0f, -9.81f, 0f));
+        var side = DropOf(doll, (1f, 0f, 0f));
+        var sideLong = DropOf(doll, (3f, 0f, 0f));
+        for (var k = 0; k < unit.Length; k++)
+        {
+            Assert.Equal(unit[k], weight[k], 1e-6f);
+            Assert.Equal(side[k], sideLong[k], 1e-6f);
+        }
+    }
+
+    /// <summary>The humanoid on a ground slab, limp, shoved by a seeded torque on pelvis and torso for six steps, then six seconds: the largest drop over its openings and the torso's face direction y.</summary>
+    private static (float Drop, float TorsoFaceY) Fall(ulong seed)
+    {
+        var (bodies, joints, _) = Ragdoll.Needs(Plan);
+        using var world = new Box3DSoaWorld(capacity: bodies + 1, jointCapacity: joints);
+        world.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        var strength = new float[Plan.Joints.Count];
+        var target = new Quat[Plan.Joints.Count];
+        Array.Fill(target, Quat.Identity);
+        var v = world.View;
+        var rng = new SplitMix64(seed);
+        for (var s = 0; s < 120 * 6; s++)
+        {
+            if (s < 6)
+            {
+                foreach (var part in new[] { "Pelvis", "Torso" })
+                {
+                    var i = doll.BodyLane(Plan.PartIndex(part));
+                    v.TorqueX[i] = 200f * rng.NextSigned();
+                    v.TorqueY[i] = 200f * rng.NextSigned();
+                    v.TorqueZ[i] = 200f * rng.NextSigned();
+                }
+            }
+
+            doll.Drive(strength, target);
+            world.Step(Dt, 4);
+        }
+
+        var t = doll.BodyLane(Plan.PartIndex("Torso"));
+        new Quat(v.RotationX[t], v.RotationY[t], v.RotationZ[t], v.RotationW[t]).Rotate(0f, 0f, 1f, out _, out var faceY, out _);
+        var drop = DropOf(doll, (0f, -1f, 0f));
+        return (MathF.Max(drop[Mouth], drop[Nose]), faceY);
+    }
+
+    /// <summary>The humanoid welded to a stool (the SeatedOrientTests rig): held at the given strength for three seconds, or limp (strength 0) after a seeded torso shove for six: the largest drop over its openings.</summary>
+    private static float Seated(float strength, ulong seed)
+    {
+        var (bodies, joints, _) = Ragdoll.Needs(Plan);
+        using var world = new Box3DSoaWorld(capacity: bodies + 2, jointCapacity: joints + 1);
+        world.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
+        var stool = world.AddStaticBox(2, (0f, 1.11f, -0.115f), (0.05f, 0.05f, 0.025f), friction: 0.8f);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        world.AddJoint(Box3DSoaJointKind.Weld, stool, doll.BodyLane(Plan.PartIndex("Pelvis")), (0f, 1.11f, -0.09f), (0f, 1f, 0f));
+        var held = new float[Plan.Joints.Count];
+        Array.Fill(held, strength);
+        var target = new Quat[Plan.Joints.Count];
+        Array.Fill(target, Quat.Identity);
+        var v = world.View;
+        var rng = new SplitMix64(seed);
+        var steps = 120 * (strength > 0f ? 3 : 6);
+        for (var s = 0; s < steps; s++)
+        {
+            if (strength == 0f && s < 6)
+            {
+                var i = doll.BodyLane(Plan.PartIndex("Torso"));
+                v.TorqueX[i] = 60f * rng.NextSigned();
+                v.TorqueY[i] = 60f * rng.NextSigned();
+                v.TorqueZ[i] = 60f * rng.NextSigned();
+            }
+
+            doll.Drive(held, target);
+            world.Step(Dt, 4);
+        }
+
+        var drop = DropOf(doll, (0f, -1f, 0f));
+        return MathF.Max(drop[Mouth], drop[Nose]);
     }
 
     [Fact]
-    public void Facing_follows_the_head()
+    public void Drop_follows_the_heads_rotation()
     {
-        // A head part created turned 90 degrees about x (its +z face along -y): the facing is read from the lane's rotation, not from the plan's offsets.
+        // One box head created turned 90 degrees about x (its +z face along -y), a sump at its centre: the opening's centre and normal come from the lane's rotation, not the plan's offsets.
+        // Down (0,-1,0): the mouth's centre lies 0.1025 m below the sump and its rim adds 0.0091 (0.0233 x the sine of the angle
+        // between down and its normal), the nose 0.1095 and 0.0023; unrotated the mouth would read 0.04 + 0.0233 less the sump. Down (0,0,1): the mouth's centre 0.04 above the sump and its rim 0.0233
+        // below it, -0.0167. Kills the rotation ignored (the part's identity pose).
         var head = new PartDef("Head", Side.Center, PartShape.Box, (0.1f, 0.1f, 0.1f), (0f, 1f, 0f), Quat.FromAxisAngle(1f, 0f, 0f, MathF.PI / 2f), 1000f, 0.5f, 0f);
-        var turned = new BodyPlan([head], [], [], [.. Plan.AirwayOpenings.Select(o => o with { Part = 0 })]);
+        var turned = new BodyPlan([head], [], [], [.. Plan.AirwayOpenings.Select(o => o with { Part = 0 })], [new AirwaySumpDef("Sump", 0, (0f, 0f, 0f))]);
         var (bodies, joints, _) = Ragdoll.Needs(turned);
         using var world = new Box3DSoaWorld(bodies, gravityY: 0f, jointCapacity: joints);
         var doll = Ragdoll.Build(world, turned, (0f, 0f), firstStableId: 100);
-        var facing = new float[2];
-        doll.ReadAirway(new float[2], new float[2], facing, (0f, -1f, 0f));
-        Assert.True(facing[Nose] > 0.8f && facing[Mouth] > 0.8f, $"nose {facing[Nose]} mouth {facing[Mouth]}");
-        doll.ReadAirway(new float[2], new float[2], facing, (0f, 0f, 1f));
-        Assert.True(MathF.Abs(facing[Nose]) < 0.2f);
+        var drop = new float[2];
+        doll.ReadAirway(new float[2], new float[2], drop, (0f, -1f, 0f));
+        Assert.Equal(0.1116f, drop[Mouth], 0.002f);
+        Assert.Equal(0.1118f, drop[Nose], 0.002f);
+        doll.ReadAirway(new float[2], new float[2], drop, (0f, 0f, 1f));
+        Assert.Equal(-0.0167f, drop[Mouth], 0.002f);
+    }
+
+    [Fact]
+    public void A_side_lying_limp_humanoid_drains()
+    {
+        // The twelve falls of the 240-seed sweep that end on the side (torso face y within 0.3 of level) each read a drop above the bound. Kills a head read from the pelvis's lane
+        // (5 of the 12 read at or below 0: the pelvis stays upright).
+        foreach (var seed in new ulong[] { 6, 10, 11, 18, 39, 66, 92, 120, 133, 151, 171, 208 })
+        {
+            var (drop, faceY) = Fall(seed);
+            Assert.InRange(faceY, -0.3f, 0.3f);
+            Assert.True(drop > SideDropBound, $"seed {seed}: drop {drop} (face y {faceY})");
+        }
+    }
+
+    [Fact]
+    public void Upright_drains_nothing()
+    {
+        // The creation pose and the humanoid welded to a stool at full strength: both rims stay above the glottis (readings -0.047 and -0.046).
+        using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        var create = DropOf(doll, (0f, -1f, 0f));
+        var seated = Seated(1f, 1);
+        Assert.True(MathF.Max(create[Mouth], create[Nose]) < UprightBound, $"creation {create[Mouth]} {create[Nose]}");
+        Assert.True(seated < UprightBound, $"seated {seated}");
+    }
+
+    [Fact]
+    public void A_limp_seated_humanoid_whose_head_hangs_drains()
+    {
+        var draining = 0;
+        for (ulong seed = 1; seed <= 40; seed++)
+        {
+            if (Seated(0f, seed) > 0f) draining++;
+        }
+
+        Assert.True(draining >= SeatedDraining, $"{draining} of 40 drain");
     }
 
     [Fact]
@@ -175,15 +319,15 @@ public sealed class AirwayTests
         world.Step(Dt, 4);
         var live = new float[2];
         var pooled = new float[2];
-        var facing = new float[2];
+        var drop = new float[2];
         var down = (0f, -1f, 0f);
-        doll.ReadAirway(live, pooled, facing, down);
+        doll.ReadAirway(live, pooled, drop, down);
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 1000; i++) doll.ReadAirway(live, pooled, facing, down);
+        for (var i = 0; i < 1000; i++) doll.ReadAirway(live, pooled, drop, down);
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.Throws<ArgumentException>(() => doll.ReadAirway(new float[1], pooled, facing, down));
-        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, new float[3], facing, down));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(new float[1], pooled, drop, down));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, new float[3], drop, down));
         Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, pooled, new float[1], down));
-        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, pooled, facing, (0f, 0f, 0f)));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, pooled, drop, (0f, 0f, 0f)));
     }
 }

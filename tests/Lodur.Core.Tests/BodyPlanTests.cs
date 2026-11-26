@@ -193,7 +193,10 @@ public sealed class BodyPlanTests
 
     // Airway openings: rules 1, 4, 5, 6.
     private static BodyPlan WithAirway(PartDef part, params AirwayOpeningDef[] openings) =>
-        new(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), openings);
+        new(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), openings, new[] { new AirwaySumpDef("S", 0, (0f, 0f, 0f)) });
+
+    private static BodyPlan WithSumps(PartDef part, params AirwaySumpDef[] sumps) =>
+        new(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), new[] { Opening((0f, 0f, 0.11f)) }, sumps);
 
     private static PartDef Shaped(PartShape shape, (float, float, float) size) =>
         new("P", Side.Center, shape, size, (0f, 0f, 0f), Quat.Identity, 1000f, 0.8f, 0f);
@@ -258,11 +261,24 @@ public sealed class BodyPlanTests
     }
 
     [Fact]
+    public void Airway_openings_need_a_sump_on_a_part_with_a_finite_offset()
+    {
+        var part = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
+        Refuses(() => WithSumps(part), "need at least one airway sump");
+        Refuses(() => WithSumps(part, new AirwaySumpDef("S", 1, (0f, 0f, 0f))), "part 1 is not a part");
+        Refuses(() => WithSumps(part, new AirwaySumpDef("S", -1, (0f, 0f, 0f))), "part -1 is not a part");
+        Refuses(() => WithSumps(part, new AirwaySumpDef("S", 0, (0f, float.NaN, 0f))), "non-finite");
+        Refuses(() => WithSumps(part, new AirwaySumpDef("S", 0, (float.PositiveInfinity, 0f, 0f))), "non-finite");
+        Assert.Single(WithSumps(part, new AirwaySumpDef("S", 0, (0f, 0f, 0f))).AirwaySumps);
+        Assert.Empty(Valid().AirwaySumps);
+    }
+
+    [Fact]
     public void The_airway_opening_list_is_copied_and_null_means_none()
     {
         var part = Shaped(PartShape.Sphere, (0.11f, 0f, 0f));
         var list = new List<AirwayOpeningDef> { Opening((0f, 0f, 0.11f)) };
-        var plan = new BodyPlan(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), list);
+        var plan = new BodyPlan(new[] { part }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>(), list, new[] { new AirwaySumpDef("S", 0, (0f, 0f, 0f)) });
         list.Add(Opening((0f, 0f, 0.12f), label: "P"));
         Assert.Single(plan.AirwayOpenings);
         Assert.Empty(Valid().AirwayOpenings);
@@ -297,6 +313,8 @@ public sealed class BodyPlanTests
     {
         var plan = BodyPlans.Humanoid();
         Assert.Equal(new[] { "Mouth", "Nose" }, plan.AirwayOpenings.Select(a => a.Label).ToArray());
+        Assert.Equal(new[] { "Pharynx", "Glottis" }, plan.AirwaySumps.Select(a => a.Label).ToArray());
+        Assert.All(plan.AirwaySumps, s => Assert.Equal(plan.PartIndex("Head"), s.Part));
         foreach (var a in plan.AirwayOpenings)
         {
             Assert.Equal(plan.PartIndex("Head"), a.Part);

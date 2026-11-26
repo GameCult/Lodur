@@ -580,7 +580,7 @@ public sealed class OrientTests
         for (var j = 0; j < Joints; j++) joints[j] = Plan.Joints[j];
         var i = Plan.JointIndex(label, side);
         joints[i] = change(joints[i]);
-        return new BodyPlan(Plan.Parts, joints, Plan.SensePoints, Plan.AirwayOpenings);
+        return new BodyPlan(Plan.Parts, joints, Plan.SensePoints, Plan.AirwayOpenings, Plan.AirwaySumps);
     }
 
     [Fact]

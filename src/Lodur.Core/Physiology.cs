@@ -8,18 +8,18 @@ namespace Lodur
 
     /// <summary>
     /// The liquid at a body's airway openings this step, as the caller measures it: the live liquid and the pooled liquid, each a non-negative amount
-    /// summed over the openings, and Facing, the greatest cosine between an opening's outward direction and down, in [-1, 1] (1: an opening faces straight down).
+    /// summed over the openings, and Drop in m, at least 0: how far the lowest opening's rim lies below the deepest point liquid pools at inside the airway, 0 when none lies below.
     /// The default is nothing at the airway.
     /// </summary>
-    public readonly record struct AirwaySample(double Live, double Pooled, double Facing)
+    public readonly record struct AirwaySample(double Live, double Pooled, double Drop)
     {
-        /// <summary>One entry per opening: Live and Pooled summed, Facing the largest (-1 with no opening).</summary>
-        public static AirwaySample Of(ReadOnlySpan<float> live, ReadOnlySpan<float> pooled, ReadOnlySpan<float> facing)
+        /// <summary>One entry per opening: Live and Pooled summed, Drop the largest of the openings' signed drops, floored at 0 (0 with no opening).</summary>
+        public static AirwaySample Of(ReadOnlySpan<float> live, ReadOnlySpan<float> pooled, ReadOnlySpan<float> drop)
         {
-            double l = 0.0, p = 0.0, f = -1.0;
+            double l = 0.0, p = 0.0, f = 0.0;
             for (var i = 0; i < live.Length; i++) l += live[i];
             for (var i = 0; i < pooled.Length; i++) p += pooled[i];
-            for (var i = 0; i < facing.Length; i++) f = Math.Max(f, facing[i]);
+            for (var i = 0; i < drop.Length; i++) f = Math.Max(f, drop[i]);
             return new AirwaySample(l, p, f);
         }
     }
@@ -201,7 +201,7 @@ namespace Lodur
         /// <summary>The liquid in m^3 the last step coughed out of the airway.</summary>
         public double Coughed => _coughed;
 
-        /// <summary>The liquid in m^3 the last step drained out of the airway (facing down).</summary>
+        /// <summary>The liquid in m^3 the last step drained out of the airway (by gravity through the mouth).</summary>
         public double Drained => _drained;
 
         /// <summary>The tissue's remaining fraction, 0..1, as of the last step.</summary>
@@ -282,9 +282,9 @@ namespace Lodur
             }
 
             var air = input.Airway;
-            if (!(air.Live >= 0.0 && air.Live < double.PositiveInfinity && air.Pooled >= 0.0 && air.Pooled < double.PositiveInfinity && air.Facing >= -1.0 && air.Facing <= 1.0))
+            if (!(air.Live >= 0.0 && air.Live < double.PositiveInfinity && air.Pooled >= 0.0 && air.Pooled < double.PositiveInfinity && air.Drop >= 0.0 && air.Drop < double.PositiveInfinity))
             {
-                throw new ArgumentException("the airway sample's liquid must be finite and not negative and its facing in [-1, 1].");
+                throw new ArgumentException("the airway sample's liquid must be finite and not negative and its drop finite and not negative.");
             }
 
             if (Dead) return;
@@ -318,14 +318,14 @@ namespace Lodur
             _breathing = Capacity(EffectTarget.Breathing);
 
             // 3b. The airway, a quantity (not particles): liquid at the openings is drawn in by a free breath, never by a held one; a cough clears it by this step's
-            // consciousness, and it drains by facing. What a step removes is reported as Coughed and Drained; occlusion takes its share of the ventilation below.
+            // consciousness, and it drains by gravity through the mouth. What a step removes is reported as Coughed and Drained; occlusion takes its share of the ventilation below.
             var held = input.BreathHeld;
             var aw = _airway;
             var at = aw.LiveWeight * air.Live + aw.PooledWeight * air.Pooled;
             _atAirway = at > 0.0 && at >= aw.HoldAt;
             var inflow = held ? 0.0 : aw.DrawPerSecond * _breathing * at;
             var cough = aw.CoughPerSecond * Effect.EvalCurve(aw.CoughByConsciousness, _consciousness);
-            var drain = aw.DrainPerSecond * Clamp01((air.Facing - aw.DrainFacingStart) / (1.0 - aw.DrainFacingStart));
+            var drain = aw.DrainPerSecond * Clamp01(air.Drop / aw.DrainDrop);
             var total = cough + drain;
             var avail = _airwayLiquid + dt * inflow;
             var want = dt * total * _airwayLiquid;
