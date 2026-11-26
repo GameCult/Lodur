@@ -369,8 +369,13 @@ Lodur's in-reach, derived per call from the sense point and the percept's positi
 he moves; what it gives up is one bit). Verbs are the world's list, given to the planner, not each Brain's
 (`rejected-verbs-on-brain`, ruling `bds-lures-tagged-props`). Verbs carry only needs and gives now; the interaction
 point and toil steps join the same record in `lodur-interaction-steps`, which waits on locomotion
-(`rejected-interaction-steps-first`). Plan steps name percept ids, not slots. Movement does not take other things
-out of reach in the planner's model, so plans are optimistic about reach; replanning every Select corrects them.
+(`rejected-interaction-steps-first`). Plan steps name percept ids, not slots. A verb that gives its This in-reach is a move
+(no Verb field marks it; the give is the mark): after it every other thing is in reach exactly when it is within reach
+of that This, by the percepts' remembered positions, so a plan cannot hold two far things in reach (finding
+`reach-is-monotone`). A carried thing is reached through a game fact, not reach, so a give of in-reach on a Tool or a
+false one is a plain literal. A Plan call takes a budget, defaulting to `NodeBudget`, and `LastExhausted` says it spent
+it; a spent budget drops legitimate plans (finding `budget-drops-legit-plans`), and not worked out is tried direct
+(ruling `bds-unplannable-tries-direct`).
 Intelligence 0 is read as: want goals go direct at the discount and still end in frustration, and every Brain
 without wants selects exactly as `brain-goal-targets` (idea `depth-zero-is-direct-with-frustration`, in force for
 the part-2 mapper).
