@@ -73,11 +73,18 @@ public sealed class OrientTests
 
     private static Percept At((float X, float Y, float Z) p, ulong id = 1) => new(id, Thing, p.X, p.Y, p.Z, 1.0, 0.0);
 
-    private static Quat[] Run(PoseBehaviour b, PartPose[] parts, Percept target, Side arm = Side.Right, double weight = 1.0, double leak = 0.0, float[]? strengths = null)
+    /// <summary>Ticks enough for the arms to engage from the base pose, follow any hand path and settle on their solution (1 s at the test tick).</summary>
+    private const int Settle = 100;
+
+    private static Quat[] Run(PoseBehaviour b, PartPose[] parts, Percept target, Side arm = Side.Right, double weight = 1.0, double leak = 0.0, float[]? strengths = null, int ticks = 1)
     {
         var targets = new Quat[Joints];
         var rig = RigOf(b);
-        b.Write(weight, leak, 0.0, 0.0, 0.0, strengths ?? new float[Joints], targets, new OrientInput(rig, parts, target, arm));
+        for (var i = 0; i < ticks; i++)
+        {
+            b.Write(weight, leak, 0.0, 0.0, 0.0, strengths ?? new float[Joints], targets, new OrientInput(rig, parts, target, arm));
+        }
+
         return targets;
     }
 
@@ -91,6 +98,9 @@ public sealed class OrientTests
     }
 
     private static void SameBits(Quat a, Quat b) => Assert.Equal(a, b);
+
+    /// <summary>The angle of the shortest rotation from a to b.</summary>
+    private static float Turn(Quat a, Quat b) => 2f * MathF.Acos(MathF.Min(1f, MathF.Abs(a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W)));
 
     private static Quat Flinched(Quat q, Quat flinch, float w) => Quat.Nlerp(q, flinch, w);
 
@@ -163,7 +173,7 @@ public sealed class OrientTests
         var parts = Turned();
         var b = Behaviour(arms: new ArmLayer { Mode = ArmMode.Reach, Side = side });
         var baseline = Base(b);
-        var got = Run(b, parts, At(Ahead));
+        var got = Run(b, parts, At(Ahead), ticks: Settle);
         var t = parts[Torso];
         foreach (var s in new[] { Side.Left, Side.Right })
         {
@@ -172,8 +182,8 @@ public sealed class OrientTests
             if (used)
             {
                 arm.Solve(t.Rotation, t.X, t.Y, t.Z, Ahead.X, Ahead.Y, Ahead.Z, out var sh, out var el);
-                SameBits(Flinched(sh, Quat.Identity, 0f), got[arm.ShoulderJoint]);
-                SameBits(Flinched(el, Quat.Identity, 0f), got[arm.ElbowJoint]);
+                Same(Flinched(sh, Quat.Identity, 0f), got[arm.ShoulderJoint]);
+                Same(Flinched(el, Quat.Identity, 0f), got[arm.ElbowJoint]);
             }
             else
             {
@@ -212,7 +222,7 @@ public sealed class OrientTests
         var spread = 0.15f;
         var b = Behaviour(arms: new ArmLayer { Mode = ArmMode.WardOff, Side = ArmSide.Both, Distance = distance, Spread = spread });
         var target = (0.0f, 1.1f, 1.2f);
-        var got = Run(b, parts, At(target));
+        var got = Run(b, parts, At(target), ticks: Settle);
         var h = parts[Head];
         var head = (h.X, h.Y, h.Z);
         var u = Sub(target, head);
@@ -244,8 +254,8 @@ public sealed class OrientTests
     {
         var parts = Rest();
         var b = Behaviour(arms: new ArmLayer { Mode = ArmMode.Present, Side = ArmSide.Both, Point = (-0.2f, 1.3f, 0.3f) });
-        var without = Run(b, parts, default);
-        var with = Run(b, parts, At((3f, 1f, -2f)));
+        var without = Run(b, parts, default, ticks: Settle);
+        var with = Run(b, parts, At((3f, 1f, -2f)), ticks: Settle);
         for (var m = 0; m < Joints; m++) SameBits(without[m], with[m]);
         var t = parts[Torso];
         var wl = Wrist(ArmChain.Of(Plan, Side.Left, Dt), t, Unflinch(with, Side.Left, out var el), el);
@@ -314,7 +324,7 @@ public sealed class OrientTests
         var b = Behaviour(new LookLayer { Weight = 0.5 }, new ArmLayer { Mode = ArmMode.Reach, Side = ArmSide.Right, Weight = 0.5 }, recoil);
         var parts = Rest();
         var target = Bearing(0.5f, 0.5f);
-        var got = Run(b, parts, At(target));
+        var got = Run(b, parts, At(target), ticks: Settle);
 
         var depth = (float)recoil.Proximity.Response(0.5);
         var key = Key();
@@ -494,11 +504,11 @@ public sealed class OrientTests
     [Theory]
     [InlineData(Side.Right)]
     [InlineData(Side.Left)]
-    public void ResetArms_makes_both_arms_solve_the_stateless_rule_again(Side side)
+    public void ResetArms_makes_both_arms_engage_from_the_base_and_settle_on_the_stateless_rule(Side side)
     {
         // Reach with both arms along the feasible tie of one arm's shoulder (goal (dx, -0.25, -0.25) from it, mirrored for the left), from
-        // dx -10 mm to 2 mm past the tie: that arm holds its basin, away from the stateless target. After ResetArms the next tick writes the
-        // stateless solve for both arms, bit for bit.
+        // dx -10 mm to 2 mm past the tie: that arm holds its basin, away from the stateless target. After ResetArms both arms are idle: the
+        // next tick writes within one slew step of the base pose, and with the goal held they settle on the stateless solve.
         var b = Behaviour(arms: new ArmLayer { Mode = ArmMode.Reach, Side = ArmSide.Both });
         var a = Watcher(Watching(b), Plan);
         var parts = Rest();
@@ -514,15 +524,22 @@ public sealed class OrientTests
         var held = (Quat[])targets.Clone();
         a.ResetArms();
         Step(a, parts, targets, Emit(1, Goal(0.002f)));
+        var baseline = Base(b);
+        foreach (var arm in arms)
+        {
+            Assert.True(Turn(baseline[arm.ShoulderJoint], targets[arm.ShoulderJoint]) <= ArmChain.MaxAngularRate * Dt + 1e-5f, "the shoulder jumped from the base on engaging");
+            Assert.True(Turn(baseline[arm.ElbowJoint], targets[arm.ElbowJoint]) <= ArmChain.MaxAngularRate * Dt + 1e-5f, "the elbow jumped from the base on engaging");
+        }
 
+        for (var i = 0; i < Settle; i++) Step(a, parts, targets, Emit(1, Goal(0.002f)));
         var t = a.Target;
         Assert.Equal(Goal(0.002f), (t.X, t.Y, t.Z));
         foreach (var arm in arms)
         {
             var p = parts[arm.ParentPart];
             arm.Solve(p.Rotation, p.X, p.Y, p.Z, t.X, t.Y, t.Z, out var shoulder, out var elbow);
-            SameBits(Flinched(shoulder, Quat.Identity, 0f), targets[arm.ShoulderJoint]);
-            SameBits(Flinched(elbow, Quat.Identity, 0f), targets[arm.ElbowJoint]);
+            Same(Flinched(shoulder, Quat.Identity, 0f), targets[arm.ShoulderJoint]);
+            Same(Flinched(elbow, Quat.Identity, 0f), targets[arm.ElbowJoint]);
         }
 
         var held2 = held[tie.ShoulderJoint];

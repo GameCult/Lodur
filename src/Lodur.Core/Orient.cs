@@ -187,8 +187,9 @@ namespace Lodur
     /// <summary>
     /// The solvers an Actor's brain needs, resolved once from the body plan: the look chain when any goal looks, wards off or recoils (they read
     /// the head), an arm chain for each side an Arms layer can use. A chain the plan cannot give refuses at construction, naming the goal, so a
-    /// plan the closed form cannot solve fails at spawn and never mid-tick. The arm chains are the Actor's arms across ticks and hold each
-    /// arm's swivel and returned targets from tick to tick (an arm not driven on a tick keeps its last ones, and slews from them when next driven, until <see cref="ResetArms"/>); the rig holds nothing else, and solving allocates nothing.
+    /// plan the closed form cannot solve fails at spawn and never mid-tick. The arm chains are the Actor's arms across ticks: each holds its
+    /// arm's swivel, hand path and written targets from tick to tick, and the rig holds nothing else. The arms are composed on every tick of an
+    /// Actor with a rig, so an arm its layer does not drive eases back to the base pose (<see cref="ArmChain.Release"/>); solving allocates nothing.
     /// </summary>
     internal sealed class OrientRig
     {
@@ -247,11 +248,18 @@ namespace Lodur
             }
         }
 
-        /// <summary>Forgets both arms' held swivels and returned targets: each arm's next solve is the stateless rule, unslewed.</summary>
+        /// <summary>Forgets both arms' held swivels, paths and written targets: each arm is idle, and engages from the base pose.</summary>
         public void ResetArms()
         {
             _left?.Reset();
             _right?.Reset();
+        }
+
+        /// <summary>The Actor committed a (goal, target) pair: each arm starts a new hand path when next driven.</summary>
+        public void Commit()
+        {
+            _left?.Restart();
+            _right?.Restart();
         }
 
         /// <summary>The arm whose shoulder is nearer the target; ties go to the right.</summary>
@@ -282,7 +290,11 @@ namespace Lodur
             return new IkVec(pose.X, pose.Y, pose.Z) + (creationPoint - new IkVec(def.Position)).Rotated(rel);
         }
 
-        /// <summary>Composes the layers onto the base pose already in <paramref name="targets"/>: recoil, then look, then the arms.</summary>
+        /// <summary>
+        /// Composes the layers onto the base pose already in <paramref name="targets"/>: recoil, then look, then the arms. An arm the behaviour
+        /// does not drive this tick is released, which passes the base pose through once it has eased back. The part poses are read only for what is
+        /// driven.
+        /// </summary>
         public void Compose(PoseBehaviour b, in OrientInput input, Span<Quat> targets)
         {
             var parts = input.Parts;
@@ -294,7 +306,7 @@ namespace Lodur
             var left = default(IkVec);
             var toward = default(IkVec);
             var distance = 0f;
-            if (hasTarget && _look != null)
+            if (hasTarget && _look != null && b.HasLayers)
             {
                 var h = parts[_look.ChildPart];
                 head = new IkVec(h.X, h.Y, h.Z);
@@ -326,20 +338,39 @@ namespace Lodur
                 targets[_look.Joint] = Toward(targets[_look.Joint], neck, look.Weight);
             }
 
+            var driveLeft = false;
+            var driveRight = false;
             if (b.Arms is { } arms && (hasTarget || arms.Mode == ArmMode.Present))
             {
-                var leftArm = arms.Side == ArmSide.Left || arms.Side == ArmSide.Both || (arms.Side == ArmSide.Nearer && input.Arm == Side.Left);
-                var rightArm = arms.Side == ArmSide.Right || arms.Side == ArmSide.Both || (arms.Side == ArmSide.Nearer && input.Arm != Side.Left);
-                if (leftArm && _left != null)
+                driveLeft = _left != null && (arms.Side == ArmSide.Left || arms.Side == ArmSide.Both || (arms.Side == ArmSide.Nearer && input.Arm == Side.Left));
+                driveRight = _right != null && (arms.Side == ArmSide.Right || arms.Side == ArmSide.Both || (arms.Side == ArmSide.Nearer && input.Arm != Side.Left));
+                if (driveLeft)
                 {
-                    Drive(_left, 1f, arms, parts, goal, head, toward, left, targets);
+                    Drive(_left!, 1f, arms, parts, goal, head, toward, left, targets);
                 }
 
-                if (rightArm && _right != null)
+                if (driveRight)
                 {
-                    Drive(_right, -1f, arms, parts, goal, head, toward, left, targets);
+                    Drive(_right!, -1f, arms, parts, goal, head, toward, left, targets);
                 }
             }
+
+            if (!driveLeft && _left != null)
+            {
+                Release(_left, targets);
+            }
+
+            if (!driveRight && _right != null)
+            {
+                Release(_right, targets);
+            }
+        }
+
+        private static void Release(ArmChain arm, Span<Quat> targets)
+        {
+            arm.Release(targets[arm.ShoulderJoint], targets[arm.ElbowJoint], out var shoulder, out var elbow);
+            targets[arm.ShoulderJoint] = shoulder;
+            targets[arm.ElbowJoint] = elbow;
         }
 
         // The solution itself at weight 1, a blend toward it below that.
@@ -364,9 +395,11 @@ namespace Lodur
             }
 
             var p = parts[arm.ParentPart];
-            arm.Solve(p.Rotation, p.X, p.Y, p.Z, wrist.X, wrist.Y, wrist.Z, out var shoulder, out var elbow);
-            targets[arm.ShoulderJoint] = Toward(targets[arm.ShoulderJoint], shoulder, arms.Weight);
-            targets[arm.ElbowJoint] = Toward(targets[arm.ElbowJoint], elbow, arms.Weight);
+            var hand = World(arm.ForearmPart, parts, new IkVec(arm.WristAnchor));
+            arm.Drive(p.Rotation, p.X, p.Y, p.Z, wrist.X, wrist.Y, wrist.Z, hand.X, hand.Y, hand.Z, targets[arm.ShoulderJoint], targets[arm.ElbowJoint], arms.Weight,
+                out var shoulder, out var elbow);
+            targets[arm.ShoulderJoint] = shoulder;
+            targets[arm.ElbowJoint] = elbow;
         }
     }
 }

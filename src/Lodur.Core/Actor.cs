@@ -339,6 +339,7 @@ namespace Lodur
                 _goal = _pending;
                 _target = _pendingTarget;
                 _pending = -1;
+                _rig?.Commit();
                 if (_layered && _brain.Goals[_goal].Behaviour.Arms is { Side: ArmSide.Nearer } && _target != 0UL)
                 {
                     var committed = Target;
@@ -382,9 +383,9 @@ namespace Lodur
             var secondsInGoal = (_tick - _goalSince) * _dt;
             var weight = _tick - _goalSince >= _onset[_goal] ? Math.Pow(_drive.Will, _driveP.WillCurve) : 1.0;
             var behaviour = _brain.Goals[_goal].Behaviour;
-            if (behaviour.HasLayers)
+            if (_rig != null)
             {
-                behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets, new OrientInput(_rig!, parts, Target, _arm));
+                behaviour.Write(weight, leak, _drive.Strain, _tick * _dt, secondsInGoal, strengths, targets, new OrientInput(_rig, parts, Target, _arm));
             }
             else
             {

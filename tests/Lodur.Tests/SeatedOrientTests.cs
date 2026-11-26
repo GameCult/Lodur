@@ -21,46 +21,48 @@ public sealed class SeatedOrientTests
     private static readonly (float X, float Y, float Z)[] Sounds = { (0.4f, 1.74f, 0.7f), (-0.4f, 1.74f, 0.7f) };
 
     /// <summary>
-    /// A lower sound to the left, whose ward goals the near (left) arm reaches with zero shoulder twist. The far arm's goal crosses the midline, and
-    /// its swing toward it drives the forearm into the side of the trunk, where it wedges (44.6 cm off, gravity or not): the far arm is not claimed here.
-    /// Owner: ruling lodur:ruling:reach-clears-body-by-via-point gives the fix (a hand path through a clearance via point) to the follow-up cut
-    /// lodur-reach-tracking, which claims the far arm with a bound and retires <see cref="FarArmWedgedFloor"/>.
+    /// A lower sound to the left, whose ward goals the near (left) arm reaches with zero shoulder twist. The far arm's goal crosses the midline and the
+    /// straight wrist path to it touches the trunk, so the far arm follows the hand path through the clearance via point (ruling
+    /// lodur:ruling:reach-clears-body-by-via-point): forward first, then across.
     /// </summary>
     private static readonly (float X, float Y, float Z) LowSound = (0.4f, 1.2f, 0.9f);
 
     /// <summary>
-    /// Tripwire on the unclaimed far arm at the low sound, metres: the geometric midpoint of the wedged reading, 44.6 cm, and the near-arm bound, 7.04 cm.
-    /// Below it the far arm has started to reach, so whoever made it reach claims it with a bound here and deletes this floor.
+    /// Without gravity, bound on the far (right) wrist's distance to its ward goal at the low sound after 2 s, metres: the geometric midpoint of the shipped
+    /// 6.97 cm and the least claimed mutant, 34.92 cm (the via point at the trunk front, clearance 0). Also killed: the via point's x at the midpoint of wrist
+    /// and goal, 39.31 cm; every reach solved directly (blocked forced false), 44.90 cm; the wedge before the path, 44.6 cm.
     /// </summary>
-    private const float FarArmWedgedFloor = 0.177f;
+    private const float FarArmBound = 0.1560f;
 
     /// <summary>
-    /// Head forward error bound after 2 s, degrees, at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 1.030 deg over the two
-    /// sounds with and without gravity, and the least claimed mutant, 15.233 deg (the look blended at half weight): separation 14.8. Layers off reads 29.7 deg.
+    /// Head forward error bound after 2 s, degrees, set at the geometric midpoint (deterministic-bound-margin) of the shipped worst then, 1.030 deg, and the
+    /// least claimed mutant, 15.233 deg (the look blended at half weight), and not loosened since: the shipped worst is now 1.080 deg over the two sounds with and
+    /// without gravity, the half-weight mutant 15.729 deg. Layers off reads 29.7 deg.
     /// </summary>
     private const float LookBoundDegrees = 3.961f;
 
     /// <summary>
     /// Without gravity, bound on each wrist's distance to its own ward goal after 2 s at the head-height sounds, metres: the geometric midpoint of the shipped
-    /// worst, 7.00 cm, and the least claimed mutant, 16.23 cm (no spread: both wrists on the line). Also killed: the wrists sent sideways of the head by the
-    /// ward distance, 27.72 cm; spread halved and offset 0.1 m, 19.36 cm; the arms blended at half weight, 27.51 cm; the zero-twist swivel clamped to the
-    /// shoulder cone (the solver before the feasible-swivel search), 64.94 cm. Layers off reads the start, 81.3 and 83.5 cm.
+    /// worst, 8.11 cm (the arm that the other sound's side blocks, on its via path), and the least claimed mutant, 13.25 cm (no spread: both wrists on the line).
+    /// Also killed: the wrists sent sideways of the head by the ward distance, 35.02 cm; the arms blended at half weight, 46.09 cm. Layers off reads the start,
+    /// 81.3 and 83.5 cm. Not re-measured: spread halved and offset, and the clamped zero-twist swivel (64.94 cm before the hand path), each far above the bound.
     /// </summary>
-    private const float WardBound = 0.1066f;
+    private const float WardBound = 0.1037f;
 
     /// <summary>
-    /// Without gravity, bound on the near (left) wrist's distance to its ward goal at the low sound: the geometric midpoint of the shipped 4.34 cm and the
-    /// least claimed mutant, 11.41 cm (the arms at half weight). Also killed: sideways, 16.64 cm; no spread, 20.10 cm.
+    /// Without gravity, bound on the near (left) wrist's distance to its ward goal at the low sound, kept from the cut that set it, not loosened: shipped
+    /// 4.13 cm, then 4.34. Killed: the arms at half weight, 36.48 cm; sideways, 25.90 cm; the via point's x at the midpoint, 7.65 cm. Not killed: no spread reads
+    /// 2.95 cm, the look at half weight 5.01 cm, every reach solved directly 5.19 cm.
     /// </summary>
     private const float NearWardBound = 0.0704f;
 
     /// <summary>
-    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 17.79 cm, and the least claimed mutant, 36.84 cm (no
-    /// spread). Also killed: spread halved and offset, 53.28 cm; the arms at half weight, 44.24 cm; the clamped zero-twist swivel, 68.58 cm. The 11 to 13 cm
-    /// over the zero-gravity case is the shoulder sagging under the arm's weight (swing 1.11 against a target of 1.50): follow-up lodur-reach-tracking.
-    /// Unclaimed: the sideways mutant reads 23.92 cm, separation 1.34.
+    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 18.68 cm, and the least claimed mutant, 31.21 cm
+    /// (the wrists sent sideways of the head). Also killed: no spread, 34.79 cm; the arms at half weight, 62.17 cm; the via point's x at the midpoint, 25.41 cm. Not killed: the via point at the trunk front, 23.56 cm. The 11 to 13 cm over the zero-gravity case is
+    /// the shoulder sagging under the arm's weight (swing 1.11 against a target of 1.50): follow-up lodur-gravity-feedforward. Not re-measured: spread halved
+    /// and offset, and the clamped zero-twist swivel, each far above the bound before this cut.
     /// </summary>
-    private const float GravityWardBound = 0.2560f;
+    private const float GravityWardBound = 0.2414f;
 
     private readonly ITestOutputHelper _out;
 
@@ -199,8 +201,7 @@ public sealed class SeatedOrientTests
         var low = Run(LowSound, gravity: 0f);
         _out.WriteLine($"low sound: wrists to their goals {low.Left * 100f:F2} and {low.Right * 100f:F2} cm");
         Assert.True(low.Left < NearWardBound, $"the near wrist is {low.Left * 100f:F1} cm from its goal, bound {NearWardBound * 100f:F1} cm");
-        Assert.True(low.Right > FarArmWedgedFloor,
-            $"the far wrist now reaches its goal ({low.Right * 100f:F1} cm): claim it with a bound (lodur-reach-tracking) and delete FarArmWedgedFloor");
+        Assert.True(low.Right < FarArmBound, $"the far wrist is {low.Right * 100f:F1} cm from its goal, bound {FarArmBound * 100f:F1} cm");
     }
 
     [Fact]

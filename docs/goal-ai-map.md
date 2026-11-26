@@ -323,7 +323,7 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 2b | `lodur-goal-planner` | Lodur | percept facts, verbs with needs and gives, depth-limited regressive planner (core, no caller) | 2 | M, specced |
 | 2c | `lodur-planner-select` | Lodur | wants, Select admission, direct tries at a discount and frustration (`bds-unplannable-tries-direct`), plan on the Actor | 2b, Actor.cs cuts in flight | M |
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
-| 3b | `lodur-reach-path` | Lodur | hand path through a clearance via point when blocked; arm hand-off slewed both ways | 3, 4 | M, specced |
+| 3b | `lodur-reach-path` | Lodur | hand path through a clearance via point when blocked; arm hand-off slewed both ways | 3, 4 | M, landed |
 | 3c | `ymir-world-gravity`, then `lodur-gravity-feedforward` | Ymir, Lodur (+ BDS content) | the world reports its gravity; muscles carry their subtree's weight times strength | Q `gravity-feedforward-scope` | S, M |
 | 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off and recoil as layers; fetal (a key-pose goal) and stare-at-hands (Look and Reach on a phantom) are data; seated Fella demo | 2, 3 | M |
 | 5 | `lodur-phantom-percepts` + `bds-thought-bubble` | Lodur, BDS | phantom things by hallucination type; the bubble reads their kinds | 1, 4 | M, S |
@@ -359,18 +359,21 @@ gives up: IK is no longer a pure function of the goal. Near a half-turn swing th
 singular, so the clamped solution can still jump; ruling `ik-output-slew-limit` covers it at the output: the returned
 shoulder and elbow targets move toward the solution no faster than `MaxAngularRate` (a placeholder near human peak
 arm speed), everywhere, and the singular-band special case is deleted. What that gives up: a leaping goal is followed
-at the rate, not at once. The slew holds only while the Arms layer drives; the hand-off into and out of the layer is
-cut `lodur-reach-path` (facts 19-23). Reach under gravity lands short by PD sag (facts 9, 19); that is follow-up
-`lodur-gravity-feedforward`.
+at the rate, not at once. The slew holds across the hand-off too (cut `lodur-reach-path`, fact 27): an arm that engages
+slews from the base pose, one the layer stops driving slews back to it, and `OrientRig.Compose` runs on every tick of an
+Actor with a rig, so the written arm targets move at most `MaxAngularRate` times the tick throughout. Reach under gravity
+lands short by PD sag (facts 9, 23); that is follow-up `lodur-gravity-feedforward`.
 
 **Reach rationale (pass `reach-tracking-map`, ruling `reach-clears-body-by-via-point`).** One owner of an arm's motion
 across ticks: `ArmChain` holds the held swivel, the slewed output and now the hand path and the hand-off state, so a
 teleport's `Reset` forgets all of it at once. The path is minimum-jerk (Flash and Hogan 1985) in the arm parent's creation
 frame, where the chain already solves; it starts at the measured wrist when the arm engages or the Actor commits a (goal,
-target) pair, and it is taken only when the straight wrist segment is blocked by the trunk (fact 21; whether unblocked
-reaches also take a path is question `reach-path-unblocked`, fact 22). The via point sits ahead of the wrist's own side,
-not of the midpoint: the arm comes forward first, then across, as a person reaching across their body does. Gravity is a
-muscle-layer term, not a reach-layer correction (fact 19): computed-torque practice (PD plus gravity compensation,
+target) pair, and it is taken only when the straight wrist segment is blocked by the trunk (fact 25). An unblocked reach
+solves the goal directly each tick, slewed (ruling `reach-path-blocked-only`; a path there ends further off, fact 26;
+it gives up the bell-shaped hand speed of an unobstructed human reach). The via point sits ahead of the wrist's own side,
+not of the midpoint (`ArmChain.ViaClearance` 0.2 m and `PathSegmentSeconds` 0.3 s are placeholders; blocked is decided once per
+path start, against the trunk bounds the chain derives from the arm's parent part and its ancestors): the arm comes forward first, then across, as a person reaching across their body does. Gravity is a
+muscle-layer term, not a reach-layer correction (fact 23): computed-torque practice (PD plus gravity compensation,
 Takegaki and Arimoto 1981; Coros et al. 2010 for simulated characters) puts it in the torque, scaled here by strength so a
 failing will still sags; a task-space loop on the target was unstable (fact 9) and fights a weak will. PuppetMaster's
 alternative, pin forces pulling bodies to the target pose, is an external force and breaks `body-one-interface`.

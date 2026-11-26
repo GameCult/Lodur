@@ -118,7 +118,19 @@ namespace Lodur
         // The targets the previous solve returned, which the next one slews from, share the flag.
         private Quat _previous, _shoulderOut;
         private float _flexOut;
-        private bool _hasPrevious;
+        private bool _hasPrevious, _hasOutput;
+
+        private enum Hand : byte { Idle, Driving, Releasing }
+
+        // The hand-off and the hand path. The path is in the arm parent's creation frame; its time counts the ticks driven since it started.
+        private Hand _hand;
+        private double _weight;
+        private bool _newPath, _pathBlocked, _hasSegGoal;
+        private IkVec _pathStart, _pathVia, _segGoal, _aim;
+        private int _pathTicks;
+        private readonly float _dt;
+        private readonly IkVec[] _trunkCentre, _trunkHalf;
+        private readonly float _trunkFront, _forearmRadius;
 
         /// <summary>
         /// Radians of limit violation, or of twist when both swivels are feasible, by which the stateless choice must beat the held swivel's
@@ -140,6 +152,15 @@ namespace Lodur
         /// </summary>
         public const float MaxAngularRate = 10f;
 
+        /// <summary>
+        /// Metres the via point sits ahead of the trunk's front. Placeholder: the probe (goal-ai-map fact 25) measured 0.15 to 0.3 m clearing the
+        /// seated far arm; no pose cost sets it.
+        /// </summary>
+        public const float ViaClearance = 0.2f;
+
+        /// <summary>Seconds of each of the path's two segments, wrist to via point and via point to goal. Placeholder: a deliberate reach, not measured (fact 25).</summary>
+        public const float PathSegmentSeconds = 0.3f;
+
         // Swivel search: steps of Pi / SwivelSteps outward from the zero-twist swivel, then bisection to the feasible boundary. When none is
         // feasible, the least-violating of LeastSteps steps round the circle, refined by golden section.
         private const int SwivelSteps = 90;
@@ -158,6 +179,7 @@ namespace Lodur
                 throw new ArgumentException($"the tick length {tickSeconds} s is not finite and positive.");
             }
 
+            _dt = (float)tickSeconds;
             _maxSwivelStep = (float)(SwivelRate * tickSeconds);
             _maxStep = (float)(MaxAngularRate * tickSeconds);
             _cosHalfMaxStep = MathF.Cos(0.5f * _maxStep);
@@ -212,14 +234,70 @@ namespace Lodur
             ShoulderAnchor = s.Anchor;
             ElbowAnchor = e.Anchor;
             WristAnchor = w.Anchor;
+            ForearmPart = e.Child;
+
+            // The trunk: the shoulder's parent part and its ancestors, each as its creation-pose axis-aligned bound.
+            var trunk = 0;
+            for (var part = s.Parent; part >= 0; part = plan.ParentOf(part)) trunk++;
+            _trunkCentre = new IkVec[trunk];
+            _trunkHalf = new IkVec[trunk];
+            _trunkFront = float.NegativeInfinity;
+            trunk = 0;
+            for (var part = s.Parent; part >= 0; part = plan.ParentOf(part))
+            {
+                var def = plan.Parts[part];
+                _trunkCentre[trunk] = new IkVec(def.Position);
+                _trunkHalf[trunk] = Half(def);
+                _trunkFront = MathF.Max(_trunkFront, def.Position.Z + _trunkHalf[trunk].Z);
+                trunk++;
+            }
+
+            var fore = plan.Parts[e.Child];
+            _forearmRadius = fore.Shape == PartShape.Box ? MathF.Min(fore.Size.X, MathF.Min(fore.Size.Y, fore.Size.Z)) : fore.Size.X;
+            _newPath = true;
+        }
+
+        // The half extents of a part's creation-pose axis-aligned bound.
+        private static IkVec Half(in PartDef part)
+        {
+            var q = part.Rotation;
+            var (sx, sy, sz) = part.Size;
+            q.Rotate(1f, 0f, 0f, out var xx, out var xy, out var xz);
+            q.Rotate(0f, 1f, 0f, out var yx, out var yy, out var yz);
+            q.Rotate(0f, 0f, 1f, out var zx, out var zy, out var zz);
+            switch (part.Shape)
+            {
+                case PartShape.Box:
+                    return new IkVec(MathF.Abs(xx) * sx + MathF.Abs(yx) * sy + MathF.Abs(zx) * sz,
+                        MathF.Abs(xy) * sx + MathF.Abs(yy) * sy + MathF.Abs(zy) * sz,
+                        MathF.Abs(xz) * sx + MathF.Abs(yz) * sy + MathF.Abs(zz) * sz);
+                case PartShape.Capsule:
+                    // Radius sx, half length sy along the part's y.
+                    return new IkVec(MathF.Abs(yx) * sy + sx, MathF.Abs(yy) * sy + sx, MathF.Abs(yz) * sy + sx);
+                default:
+                    return new IkVec(sx, sx, sx);
+            }
         }
 
         /// <summary>Finds the shoulder, elbow and wrist of <paramref name="side"/> by label; <see cref="ArgumentException"/> if the plan has no such arm.</summary>
         /// <remarks>One chain is one arm's solver across ticks of <paramref name="tickSeconds"/>, which sets how far the swivel turns per solve.</remarks>
         public static ArmChain Of(BodyPlan plan, Side side, double tickSeconds) => new ArmChain(plan, side, tickSeconds);
 
-        /// <summary>Forgets the previous swivel and returned targets: the next solve uses the stateless rule and returns its solution unslewed.</summary>
-        public void Reset() => _hasPrevious = false;
+        /// <summary>
+        /// Forgets the previous swivel, the returned targets, the hand path and the hand-off: the next <see cref="Solve"/> uses the stateless rule
+        /// and returns its solution unslewed, and the arm is idle, so <see cref="Release"/> passes the base through and <see cref="Drive"/> engages
+        /// from it.
+        /// </summary>
+        public void Reset()
+        {
+            _hasPrevious = false;
+            _hasOutput = false;
+            _hand = Hand.Idle;
+            _newPath = true;
+        }
+
+        /// <summary>The next <see cref="Drive"/> starts a new hand path from the measured wrist, keeping the swivel and the returned targets.</summary>
+        public void Restart() => _newPath = true;
 
         /// <summary>The last solve's shoulder target before clamping, whose swivel the next solve holds (identity before any solve); tests read it.</summary>
         internal Quat Held => _hasPrevious ? _previous : Quat.Identity;
@@ -230,6 +308,9 @@ namespace Lodur
 
         /// <summary>The part the shoulder hangs from; Solve takes its world rotation and position.</summary>
         public int ParentPart { get; }
+
+        /// <summary>The forearm part, which carries the wrist anchor; Drive takes the measured wrist from its pose.</summary>
+        public int ForearmPart { get; }
 
         /// <summary>Creation-pose anchors. The effector is <see cref="WristAnchor"/>.</summary>
         public (float X, float Y, float Z) ShoulderAnchor { get; }
@@ -247,10 +328,14 @@ namespace Lodur
         /// basins, the clamped pose of the swivel on its way. The returned targets are slewed toward that solution at
         /// <see cref="MaxAngularRate"/>; the return value describes the solution. One call is one tick of the arm's history.
         /// </summary>
-        public bool Solve(in Quat parentRotation, float px, float py, float pz, float tx, float ty, float tz, out Quat shoulder, out Quat elbow)
+        public bool Solve(in Quat parentRotation, float px, float py, float pz, float tx, float ty, float tz, out Quat shoulder, out Quat elbow) =>
+            SolveCreation(Ik.ToCreationFrame(parentRotation, _parentRestInverse, _parentCentre, px, py, pz, tx, ty, tz), out shoulder, out elbow);
+
+        // Solve for a wrist point already in the parent's creation frame.
+        private bool SolveCreation(IkVec target, out Quat shoulder, out Quat elbow)
         {
             var reached = true;
-            var v = Ik.ToCreationFrame(parentRotation, _parentRestInverse, _parentCentre, px, py, pz, tx, ty, tz) - _shoulderAnchor;
+            var v = target - _shoulderAnchor;
             var d = v.Length;
             var dMin = MathF.Abs(L1 - L2) + 1e-3f;
             var dMax = L1 + L2 - 1e-3f;
@@ -285,9 +370,10 @@ namespace Lodur
             }
 
             var local = Local(a, b, phi);
-            var slew = _hasPrevious;
+            var slew = _hasOutput;
             _previous = local;
             _hasPrevious = true;
+            _hasOutput = true;
             if (clamp)
             {
                 // Infeasible: swing and twist clamped to the limits.
@@ -308,6 +394,164 @@ namespace Lodur
             shoulder = _shoulderOut;
             elbow = Quat.FromAxisAngle(0f, 0f, 1f, _flexOut);
             return reached;
+        }
+
+        /// <summary>
+        /// One tick the arm's layer drives: the targets to write for the wrist goal (tx, ty, tz) given the arm parent's world pose, the wrist
+        /// measured now (mx, my, mz) and the base shoulder and elbow targets, blended toward the solution by <paramref name="weight"/> in [0, 1].
+        /// An arm that was idle starts slewing from the base targets; one that was releasing, from where its output was. The tick that engages the
+        /// arm, and every tick after <see cref="Restart"/>, starts a hand path from the measured wrist. Returns whether the goal was reached,
+        /// as <see cref="Solve"/> does for the point it was given.
+        /// </summary>
+        public bool Drive(in Quat parentRotation, float px, float py, float pz, float tx, float ty, float tz, float mx, float my, float mz,
+            in Quat baseShoulder, in Quat baseElbow, double weight, out Quat shoulder, out Quat elbow)
+        {
+            if (_hand != Hand.Driving)
+            {
+                if (_hand == Hand.Idle)
+                {
+                    _shoulderOut = baseShoulder;
+                    _flexOut = Flex(baseElbow);
+                    _hasOutput = true;
+                }
+
+                _hand = Hand.Driving;
+                _newPath = true;
+            }
+
+            _weight = weight;
+            var goal = Ik.ToCreationFrame(parentRotation, _parentRestInverse, _parentCentre, px, py, pz, tx, ty, tz);
+            if (_newPath)
+            {
+                _newPath = false;
+                var wrist = Ik.ToCreationFrame(parentRotation, _parentRestInverse, _parentCentre, px, py, pz, mx, my, mz);
+                _pathStart = wrist;
+                _pathBlocked = Blocked(wrist, goal);
+                _pathVia = new IkVec(wrist.X, 0.5f * (wrist.Y + goal.Y), _trunkFront + ViaClearance);
+                _pathTicks = 0;
+                _hasSegGoal = false;
+            }
+
+            var aim = goal;
+            if (_pathBlocked && _pathTicks * _dt < 2f * PathSegmentSeconds)
+            {
+                var t = _pathTicks * _dt;
+                if (!_hasSegGoal && t >= PathSegmentSeconds)
+                {
+                    _segGoal = goal;
+                    _hasSegGoal = true;
+                }
+
+                aim = PathPoint(_pathStart, _pathVia, _segGoal, goal, t);
+                _pathTicks++;
+            }
+
+            _aim = aim;
+            var reached = SolveCreation(aim, out var s, out var e);
+            shoulder = Blend(baseShoulder, s, weight);
+            elbow = Blend(baseElbow, e, weight);
+            return reached;
+        }
+
+        /// <summary>
+        /// One tick the arm's layer does not drive: while the arm still holds a driven output, it slews to the base targets at
+        /// <see cref="MaxAngularRate"/>, written blended toward the base by the weight it was last driven at; when it has arrived, and for an arm
+        /// that never was driven, the written targets are the base ones, untouched.
+        /// </summary>
+        public void Release(in Quat baseShoulder, in Quat baseElbow, out Quat shoulder, out Quat elbow)
+        {
+            if (_hand == Hand.Idle)
+            {
+                shoulder = baseShoulder;
+                elbow = baseElbow;
+                return;
+            }
+
+            _hand = Hand.Releasing;
+            _shoulderOut = Toward(_shoulderOut, baseShoulder);
+            var flex = Flex(baseElbow);
+            var gap = flex - _flexOut;
+            _flexOut = MathF.Abs(gap) <= _maxStep ? flex : _flexOut + (gap > 0f ? _maxStep : -_maxStep);
+            if (_flexOut == flex && _shoulderOut.X == baseShoulder.X && _shoulderOut.Y == baseShoulder.Y && _shoulderOut.Z == baseShoulder.Z
+                && _shoulderOut.W == baseShoulder.W)
+            {
+                _hand = Hand.Idle;
+                shoulder = baseShoulder;
+                elbow = baseElbow;
+                return;
+            }
+
+            shoulder = Blend(baseShoulder, _shoulderOut, _weight);
+            elbow = Blend(baseElbow, Quat.FromAxisAngle(0f, 0f, 1f, _flexOut), _weight);
+        }
+
+        // The solution itself at weight 1, a blend toward it from the base below that.
+        private static Quat Blend(in Quat baseTarget, in Quat solution, double weight) =>
+            weight >= 1.0 ? solution : Quat.Nlerp(baseTarget, solution, (float)weight);
+
+        // The flex of an elbow target, a rotation about the hinge's frame z, on the shortest turn.
+        private static float Flex(in Quat elbow) => 2f * MathF.Atan2(elbow.W < 0f ? -elbow.Z : elbow.Z, MathF.Abs(elbow.W));
+
+        // Minimum jerk (Flash and Hogan 1985): 0 to 1 with zero velocity and acceleration at both ends.
+        internal static float MinimumJerk(float t)
+        {
+            t = Ik.Clamp(t, 0f, 1f);
+            return t * t * t * (10f - 15f * t + 6f * t * t);
+        }
+
+        /// <summary>
+        /// The hand path in the arm parent's creation frame at <paramref name="t"/> seconds: the start to the via point over
+        /// <see cref="PathSegmentSeconds"/>, then the goal plus the via point's offset from the goal as it was when the segment began, shrinking
+        /// to nothing, so a goal that moves is met at the end. <paramref name="segmentGoal"/> is the goal at that moment.
+        /// </summary>
+        internal static (float X, float Y, float Z) PathPoint((float X, float Y, float Z) start, (float X, float Y, float Z) via,
+            (float X, float Y, float Z) segmentGoal, (float X, float Y, float Z) goal, float t)
+        {
+            var p = PathPoint(new IkVec(start), new IkVec(via), new IkVec(segmentGoal), new IkVec(goal), t);
+            return (p.X, p.Y, p.Z);
+        }
+
+        private static IkVec PathPoint(IkVec start, IkVec via, IkVec segmentGoal, IkVec goal, float t)
+        {
+            if (t < PathSegmentSeconds) return start + (via - start) * MinimumJerk(t / PathSegmentSeconds);
+            return goal + (via - segmentGoal) * (1f - MinimumJerk((t - PathSegmentSeconds) / PathSegmentSeconds));
+        }
+
+        /// <summary>Whether the last path start found the trunk in the way (tests read it).</summary>
+        internal bool PathBlocked => _pathBlocked;
+
+        /// <summary>The creation-frame point the last <see cref="Drive"/> solved for: the path point, or the goal (tests read it).</summary>
+        internal (float X, float Y, float Z) Aim => (_aim.X, _aim.Y, _aim.Z);
+
+        // Whether the straight segment from the wrist to the goal passes within the forearm radius of a trunk bound.
+        private bool Blocked(IkVec wrist, IkVec goal)
+        {
+            for (var b = 0; b < _trunkCentre.Length; b++)
+            {
+                // The distance to a box is convex along a line, so a ternary search finds its least over the segment.
+                float lo = 0f, hi = 1f;
+                for (var i = 0; i < 40; i++)
+                {
+                    var m1 = lo + (hi - lo) / 3f;
+                    var m2 = hi - (hi - lo) / 3f;
+                    if (BoxDistance(wrist + (goal - wrist) * m1, b) < BoxDistance(wrist + (goal - wrist) * m2, b)) hi = m2;
+                    else lo = m1;
+                }
+
+                if (BoxDistance(wrist + (goal - wrist) * (0.5f * (lo + hi)), b) < _forearmRadius) return true;
+            }
+
+            return false;
+        }
+
+        private float BoxDistance(IkVec p, int box)
+        {
+            var d = p - _trunkCentre[box];
+            var h = _trunkHalf[box];
+            var x = MathF.Max(0f, MathF.Abs(d.X) - h.X);
+            var y = MathF.Max(0f, MathF.Abs(d.Y) - h.Y);
+            var z = MathF.Max(0f, MathF.Abs(d.Z) - h.Z);
+            return MathF.Sqrt(x * x + y * y + z * z);
         }
 
         // The rotation from current toward target, turned by at most the per-solve step: the target itself when it is within the step.

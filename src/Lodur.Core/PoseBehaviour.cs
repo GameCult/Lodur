@@ -144,7 +144,8 @@ namespace Lodur
 
         /// <summary>
         /// The same, with the orient layers composed between the keys and the flinch: the base key pose, then recoil, look and the arms (each a
-        /// blend toward its solution), then the flinch blend over every muscle. Layers write joint targets only; the strength line is the pose rule's.
+        /// blend toward its solution), then the flinch blend over every muscle. With a rig, the arms are composed on every call, driven or
+        /// released, so an arm the goal stopped driving eases back to the base pose. Layers write joint targets only; the strength line is the pose rule's.
         /// With no layers, the arithmetic is the key loop's, operation for operation.
         /// </summary>
         internal void Write(double weight, double leak, double strain, double seconds, double secondsInGoal, Span<float> strengths, Span<Quat> targets, in OrientInput orient)
@@ -193,9 +194,9 @@ namespace Lodur
                 targets[m] = a;
             }
 
-            if (layered)
+            if (orient.Rig != null)
             {
-                orient.Rig!.Compose(this, orient, targets);
+                orient.Rig.Compose(this, orient, targets);
             }
 
             for (var m = 0; m < count; m++)
