@@ -506,10 +506,31 @@ public sealed class PlannerTests
         {
             Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, 0, Self(1), 8, steps));
             Assert.Equal(Planner.NodeBudget + 1, planner.LastNodes);
+            Assert.True(planner.LastExhausted);
         }
+
+        // The call's budget is the cut-off, not the constant.
+        Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, 0, Self(1), 8, steps, budget: 100));
+        Assert.Equal(101, planner.LastNodes);
+        Assert.True(planner.LastExhausted);
 
         // A short plan in the same world is not touched by the budget the long one spent.
         Assert.Equal(1, planner.Plan(p, 1UL << 2, 0f, 0f, 0f, 0, Self(1), 8, steps));
         Assert.Equal(new PlanStep(0, 1, 0), steps[0]);
+        Assert.False(planner.LastExhausted);
+
+        // No plan within the depth is not a spent budget.
+        Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, 0, Self(3), 8, steps));
+        Assert.False(planner.LastExhausted);
+        Assert.ThrowsAny<ArgumentOutOfRangeException>(() => planner.Plan(p, 0UL, 0f, 0f, 0f, 0, Self(1), 8, steps, budget: 0));
+
+        // The switch plan needs four steps: a small budget gives up on it, the default finds it.
+        var catalogue = Build();
+        var world = World();
+        var run = new PlanStep[8];
+        Assert.Equal(-1, catalogue.Plan(world, 0UL, 0f, 0f, 0f, SlotOf(world, 3), This(Off), 8, run, budget: 5));
+        Assert.True(catalogue.LastExhausted);
+        Assert.Equal(4, catalogue.Plan(world, 0UL, 0f, 0f, 0f, SlotOf(world, 3), This(Off), 8, run));
+        Assert.False(catalogue.LastExhausted);
     }
 }

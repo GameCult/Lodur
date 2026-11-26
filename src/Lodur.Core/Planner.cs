@@ -61,8 +61,8 @@ namespace Lodur
         private const int MaxNeeds = 8;
 
         /// <summary>
-        /// The most groundings one <see cref="Plan"/> call may regress, counted across all its depths. A counter, not a clock, so the cut-off is the same on every machine.
-        /// A call that spends it returns -1 as if no plan existed.
+        /// The default budget of a <see cref="Plan"/> call: the most groundings it may regress, counted across all its depths. A counter, not a clock, so the cut-off is the same on every machine.
+        /// A call that spends its budget returns -1 and sets <see cref="LastExhausted"/>.
         /// </summary>
         public const int NodeBudget = 4096;
 
@@ -87,6 +87,8 @@ namespace Lodur
         private readonly ulong[] _meetsThis;    // per level, the slots whose literal a This give of the verb in hand meets, _words per level
         private readonly ulong[] _meetsTool;
         private int _nodes;
+        private int _budget;
+        private bool _exhausted;
 
         public Planner(IReadOnlyList<Verb> verbs, int capacity, int maxDepth, double reachMeters)
         {
@@ -151,18 +153,24 @@ namespace Lodur
         /// <summary>The deepest plan this planner can be asked for.</summary>
         public int MaxDepth { get; }
 
-        /// <summary>The groundings the last <see cref="Plan"/> call regressed; above <see cref="NodeBudget"/> means it ran out and returned -1.</summary>
+        /// <summary>The groundings the last <see cref="Plan"/> call regressed; above the call budget means it ran out and returned -1.</summary>
         public int LastNodes => _nodes;
+
+        /// <summary>True when the last <see cref="Plan"/> call returned -1 because it spent its budget, not because no plan within the depth exists.</summary>
+        public bool LastExhausted => _exhausted;
 
         /// <summary>
         /// 0 when the want already holds, else the length of the shallowest plan of at most <paramref name="depth"/> steps, written into
         /// <paramref name="plan"/> in execution order, else -1. The want is about self or about the percept in <paramref name="targetSlot"/>.
         /// A thing's facts are those it was last sensed with, bit 63 replaced by whether it is within reach of the point.
+        /// <paramref name="budget"/> is the most groundings the call may regress, at least 1; a call that spends it returns -1 and sets <see cref="LastExhausted"/>.
         /// </summary>
-        public int Plan(Perception perception, ulong selfFacts, float ox, float oy, float oz, int targetSlot, Fact want, int depth, Span<PlanStep> plan)
+        public int Plan(Perception perception, ulong selfFacts, float ox, float oy, float oz, int targetSlot, Fact want, int depth, Span<PlanStep> plan, int budget = NodeBudget)
         {
-            Check(perception, targetSlot, want, depth, plan.Length);
+            Check(perception, targetSlot, want, depth, plan.Length, budget);
             _nodes = 0;
+            _budget = budget;
+            _exhausted = false;
 
             _facts[0] = selfFacts & ~Perception.InReachFact;
             var ids = perception.PerceptIds;
@@ -200,12 +208,13 @@ namespace Lodur
                     return d;
                 }
 
-                if (_nodes > NodeBudget)
+                if (_nodes > _budget)
                 {
                     break;
                 }
             }
 
+            _exhausted = _nodes > _budget;
             return -1;
         }
 
@@ -259,7 +268,7 @@ namespace Lodur
                             return true;
                         }
 
-                        if (_nodes > NodeBudget)
+                        if (_nodes > _budget)
                         {
                             return false;
                         }
@@ -279,7 +288,7 @@ namespace Lodur
                             return true;
                         }
 
-                        if (_nodes > NodeBudget)
+                        if (_nodes > _budget)
                         {
                             return false;
                         }
@@ -294,7 +303,7 @@ namespace Lodur
         private bool Try(int r, int v, int a, int b, int cur, int n)
         {
             _nodes++;
-            if (_nodes > NodeBudget || !Regress(v, a, b, cur, n, (r - 1) * _stride, out var count))
+            if (_nodes > _budget || !Regress(v, a, b, cur, n, (r - 1) * _stride, out var count))
             {
                 return false;
             }
@@ -457,8 +466,13 @@ namespace Lodur
 
         private static PlanStep Step(int verb, ulong thisId, ulong toolId) => new PlanStep(verb, thisId, toolId);
 
-        private void Check(Perception perception, int targetSlot, Fact want, int depth, int planLength)
+        private void Check(Perception perception, int targetSlot, Fact want, int depth, int planLength, int budget)
         {
+            if (budget < 1)
+            {
+                throw new ArgumentOutOfRangeException(nameof(budget), "The budget must be at least 1.");
+            }
+
             if (perception is null)
             {
                 throw new ArgumentNullException(nameof(perception));
