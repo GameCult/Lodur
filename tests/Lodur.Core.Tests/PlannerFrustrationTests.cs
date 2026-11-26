@@ -399,7 +399,9 @@ public sealed class PlannerFrustrationTests
             Assert.Throws<ArgumentException>(() => Build(Make(retry: bad)));
         }
 
+        Assert.Throws<ArgumentException>(() => Build(Make(frustration: 0.5, retry: 0.0)));
+
         Build(Make(frustration: double.PositiveInfinity, retry: double.PositiveInfinity));
-        Build(Make(frustration: 0.0, retry: 0.0));
+        Build(Make(frustration: 0.0, retry: 1.0));
     }
 }
