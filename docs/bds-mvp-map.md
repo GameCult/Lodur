@@ -342,3 +342,14 @@ Admitted 2026-11-20 (pass `bds-mvp-map`): specs `lodur:cut_spec:cut-ymir-contact
 `cut-ymir-grab-anchor.r2` (siblings, after the parallel pass's `ymir-shape-lanes`), `cut-ymir-break-and-remove.r2` (after contact facts); every
 later cut above is a `lodur:follow_up:<label>` of the same name (22), owner nibu; questions
 `lodur:question:bds-*` (7); ideas `lodur:idea:bds-mvp-map.*` (22, seven rejected and resolved Recorded).
+
+## Wound blood slice (pass `bds-slice-map`, 2026-11-27; mains Lodur `2359142`, Ymir `1d27114`, BDS `f26ec57`)
+
+Probe: `<scratchpad>/nibu-imagination/probe/Program.cs` (Release, net10 roll-forward, paired interleaved medians of 9 against a no-fluid control).
+
+- **B, bleed.** One Knife cut (Skin, Fat, Muscle at 60) bleeds 78.0 mL/s at peak and kills by BloodLoss at 38.1 s; 3 cuts 234 mL/s and 11.2 s; 6 cuts 468 mL/s and 5.5 s. Every bleed-out spills 2.50 L real, 25.0 L visible at gain 10, 1600 drops of 15.625 mL.
+- **A, cost on the seated world.** Drops at three body points, settled when supported and under 0.05 m/s for 30 ticks: +0.076 ms a tick at 50 drops/s (live 42), +0.250 at 150/s (live 126), +0.562 at 300/s (live 256), at caps 512 to 2048 alike; wets 37-39, overflow 0. Cap-bound (only the cap settles): 512 live +1.49 ms, 1024 +3.9, 2048 +7.2. Settling carries the gain; the cap stays 512.
+- **A, lane reuse.** A lane freed by Settle is free only after the next Step: settling only when emission finds the cap full refuses 795 of about 2,600 drops at cap 512. Settle after the Step, down to LiveCap - MaxDropsPerTick.
+- **I, identity.** A SeatedPuppet world with particle capacities and no fluid steps byte-identically over 1200 driven ticks (hash `B3ACA960FE3B41E7` both); Ragdoll.Build places 2 airway sensors.
+
+Order: `cut-bds-wound-blood.r1`, then `cut-bds-client-office.r1`, then follow-up `bds-drown-own-blood-slice` (its Lodur part, `lodur-airway-internal-bleed`, can run beside the client cut). Idea `bds-slice-map.gain-at-circulation-boundary` holds the aspirate-cough amplification hazard for that slice.
