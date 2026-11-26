@@ -110,6 +110,39 @@ Pass `goal-planner-cut`, Lodur `419d454` (`nibu/brain-goal-targets` head, in Sou
     the oxygen cut (`Physiology.Step` input, the ceiling loop) also edit; it runs after whichever of them is in
     flight and adds only trailing optional parameters.
 
+Pass `planner-select-cut`, Lodur `77d00d3` (main: goal targets, planner part 1, airway, orient goals), 2026-11-26.
+Probes in the scratch project `nibu-imagination-select/probe` (not committed): `Lodur.Core` at `77d00d3` with
+`NodeBudget` made settable and a `MoveRule` switch in `Regress` only; net10 Release on the workstation.
+
+19. **Baseline.** `dotnet test tests/Lodur.Core.Tests -c Release` at `77d00d3`: 377 passed.
+20. **Reach and the oracle.** `Planner.Plan` sets bit 63 once per call from distance to the observer
+    (`Planner.cs:177-181`) and no verb takes it away (finding `reach-is-monotone`). The forward oracle in
+    `PlannerEquivalenceTests` places things only at x 0.5 or 5 and its `Apply` has no reach rule, so it cannot see the
+    rule either way: with the Regress half of the move rule on, the 17 planner tests (equivalence included) passed.
+21. **Crowded worlds (probe).** Rooms of 16, 48 and 64 things (a strap at 0.3 m; knives, keys, doors 70% locked,
+    switches, tools and four junk kinds within 12 m), verbs of the test catalogue plus `Pry` (strap with a tool) and
+    junk `Fiddle`/`Stack` decoys, wants on every door, switch, knife and the strap; 100 seeds. Plan calls exhausting the
+    4096 budget while an unbounded search finds a plan within depth: none at depth <= 5; at depth 6, 23 of 1200 calls
+    (48 things) and 96 of 1800 (64); at 7-8, 62/1200 and 127/1800. The move rule removed 2-3 plans per 600-1800 calls at
+    depth 4 (plans holding two far things in reach) and cut nodes slightly. **Decisions** (300 seeds, the best pair by
+    `raw x (1 - 0.08 len)`, direct `raw x 0.5 x (1 - 0.08 (d + 1))`): per-plan budget, exhaustive or best-first, chose
+    as unbounded search in every room; one 4096 budget per decision spent best-first differed in 0 rooms at depth 4,
+    11-20 of 300 at depths 5-8 for 48-64 things, and 16 of 300 at depth 8 for 16 things.
+22. **Cost per Select (probe).** Paired interleaved medians, 31 rounds, us per Select (all want pairs):
+
+    | Things | Depth | Every pair | Best-first, budget per plan | Best-first, budget per decision |
+    |---|---|---|---|---|
+    | 16 | 4 | 25.8 | 10.9 | 11.1 |
+    | 16 | 8 | 937.6 | 578.7 | 233.0 |
+    | 48 | 4 | 239.0 | 59.3 | 65.5 |
+    | 48 | 6 | 1989.9 | 525.1 | 213.4 |
+    | 48 | 8 | 3169.1 | 1114.2 | 237.7 |
+    | 64 | 4 | 526.8 | 105.0 | 101.1 |
+    | 64 | 8 | 3539.3 | 905.2 | 172.6 |
+
+    A grounding costs about 0.2 us here, not the 35 ns fact 13's world implied, and pairs multiply it: the 8.5 us of
+    fact 13 was six wants, not a want per thing. At 120 Hz, 1.1 ms per Select is 13% of a core per Fella.
+
 ## Prior art (research pass `goal-ai-prior-art`)
 
 - The Sims: needs-based utility; objects advertise what they offer, so the data lives on the object and new
@@ -291,6 +324,18 @@ out of reach in the planner's model, so plans are optimistic about reach; replan
 Intelligence 0 is read as: want goals go direct at the discount and still end in frustration, and every Brain
 without wants selects exactly as `brain-goal-targets` (idea `depth-zero-is-direct-with-frustration`, in force for
 the part-2 mapper).
+
+**Planner-select rationale (pass `planner-select-cut`).** Cut 2c is three cuts: `lodur-planner-moves` (Planner only:
+a This give of in-reach is a move, so after it another thing is in reach only if near the move's target; a budget per
+Plan call and `LastExhausted`), `lodur-planner-select` (wants, the gate, the plan on the Actor) and follow-up
+`lodur-planner-frustration`. The gate: a satisfied want is not offered; a planned pair scores through `PlanSteps`; an
+unplanned or not-worked-out pair is tried direct at `DirectDiscount`, reading `PlanSteps` at depth + 1 so a futile try
+never outranks an equal pair he can plan. Pairs are planned best raw score first and planning stops when no remaining
+raw score can win, as ReGoap tries goals in priority order with a per-attempt cap; fact 21 shows this changes no
+choice. One `ThinkBudget` per Select bounds cost (fact 22) at the price of 4-7% of choices in crowds at depth 5 and up:
+question `bds-think-budget-per-decision` (Deru). With no pair offered, the goal in force stays and lets go of its
+target (finding `stale-target-without-pair`); the orient layers then rest. The committed pair's plan is derived each
+tick after the commit block, a second Plan call on the current pair that the budget bounds.
 
 ## Mind stats
 
