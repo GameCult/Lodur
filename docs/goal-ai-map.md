@@ -285,8 +285,9 @@ a pair planned within `PlanDepth` steps scores raw times the `PlanSteps` respons
 plan (none within the depth, or the think budget gone) is tried direct at `DirectDiscount`, reading `PlanSteps`
 at depth + 1 (ruling `bds-unplannable-tries-direct`, which answers `bds-unplannable-goal`: he goes at the target
 and fails where the player can see it; a direct try that reads `PlanLength` -1 for `FrustrationSeconds` bars that pair's
-direct try, reports `TickEvents.Frustrated` and decides again past the dwell, and the bar lifts on forgetting the target, a changed
-fact of it or of himself, or `RetrySeconds`). One `ThinkBudget` serves a whole Select, spent by deepening
+direct try, reports `TickEvents.Frustrated` and decides again past the dwell, and the bar lifts on forgetting the target or
+`RetrySeconds`; a changed fact does not lift it, since his own try can change one, and a change that makes the goal
+achievable shows as a plannable pair offered through the bar, ruling `frustration-lifts-without-fact-changes`). One `ThinkBudget` serves a whole Select, spent by deepening
 across the pairs (Korf's iterative deepening, anytime): round k asks every live pair for a plan of exactly k steps,
 by a bound on what the pair can still score, so short plans are found first and one pair's dead end cannot starve the
 rest; a want about himself is planned once per goal. The plan is the decision's: made by the Select that chose or
