@@ -284,8 +284,9 @@ on its pairs, built in `Brain.Select` and the Actor's `Deliberation`: a pair who
 a pair planned within `PlanDepth` steps scores raw times the `PlanSteps` responses at its length; a pair with no
 plan (none within the depth, or the think budget gone) is tried direct at `DirectDiscount`, reading `PlanSteps`
 at depth + 1 (ruling `bds-unplannable-tries-direct`, which answers `bds-unplannable-goal`: he goes at the target
-and fails where the player can see it; the frustration that ends a futile try is follow-up `lodur-planner-frustration`,
-so until it lands a direct try lasts while it wins). One `ThinkBudget` serves a whole Select, spent by deepening
+and fails where the player can see it; a direct try that reads `PlanLength` -1 for `FrustrationSeconds` bars that pair's
+direct try, reports `TickEvents.Frustrated` and decides again past the dwell, and the bar lifts on forgetting the target, a changed
+fact of it or of himself, or `RetrySeconds`). One `ThinkBudget` serves a whole Select, spent by deepening
 across the pairs (Korf's iterative deepening, anytime): round k asks every live pair for a plan of exactly k steps,
 by a bound on what the pair can still score, so short plans are found first and one pair's dead end cannot starve the
 rest; a want about himself is planned once per goal. The plan is the decision's: made by the Select that chose or

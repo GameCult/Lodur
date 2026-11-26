@@ -18,6 +18,8 @@ namespace Lodur
         Died = 8,
         /// <summary>An involuntary breath ended a held breath: the breath reflex leaked past the will, or the will gave out while the breath was wanted held.</summary>
         Gasp = 16,
+        /// <summary>A futile direct try was given up this tick: its (goal, target) pair is barred from being tried direct, and the next decision is made past the goal's dwell.</summary>
+        Frustrated = 32,
     }
 
     /// <summary>
@@ -65,6 +67,11 @@ namespace Lodur
         // The want gate's thinking space (null when no goal has a want), which also holds the plan of the decision in force, and its length as read.
         private readonly Deliberation? _deliberation;
         private int _planLength;
+        // Frustration (ruling bds-unplannable-tries-direct): the ticks a direct try may last and a bar lasts, the tick from which the committed pair has read PlanLength -1 without a break (-1: not), and whether the next Select is accepted past the dwell.
+        private readonly long _frustrationTicks;
+        private readonly long _retryTicks;
+        private long _directSince = -1;
+        private bool _impatient;
 
         public Actor(
             double tickSeconds, int regionCount,
@@ -136,6 +143,12 @@ namespace Lodur
                 var entryTicks = brain.Goals[g].EntrySeconds / tickSeconds;
                 _entryTicks[g] = entryTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(entryTicks);
             }
+
+            // Rounded once to ticks like the dwell; a quotient past the long range (+infinity included) is never reached.
+            var frustrationTicks = brain.FrustrationSeconds / tickSeconds;
+            _frustrationTicks = frustrationTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(frustrationTicks);
+            var retryTicks = brain.RetrySeconds / tickSeconds;
+            _retryTicks = retryTicks >= long.MaxValue ? long.MaxValue : (long)Math.Round(retryTicks);
 
             if (physiology != null)
             {
@@ -218,7 +231,7 @@ namespace Lodur
         /// <summary>
         /// The length of the plan of the decision in force, made by the Select that chose or re-chose the pair and carried with it (a tick that decides nothing only checks it): n steps,
         /// -1 when he goes at it direct (no plan within <see cref="Brain.PlanDepth"/>, the think budget gone, or a step's thing forgotten), 0 when the goal has no want, the want holds,
-        /// or its target is no longer in memory.
+        /// or its target is no longer in memory. A -1 that lasts <see cref="Brain.FrustrationSeconds"/> ends in <see cref="TickEvents.Frustrated"/>.
         /// </summary>
         public int PlanLength => _planLength;
 
@@ -358,6 +371,19 @@ namespace Lodur
 
             // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is
             // pending. Within the goal in force's minimum dwell only a strictly higher-priority goal is decided on.
+            // Order: the bars lift on what he knows now, then a direct try that has lasted its time is barred (and the next decision made impatient), then the decision.
+            if (_deliberation != null)
+            {
+                _deliberation.Lift(_perception, selfFacts, _tick);
+                if (_directSince >= 0 && _tick - _directSince >= _frustrationTicks && !_deliberation.Barred(_goal, _target))
+                {
+                    _deliberation.Bar(_goal, _target, _retryTicks > long.MaxValue - _tick ? long.MaxValue : _tick + _retryTicks);
+                    events |= TickEvents.Frustrated;
+                    _directSince = -1;
+                    _impatient = true;
+                }
+            }
+
             var planned = false;
             if (_pending < 0)
             {
@@ -369,8 +395,10 @@ namespace Lodur
                 }
 
                 var wanted = _brain.Select(_drive, _perception, regionX[sr], regionY[sr], regionZ[sr], now, _deliberation);
+                var impatient = _impatient;
+                _impatient = false;   // one Select is impatient, whatever it returns
                 if (wanted != new Choice(_goal, _target)
-                    && (wanted.Goal == _goal || _tick - _goalSince >= _dwell[_goal] || _brain.Goals[wanted.Goal].Priority > _brain.Goals[_goal].Priority))
+                    && (wanted.Goal == _goal || _tick - _goalSince >= _dwell[_goal] || _brain.Goals[wanted.Goal].Priority > _brain.Goals[_goal].Priority || impatient))
                 {
                     _pending = wanted.Goal;
                     _pendingTarget = wanted.Target;
@@ -394,6 +422,11 @@ namespace Lodur
             if (_pending >= 0 && _tick == _switchTick)
             {
                 var changed = _pending != _goal;
+                if (changed || _pendingTarget != _target)
+                {
+                    _directSince = -1;
+                }
+
                 _goal = _pending;
                 _target = _pendingTarget;
                 _pending = -1;
@@ -438,6 +471,21 @@ namespace Lodur
                 }
 
                 _planLength = _deliberation.InForceLength;
+                if (_planLength < 0)
+                {
+                    if (_directSince < 0)
+                    {
+                        _directSince = _tick;
+                    }
+                }
+                else
+                {
+                    _directSince = -1;
+                }
+            }
+            else
+            {
+                _directSince = -1;
             }
 
             // For EntrySeconds after a takeover the Actor, not the drive, takes the gain (and the arousal, if the goal declares one) from their values at

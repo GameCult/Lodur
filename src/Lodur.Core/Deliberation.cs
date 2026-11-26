@@ -50,6 +50,10 @@ namespace Lodur
         private readonly int _width;            // the steps a plan buffer holds
         private PlanStep[] _best;               // the plan of the pair best so far in this Select, BestLength steps
         private PlanStep[] _inForce;            // the plan of the decision in force
+        private readonly ulong[] _barTarget;    // per goal: the barred target's id (0 for a Self want's untargeted goal)
+        private readonly ulong[] _barFacts;     // per goal: the barred target's facts when barred
+        private readonly ulong[] _barSelf;      // per goal: the actor's own facts when barred
+        private readonly long[] _barUntil;      // per goal: the tick the bar expires at; -1 is no bar
 
         internal Deliberation(Brain brain, IReadOnlyList<Verb> verbs, int capacity)
         {
@@ -67,6 +71,11 @@ namespace Lodur
             _selfPlan = new PlanStep[brain.Goals.Count * _width];
             _next = new WantPair[_heap.Length];
             _selfDepth = new int[brain.Goals.Count];
+            _barTarget = new ulong[brain.Goals.Count];
+            _barFacts = new ulong[brain.Goals.Count];
+            _barSelf = new ulong[brain.Goals.Count];
+            _barUntil = new long[brain.Goals.Count];
+            Array.Fill(_barUntil, -1L);
             _bound = new double[brain.Goals.Count * (_depth + 1)];
             for (var g = 0; g < brain.Goals.Count; g++)
             {
@@ -98,6 +107,66 @@ namespace Lodur
 
         /// <summary>The length of the plan of the decision in force: n steps, -1 to go direct, 0 when its want holds, it has none, or its target left memory.</summary>
         internal int InForceLength => _inForceLength;
+
+        /// <summary>
+        /// Bars the direct try of the pair (<paramref name="goal"/>, <paramref name="target"/>) until <paramref name="untilTick"/>, remembering the target's facts and the actor's own as they stand now
+        /// (the percepts and self facts of the last Select). One bar per goal: a new one replaces it.
+        /// </summary>
+        internal void Bar(int goal, ulong target, long untilTick)
+        {
+            _barTarget[goal] = target;
+            _barSelf[goal] = SelfFacts;
+            var ids = _perception.PerceptIds;
+            var facts = _perception.PerceptFacts;
+            _barFacts[goal] = 0UL;
+            for (var s = 0; target != 0UL && s < ids.Length; s++)
+            {
+                if (ids[s] == target)
+                {
+                    _barFacts[goal] = facts[s];
+                    break;
+                }
+            }
+
+            _barUntil[goal] = untilTick;
+        }
+
+        /// <summary>Whether the direct try of the pair is barred: an equal bar, live (<see cref="Lift"/> runs each tick before the decision).</summary>
+        internal bool Barred(int goal, ulong target) => _barUntil[goal] >= 0 && _barTarget[goal] == target;
+
+        /// <summary>Clears every bar whose time has come, whose target is no longer in memory, or whose remembered facts or self facts differ from the bar's.</summary>
+        internal void Lift(Perception perception, ulong selfFacts, long tick)
+        {
+            var ids = perception.PerceptIds;
+            var facts = perception.PerceptFacts;
+            for (var g = 0; g < _barUntil.Length; g++)
+            {
+                if (_barUntil[g] < 0)
+                {
+                    continue;
+                }
+
+                var lift = tick >= _barUntil[g] || _barSelf[g] != selfFacts;
+                if (!lift && _barTarget[g] != 0UL)
+                {
+                    lift = true;
+                    for (var s = 0; s < ids.Length; s++)
+                    {
+                        if (ids[s] == _barTarget[g])
+                        {
+                            lift = facts[s] != _barFacts[g];
+                            break;
+                        }
+                    }
+                }
+
+                if (lift)
+                {
+                    _barUntil[g] = -1;
+                    _barTarget[g] = 0UL;
+                }
+            }
+        }
 
         /// <summary>Starts a Select: nothing waits, nothing is spent, nothing is known of the Self wants.</summary>
         internal void Begin(Perception perception, float ox, float oy, float oz)

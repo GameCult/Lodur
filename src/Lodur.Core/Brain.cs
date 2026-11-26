@@ -328,6 +328,12 @@ namespace Lodur
         /// <summary>The factor on a pair's score when its goal's want has no plan within <see cref="PlanDepth"/> (or the think budget ran out): he goes at the target directly, in [0, 1], default 0.5 (a placeholder).</summary>
         public double DirectDiscount { get; init; } = 0.5;
 
+        /// <summary>How long a direct try (<see cref="Actor.PlanLength"/> -1) of one (goal, target) pair may last before the Actor gives it up: it bars the pair's direct try, reports <see cref="TickEvents.Frustrated"/> and decides again past the goal's dwell. Not NaN, not negative; +infinity never frustrates. Default 5 (a placeholder; ruling bds-unplannable-tries-direct).</summary>
+        public double FrustrationSeconds { get; init; } = 5.0;
+
+        /// <summary>How long a bar on a direct try lasts if the world he knows does not change first: the pair is tried direct again after it. Not NaN, not negative; +infinity never lifts by time. Default 30 (a placeholder).</summary>
+        public double RetrySeconds { get; init; } = 30.0;
+
         /// <summary>The most groundings one Select may regress across all its plans, at least 1, default 4096: one budget per decision, spent by deepening across the want pairs, short plans first (lodur:question:bds-think-budget-per-decision).</summary>
         public int ThinkBudget { get; init; } = Planner.NodeBudget;
 
@@ -374,7 +380,7 @@ namespace Lodur
         /// the untargeted-by-want pairs; a want pair whose want holds is not offered, the rest wait in the Deliberation. Pass 2 deepens across the waiting pairs: round k takes them by
         /// bound (raw times the best factor any plan longer than k - 1 steps, or going direct, could earn), asks each for a plan of exactly k steps with what is left of <see cref="ThinkBudget"/>,
         /// and offers raw times the plan-length factor for one found; a pair with none of k steps waits for round k + 1, and one with no plan within PlanDepth (or the budget gone) is offered
-        /// at raw times the factor at PlanDepth + 1 times <see cref="DirectDiscount"/>. A round ends when no remaining bound can beat or tie-win the best, so short plans are found
+        /// at raw times the factor at PlanDepth + 1 times <see cref="DirectDiscount"/>, unless the Deliberation holds a bar on that pair's direct try (it is then not offered; it is offered when it plans). A round ends when no remaining bound can beat or tie-win the best, so short plans are found
         /// first and one pair's dead end cannot starve the rest.
         /// </summary>
         internal Choice Select(in DriveState drive, Perception perception, float ox, float oy, float oz, Choice current, Deliberation? d)
@@ -427,6 +433,11 @@ namespace Lodur
                             pair.Bound = pair.Raw * d.BoundFactor(pair.Goal, k);
                             d.Defer(pair);
                             continue;
+                        }
+
+                        if (length < 0 && d.Barred(pair.Goal, pair.Target))
+                        {
+                            continue;   // a futile direct try is barred: neither offered nor deferred
                         }
 
                         var factor = length > 0 ? goal.PlanFactor(length) : goal.PlanFactor(PlanDepth + 1) * DirectDiscount;
@@ -523,6 +534,16 @@ namespace Lodur
             if (!(DirectDiscount >= 0.0 && DirectDiscount <= 1.0))
             {
                 throw new ArgumentException("DirectDiscount must be in [0, 1].");
+            }
+
+            if (!(FrustrationSeconds >= 0.0))
+            {
+                throw new ArgumentException("FrustrationSeconds must not be NaN or negative.");
+            }
+
+            if (!(RetrySeconds >= 0.0))
+            {
+                throw new ArgumentException("RetrySeconds must not be NaN or negative.");
             }
 
             if (ThinkBudget < 1)
