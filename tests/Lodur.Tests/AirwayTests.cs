@@ -42,8 +42,15 @@ public sealed class AirwayTests
     {
         var live = new float[Plan.AirwayOpenings.Count];
         var pooled = new float[Plan.AirwayOpenings.Count];
-        doll.ReadAirway(live, pooled);
+        doll.ReadAirway(live, pooled, new float[Plan.AirwayOpenings.Count], (0f, -1f, 0f));
         return (live, pooled);
+    }
+
+    private static float[] Facing(Ragdoll doll, (float X, float Y, float Z) down)
+    {
+        var facing = new float[Plan.AirwayOpenings.Count];
+        doll.ReadAirway(new float[facing.Length], new float[facing.Length], facing, down);
+        return facing;
     }
 
     [Fact]
@@ -117,9 +124,40 @@ public sealed class AirwayTests
         world.Step(Dt, 4);
         var live = new[] { 7f, 7f };
         var pooled = new[] { 7f, 7f };
-        doll.ReadAirway(live, pooled);
+        var facing = new[] { 7f, 7f };
+        doll.ReadAirway(live, pooled, facing, (0f, 0f, 1f));
         Assert.Equal(new[] { 0f, 0f }, live);
         Assert.Equal(new[] { 0f, 0f }, pooled);
+        Assert.True(facing[Nose] > 0.9f && facing[Mouth] > 0.8f);
+    }
+
+    [Fact]
+    public void Facing_at_the_creation_pose_follows_down()
+    {
+        using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        var toward = Facing(doll, (0f, 0f, 1f));
+        Assert.True(toward[Nose] > 0.9f && toward[Mouth] > 0.8f);
+        var away = Facing(doll, (0f, 0f, -1f));
+        Assert.True(away[Nose] < -0.8f && away[Mouth] < -0.8f);
+        var side = Facing(doll, (0f, -1f, 0f));
+        Assert.True(MathF.Abs(side[Nose]) < 0.2f);
+    }
+
+    [Fact]
+    public void Facing_follows_the_head()
+    {
+        // A head part created turned 90 degrees about x (its +z face along -y): the facing is read from the lane's rotation, not from the plan's offsets.
+        var head = new PartDef("Head", Side.Center, PartShape.Box, (0.1f, 0.1f, 0.1f), (0f, 1f, 0f), Quat.FromAxisAngle(1f, 0f, 0f, MathF.PI / 2f), 1000f, 0.5f, 0f);
+        var turned = new BodyPlan([head], [], [], [.. Plan.AirwayOpenings.Select(o => o with { Part = 0 })]);
+        var (bodies, joints, _) = Ragdoll.Needs(turned);
+        using var world = new Box3DSoaWorld(bodies, gravityY: 0f, jointCapacity: joints);
+        var doll = Ragdoll.Build(world, turned, (0f, 0f), firstStableId: 100);
+        var facing = new float[2];
+        doll.ReadAirway(new float[2], new float[2], facing, (0f, -1f, 0f));
+        Assert.True(facing[Nose] > 0.8f && facing[Mouth] > 0.8f, $"nose {facing[Nose]} mouth {facing[Mouth]}");
+        doll.ReadAirway(new float[2], new float[2], facing, (0f, 0f, 1f));
+        Assert.True(MathF.Abs(facing[Nose]) < 0.2f);
     }
 
     [Fact]
@@ -137,11 +175,15 @@ public sealed class AirwayTests
         world.Step(Dt, 4);
         var live = new float[2];
         var pooled = new float[2];
-        doll.ReadAirway(live, pooled);
+        var facing = new float[2];
+        var down = (0f, -1f, 0f);
+        doll.ReadAirway(live, pooled, facing, down);
         var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 1000; i++) doll.ReadAirway(live, pooled);
+        for (var i = 0; i < 1000; i++) doll.ReadAirway(live, pooled, facing, down);
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
-        Assert.Throws<ArgumentException>(() => doll.ReadAirway(new float[1], pooled));
-        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, new float[3]));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(new float[1], pooled, facing, down));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, new float[3], facing, down));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, pooled, new float[1], down));
+        Assert.Throws<ArgumentException>(() => doll.ReadAirway(live, pooled, facing, (0f, 0f, 0f)));
     }
 }

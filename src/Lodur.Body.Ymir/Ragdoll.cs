@@ -173,13 +173,17 @@ namespace Lodur.Body.Ymir
         }
 
         /// <summary>
-        /// Writes, per plan airway opening, the end-of-step volume (m^3) of live fluid and of settled (wet patch) liquid inside its sphere.
-        /// Zeros in a world with no particle system. Allocates nothing.
+        /// Writes, per plan airway opening, the end-of-step volume (m^3) of live fluid and of settled (wet patch) liquid inside its sphere
+        /// (zeros in a world with no particle system), and the opening's facing: the cosine between its part's rotation applied to the
+        /// opening's normalised offset and the normalised <paramref name="down"/> (1 pointing straight down, 0 on the side, -1 up).
+        /// Facing comes from the body's pose and is written in every world. Refuses spans not one per opening and a zero <paramref name="down"/>. Allocates nothing.
         /// </summary>
-        public void ReadAirway(Span<float> live, Span<float> pooled)
+        public void ReadAirway(Span<float> live, Span<float> pooled, Span<float> facing, (float X, float Y, float Z) down)
         {
             var n = _sensorLane.Length;
-            if (live.Length != n || pooled.Length != n) throw new ArgumentException($"live and pooled need {n} entries, one per airway opening.");
+            if (live.Length != n || pooled.Length != n || facing.Length != n) throw new ArgumentException($"live, pooled and facing need {n} entries, one per airway opening.");
+            var dl = MathF.Sqrt(down.X * down.X + down.Y * down.Y + down.Z * down.Z);
+            if (!(dl > 0f) || !float.IsFinite(dl)) throw new ArgumentException("down needs a nonzero finite direction.", nameof(down));
 
             var v = _world.View;
             for (var k = 0; k < n; k++)
@@ -187,6 +191,14 @@ namespace Lodur.Body.Ymir
                 var lane = _sensorLane[k];
                 live[k] = lane < 0 ? 0f : v.SensorLiquidVolume[lane];
                 pooled[k] = lane < 0 ? 0f : v.SensorWetVolume[lane];
+
+                var a = Plan.AirwayOpenings[k];
+                var i = _bodyLane[a.Part];
+                var o = a.Offset;
+                var ol = MathF.Sqrt(o.X * o.X + o.Y * o.Y + o.Z * o.Z);
+                if (ol <= 0f) { facing[k] = 0f; continue; }
+                new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i]).Rotate(o.X / ol, o.Y / ol, o.Z / ol, out var rx, out var ry, out var rz);
+                facing[k] = (rx * down.X + ry * down.Y + rz * down.Z) / dl;
             }
         }
     }
