@@ -466,7 +466,7 @@ public sealed class PlannerSelectTests
 
     // ----- the crowded room: how often a bounded budget changes the decision
 
-    private static (Perception Percepts, Verb[] Verbs) Crowd(Random rng, int things)
+    private static (Perception Percepts, Verb[] Verbs, Emitter[] Emitters) Crowd(Random rng, int things)
     {
         const uint Strap = 5, Switch = 6;
         var emitters = new List<Emitter> { Thing(1, Strap, 0.3f), Thing(2, Knife, 0.5f) };
@@ -491,8 +491,8 @@ public sealed class PlannerSelectTests
             new Verb { Id = "Fiddle", This = Kinds(10, 11), Needs = new[] { This(Reach) }, Gives = new[] { This(Latched) } },
             new Verb { Id = "Stack", This = Kinds(12, 13), Tool = Kinds(10, 11), Needs = new[] { Tool(Latched), This(Reach) }, Gives = new[] { This(Latched) } },
         };
-        var p = See(things, emitters.ToArray());
-        return (p, verbs);
+        var all = emitters.ToArray();
+        return (See(things, all), verbs, all);
     }
 
     private static Brain Crowded(int depth, int budget) => new()
@@ -514,7 +514,7 @@ public sealed class PlannerSelectTests
         for (var seed = 0; seed < seeds; seed++)
         {
             var rng = new Random(seed);
-            var (p, verbs) = Crowd(rng, things);
+            var (p, verbs, _) = Crowd(rng, things);
             var bounded = Crowded(depth, Planner.NodeBudget);
             var unbounded = Crowded(depth, int.MaxValue);
             var cur = new Choice(0, 0);

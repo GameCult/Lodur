@@ -150,7 +150,11 @@ namespace Lodur
         internal void Add(int goal, int slot, ulong target, double raw, bool current)
         {
             var i = _count++;
-            _heap[i] = new WantPair { Goal = goal, Slot = slot, Target = target, Raw = raw, Current = current };
+            _heap[i].Goal = goal;
+            _heap[i].Slot = slot;
+            _heap[i].Target = target;
+            _heap[i].Raw = raw;
+            _heap[i].Current = current;
             while (i > 0)
             {
                 var parent = (i - 1) >> 1;

@@ -199,6 +199,20 @@ in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; er
     before the break) and, gated only, the flinch control (tracks 5.5 cm apart before the first flinch, 6.0 after).
     Office body tests, the CLI goldens and `tools/PainSweep` (engine-free, no body) do not move. Probe:
     `F:\aeth-wt\imag-gravity-probe\` (patch, harness, logs).
+31. **The built gate in a crowded room (probe, `PlannerSelectTests`).** Room of 48 things (a strap at 0.3 m, a knife at
+    0.5 m, then knives, keys, doors 70% locked, switches and four junk kinds within 12 m; the test catalogue plus `Pry`,
+    `Fiddle`, `Stack`; wants on every door, switch, knife and the strap; doors outrank the strap), 100 seeds, ThinkBudget
+    4096 against `int.MaxValue`: decisions that differ are 0 at depth 4, 37 at 5, 59 at 6 and 62 at 8 (at 64 things, 8
+    at depth 4). This is far above fact 21's 4-7%: the first pair in raw order is a locked door no plan within depth 6
+    reaches, it spends the whole budget searching, and the strap he could cut is starved to a direct try. The count is
+    a property of the world's priorities (a crowd of high-raw unplannable wants), not of the gate; fact 21's room did
+    not have it. Paired interleaved medians (20 seeds, 20 measured ticks each after 12 settling ticks, net10 Release,
+    workstation): `Brain.Select` alone, budget 4096, 406 us at depth 4 and 766 us at depth 6 (unbounded: 259 us and
+    13.3 ms); `Actor.Tick` over a utility-only Brain, extra 441 us at depth 4 and 924 us at depth 6, the difference
+    from Select being the committed pair's plan, a second Plan call with the full budget every tick. A grounding costs
+    about 0.1-0.2 us, so the budget bounds a tick near 2 x ThinkBudget x 0.2 us. At depth 4 the move rule's plan cost
+    is about 2x on movers and 1.0x elsewhere (Soul s1 on `lodur-planner-moves`, paired medians, 6 wants); the budget
+    bounds it, so no work on it here.
 
 ## Prior art (research pass `goal-ai-prior-art`)
 
@@ -260,14 +274,19 @@ sight. Lodur never interprets a fact key, as it never interprets a kind.
 
 Search is regressive and depth-first with iterative deepening, as F.E.A.R.'s, over verbs grounded on the
 percept slots, to a depth limit that is the intelligence stat; it returns the shallowest plan, ties to the
-lowest verb order, and allocates nothing. Selection stays utility (`brain-goal-targets`): a (goal, target) pair
-whose goal has a want is admitted only if a plan of length at most the depth exists, and is scored with one
-more consideration on the plan's length. The plan is derived state on the Actor, recomputed each Select from
-current percepts (fact 13 says it can be); the pair's commitment keeps it stable. A plan step is a verb on a
-percept, and a phantom percept advertises as its kind does: a clever Fella plans through a hallucinated door
-and fails at it as a dim one fails at a real one. Intelligence 0 is the Fella of `brain-goal-targets`: no
-plans, only goals with direct behaviours. What a goal with a want and no plan within depth does is
-`lodur:question:bds-unplannable-goal` (Deru).
+lowest verb order, and allocates nothing. Selection stays utility (`brain-goal-targets`), and the planner is a gate
+on its pairs, built in `Brain.Select` and the Actor's `Deliberation`: a pair whose want already holds is not offered;
+a pair planned within `PlanDepth` steps scores raw times the `PlanSteps` responses at its length; a pair with no
+plan (none within the depth, or the think budget gone) is tried direct at `DirectDiscount`, reading `PlanSteps`
+at depth + 1 (ruling `bds-unplannable-tries-direct`, which answers `bds-unplannable-goal`: he goes at the target
+and fails where the player can see it; the frustration that ends a futile try is follow-up `lodur-planner-frustration`,
+so until it lands a direct try lasts while it wins). One `ThinkBudget` serves a whole Select, spent on pairs by raw
+score, best first; a want about himself is planned once per goal. The plan is derived state on the Actor, recomputed
+each tick from current percepts for the committed pair (`PlanLength`, `PlanStep(i)`, never kept across ticks; fact 13
+says it can be); the pair's commitment keeps the choice stable. A plan step is a verb on a percept, and a phantom
+percept advertises as its kind does: a clever Fella plans through a hallucinated door and fails at it as a dim one
+fails at a real one. Intelligence 0 is the Fella of `brain-goal-targets`: no plans, every want pair direct. With no
+pair offered the goal in force stays and lets go of its target.
 
 **Mind stats.** Four sim stats per `lodur:ruling:bds-intelligence-is-planning-depth`, each derived each step as
 a physiology capacity is (base from the character content, then the offsets and factors of live afflictions,
@@ -321,7 +340,7 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 1 | `lodur-percepts` | Lodur | emitter id and kind, percept memory, phantom id bit | none | S, specced |
 | 2 | `brain-goal-targets` | Lodur | target filters, (goal, percept) utility, commitment | 1 | M |
 | 2b | `lodur-goal-planner` | Lodur | percept facts, verbs with needs and gives, depth-limited regressive planner (core, no caller) | 2 | M, specced |
-| 2c | `lodur-planner-select` | Lodur | wants, Select admission, direct tries at a discount and frustration (`bds-unplannable-tries-direct`), plan on the Actor | 2b, Actor.cs cuts in flight | M |
+| 2c | `lodur-planner-moves`, `lodur-planner-select` (built), `lodur-planner-frustration` | Lodur | the move rule and a budget per Plan call; wants, the Select gate, direct tries at a discount (`bds-unplannable-tries-direct`), one think budget per Select, the plan on the Actor; the frustration that ends a futile direct try | 2b | S, M, S |
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
 | 3b | `lodur-reach-path` | Lodur | hand path through a clearance via point when blocked; arm hand-off slewed both ways | 3, 4 | M, landed |
 | 3c | `ymir-world-gravity`, then `lodur-gravity-feedforward` | Ymir, Lodur (+ BDS content) | the world reports its gravity; muscles carry their subtree's weight times strength | Q `gravity-feedforward-scope` | S, M |
@@ -418,7 +437,7 @@ Plan call and `LastExhausted`), `lodur-planner-select` (wants, the gate, the pla
 unplanned or not-worked-out pair is tried direct at `DirectDiscount`, reading `PlanSteps` at depth + 1 so a futile try
 never outranks an equal pair he can plan. Pairs are planned best raw score first and planning stops when no remaining
 raw score can win, as ReGoap tries goals in priority order with a per-attempt cap; fact 21 shows this changes no
-choice. One `ThinkBudget` per Select bounds cost (fact 22) at the price of 4-7% of choices in crowds at depth 5 and up:
+choice. One `ThinkBudget` per Select bounds cost (fact 22) at the price of 4-7% of choices in crowds at depth 5 and up (fact 21; fact 31 measures the built gate far higher where unplannable wants outrank plannable ones):
 question `bds-think-budget-per-decision` (Deru). With no pair offered, the goal in force stays and lets go of its
 target (finding `stale-target-without-pair`); the orient layers then rest. The committed pair's plan is derived each
 tick after the commit block, a second Plan call on the current pair that the budget bounds.
