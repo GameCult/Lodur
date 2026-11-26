@@ -10,7 +10,10 @@ namespace Lodur.Body.Ymir
     /// <see cref="Drive"/> is the muscle layer: it turns caller-owned strengths and target rotations into torques on the world's
     /// torque lanes and does nothing else to the physics. Each muscle's torque is a PD term toward its target plus the gravity load of the
     /// muscle's unsupported subtree times its strength, projected on the axes it has gains for (ruling gravity-feedforward-all-muscles), so
-    /// sag comes only from weakness; the load reads Ymir's Mass, ContactCount, JointOrigin and Gravity, and a body in contact carries none. The binding holds no body numbers; the plan owns them.
+    /// sag comes only from weakness. Each body's weight is carried from the lowest common ancestor of it and every body it touches, and by
+    /// no joint when it touches anything outside this ragdoll: only a touch outside a joint's subtree supports that joint's load (ruling
+    /// gravity-support-subtree-external, superseding gravity-feedforward-count-gate). The load reads Ymir's Mass, Facts.Touching, JointOrigin and
+    /// Gravity. The binding holds no body numbers; the plan owns them.
     /// In a world with a particle system Build also places one liquid sensor per plan airway opening, and <see cref="ReadAirway"/> reads them.
     /// </summary>
     public sealed class Ragdoll
@@ -22,6 +25,9 @@ namespace Lodur.Body.Ymir
         private readonly MuscleGains[] _gains;
         // Subtree mass and mass-weighted position per part: scratch rebuilt every Drive, never read across ticks.
         private readonly float[] _mass, _momentX, _momentY, _momentZ;
+        // Depth in the plan's tree, fixed at construction, and the part each part's weight is deposited at (-1: carried from outside): the deposit is scratch rebuilt every Drive.
+        private readonly int[] _depth, _deposit;
+        private ulong _firstStableId;
 
         private Ragdoll(Box3DSoaWorld world, BodyPlan plan)
         {
@@ -36,6 +42,9 @@ namespace Lodur.Body.Ymir
             _momentX = new float[plan.Parts.Count];
             _momentY = new float[plan.Parts.Count];
             _momentZ = new float[plan.Parts.Count];
+            _depth = new int[plan.Parts.Count];
+            _deposit = new int[plan.Parts.Count];
+            for (var i = 1; i < _depth.Length; i++) _depth[i] = plan.ParentOf(i) < 0 ? 0 : _depth[plan.ParentOf(i)] + 1; // parent before child
         }
 
         /// <summary>The plan this ragdoll was built from.</summary>
@@ -57,6 +66,7 @@ namespace Lodur.Body.Ymir
         public static Ragdoll Build(Box3DSoaWorld world, BodyPlan plan, (float X, float Z) origin, ulong firstStableId)
         {
             var r = new Ragdoll(world, plan);
+            r._firstStableId = firstStableId;
             var ox = origin.X;
             var oz = origin.Z;
             for (var i = 0; i < plan.Parts.Count; i++)
@@ -113,9 +123,10 @@ namespace Lodur.Body.Ymir
         /// Writes this tick's muscle torques onto the world's torque lanes: for each joint a PD torque toward
         /// <paramref name="targets"/>[joint] (the child's rotation relative to the parent in the joint frame, whose z axis is a hinge's axis; a hinge has no swing gains, so it takes torque about that axis only) scaled by <paramref name="strengths"/>[joint], applied to the child
         /// and, equal and opposite, to the parent, plus the gravity feedforward: the torque about the joint origin that holds up the weight of the child's
-        /// subtree, except every body in contact with anything (a supported body, one lying or leaning, carries no load: ruling gravity-feedforward-count-gate),
-        /// times the strength and kept to the joint frame axes the muscle has gains for. A world with no gravity skips it. Both arrays are the caller's, one entry per plan joint;
-        /// nothing is copied or retained. Allocates nothing. Call once per step, before <c>world.Step</c>; the
+        /// subtree, except each body in it that touches something outside the subtree (the floor, an object, another body: ruling
+        /// gravity-support-subtree-external), times the strength and kept to the joint frame axes the muscle has gains for. A world with no gravity skips it.
+        /// Both arrays are the caller's, one entry per plan joint; nothing is copied or retained. Allocates nothing. Throws when the world dropped
+        /// touching pairs for want of fact capacity: a load from a partial list is wrong without a trace. Call once per step, before <c>world.Step</c>; the
         /// world clears the lanes when it applies them.
         /// </summary>
         public void Drive(ReadOnlySpan<float> strengths, ReadOnlySpan<Quat> targets)
@@ -143,14 +154,40 @@ namespace Lodur.Body.Ymir
             var (gx, gy, gz) = _world.Gravity;
             if (gx == 0f && gy == 0f && gz == 0f) return;
             var n = _mass.Length;
+            var facts = _world.Facts;
+            if (facts.Dropped.Touching > 0)
+            {
+                throw new InvalidOperationException("The world dropped touching pairs past its fact capacity; the gravity load needs every pair. Raise the world's fact capacity.");
+            }
+
+            for (var p = 0; p < n; p++) _deposit[p] = p;
+            foreach (var t in facts.Touching)
+            {
+                var a = PartOf(t.LaneA, t.StableIdA);
+                var b = PartOf(t.LaneB, t.StableIdB);
+                if (a >= 0 && b >= 0)
+                {
+                    if (_deposit[a] >= 0) _deposit[a] = CommonAncestor(_deposit[a], b);
+                    if (_deposit[b] >= 0) _deposit[b] = CommonAncestor(_deposit[b], a);
+                }
+                else if (a >= 0) _deposit[a] = -1;
+                else if (b >= 0) _deposit[b] = -1;
+            }
+
+            Array.Clear(_mass);
+            Array.Clear(_momentX);
+            Array.Clear(_momentY);
+            Array.Clear(_momentZ);
             for (var p = 0; p < n; p++)
             {
+                var d = _deposit[p];
+                if (d < 0) continue;
                 var b = _bodyLane[p];
-                var load = v.ContactCount[b] > 0 ? 0f : v.Mass[b];
-                _mass[p] = load;
-                _momentX[p] = load * v.PositionX[b];
-                _momentY[p] = load * v.PositionY[b];
-                _momentZ[p] = load * v.PositionZ[b];
+                var load = v.Mass[b];
+                _mass[d] += load;
+                _momentX[d] += load * v.PositionX[b];
+                _momentY[d] += load * v.PositionY[b];
+                _momentZ[d] += load * v.PositionZ[b];
             }
 
             for (var p = n - 1; p > 0; p--) // BodyPlan puts every parent before its child
@@ -185,6 +222,21 @@ namespace Lodur.Body.Ymir
                 v.TorqueX[child] += wx; v.TorqueY[child] += wy; v.TorqueZ[child] += wz;
                 v.TorqueX[parent] -= wx; v.TorqueY[parent] -= wy; v.TorqueZ[parent] -= wz;
             }
+        }
+
+        /// <summary>The plan part a touch end is, or -1 when the body is not this ragdoll's (its stable id is outside the range, or its lane is not the part's).</summary>
+        private int PartOf(int lane, ulong stableId)
+        {
+            var part = stableId - _firstStableId;
+            return stableId >= _firstStableId && part < (ulong)_bodyLane.Length && _bodyLane[(int)part] == lane ? (int)part : -1;
+        }
+
+        private int CommonAncestor(int a, int b)
+        {
+            while (_depth[a] > _depth[b]) a = Plan.ParentOf(a);
+            while (_depth[b] > _depth[a]) b = Plan.ParentOf(b);
+            while (a != b) { a = Plan.ParentOf(a); b = Plan.ParentOf(b); }
+            return a;
         }
 
         /// <summary>

@@ -275,10 +275,12 @@ public sealed class HandTests
 
     /// <summary>
     /// How far past its cone a hand joint may swing, at the geometric midpoint (deterministic-bound-margin) of the shipped worst and the least claimed mutant:
-    /// 0.0621 rad (wrist, seeds 1-3, four directions, both sides; 0.0557 thumb) against 0.6048 (the wrist added without its cone limit; the thumb reads 0.894), margin 3.1 each side.
-    /// The gravity feedforward lets the muscle press its full torque on Box3D's soft limit, which gives 0.0621 where the controller at e47e3d3 sagged off it (0.0587), and the old 0.06 bound.
+    /// 0.0684 rad (wrist, both sides, four directions; 0.0528 thumb) against 0.0970 (the wrist cone 0.03 rad wider than its plan; 0.0874 at 0.02, 0.1065 at 0.04, the cone limit off
+    /// 1.47), separation 1.42, margin 1.19 each side. The gravity feedforward lets the muscle press its full torque on Box3D's soft limit, which gives 0.0684 where the controller at
+    /// e47e3d3 sagged off it (0.0587; 0.0621 under the count gate at 63444f0, whose bound was 0.194 against the cone-less mutant 0.6048: three times looser than the old 0.06, a limit
+    /// 0.1 rad wider would have passed). Claiming a limit 1.7 degrees wide keeps the bound under 0.082 rad.
     /// </summary>
-    private const float ConeOvershoot = 0.194f;
+    private const float ConeOvershoot = 0.0815f;
 
     [Theory]
     [InlineData("Wrist", Side.Left, 1.0f)]

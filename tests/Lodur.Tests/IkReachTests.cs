@@ -106,12 +106,14 @@ public sealed class IkReachTests
     }
 
     /// <summary>
-    /// Gravity reach bound at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 3.97 cm over the three targets with the pelvis welded (3.01, 3.16, 3.97),
-    /// and the least claimed mutant, 24.01 cm (the feedforward off: 13.69, 10.16, 24.01): margin 2.46 each side. The controller no longer sags: zero gravity reads 0.89 cm here.
-    /// With the count gate off the shipped worst reads 0.89 cm: the right hand's thumb and fingers touch each other, so their weight leaves the arm's load (ruling
-    /// gravity-feedforward-count-gate, given up: self-contact counts as support; follow-up gravity-support-subtree-external).
+    /// Gravity reach bound at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 0.77 cm over the three targets with the pelvis welded (0.77, 0.16, 0.72),
+    /// and the least claimed mutant, 3.97 cm (the count gate, any touch carries the body's weight at no joint: 3.01, 3.16, 3.97): 1.75 cm, margin 2.27 each side, separation 5.2.
+    /// Also killed: a deposit at the touched body instead of the common ancestor, 5.84 cm; the feedforward off, 24.01 cm (13.69, 10.16, 24.01). Not claimed here: no gate at all reads
+    /// 0.89 cm and a touch outside the ragdoll ignored 0.77 cm, 1.16 and 1.00 times the shipped worst; the hand-rest tests in HandTests kill both. The controller no longer sags: zero
+    /// gravity reads 0.89 cm. Only a touch outside a joint's subtree supports it (ruling gravity-support-subtree-external), so the right hand's thumb on its fingers no longer lifts the arm's load.
+    /// At 63444f0 this bound was 9.76 cm, pinned to the count gate's own self-contact cost.
     /// </summary>
-    private const float GravityBound = 0.0976f;
+    private const float GravityBound = 0.0175f;
 
     [Fact]
     public void Gravity_reach_lands_the_wrist_at_full_strength()
@@ -129,11 +131,11 @@ public sealed class IkReachTests
     }
 
     /// <summary>
-    /// The least a half-strength arm sags at any target, at the geometric midpoint of the shipped least (13.38 cm; 20.31, 13.38, 25.01) and the least claimed mutant (1.47 cm:
-    /// the feedforward without its strength factor, which holds the weight up at half strength; 18.95, 5.47, 1.47): margin 3.0 each side. A weak will sags (strength 0.5 is
-    /// weakness, not the controller), and the feedforward off reads 22.45, 17.18, 38.77 there.
+    /// The least a half-strength arm sags at any target, at the geometric midpoint of the shipped least (13.85 cm; 19.00, 13.85, 22.79) and the least claimed mutant (0.88 cm:
+    /// the feedforward without its strength factor, which holds the weight up at half strength; 0.88, 0.89, 12.78): 3.49 cm, margin 3.97 each side. A weak will sags (strength 0.5 is
+    /// weakness, not the controller), and the feedforward off reads 22.45, 17.18, 38.77 there. At 63444f0 the bound was 4.43 cm (shipped least 13.38, mutant 1.47).
     /// </summary>
-    private const float WeakSag = 0.0443f;
+    private const float WeakSag = 0.0349f;
 
     [Fact]
     public void A_half_strength_arm_still_sags_under_gravity_at_every_target()

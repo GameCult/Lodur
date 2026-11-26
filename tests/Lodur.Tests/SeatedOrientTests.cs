@@ -57,14 +57,16 @@ public sealed class SeatedOrientTests
     private const float NearWardBound = 0.0576f;
 
     /// <summary>
-    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 6.00 cm, and the least claimed mutant, 15.52 cm (the via point
-    /// at the trunk front, clearance 0): margin 1.61 each side. Also killed: the gravity feedforward off, 18.68 cm (the controller's own sag, which was the shipped
-    /// worst before it, 18.68); the wrists sent sideways of the head, 33.87 cm; the via point's x at the midpoint, 29.77 cm; no spread, 28.38 cm; the arms at half weight, 54.60 cm.
-    /// Not killed: every reach solved directly, 7.20 cm. The bound at e47e3d3, before the feedforward, was 21.78 cm (shipped worst 18.68, least claimed mutant 25.41, the via
-    /// point's x at the midpoint). With the count gate off the shipped worst reads 7.59 cm: bodies in self-contact leave the arm's load
-    /// (ruling gravity-feedforward-count-gate, given up: self-contact counts as support). Not re-measured: spread halved and offset, and the clamped zero-twist swivel.
+    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 7.03 cm, and the least claimed mutant, 9.81 cm (the arm's path never
+    /// blocked by the trunk: 9.81 and 3.76 cm): 8.30 cm, margin 1.18 each side, separation 1.40. Also killed, re-measured under the subtree-external gate (ruling
+    /// gravity-support-subtree-external): the gravity feedforward off, 18.68 cm; no spread, 21.21 cm; the via point's x at the midpoint, 26.77 cm; the wrists sent sideways of
+    /// the head, 34.25 cm; the via point at the trunk front with clearance 0, 34.30 cm (15.52 at 63444f0, where the count gate left the arm lighter); the arms at half weight, 52.17 cm.
+    /// Not killed: every reach solved directly, 7.20 cm at 63444f0, not re-measured. The ward is not limited by gravity or by the gate: zero gravity reads 8.11 cm, the count gate
+    /// 6.00, no gate 7.59, the subtree-external gate 7.03, so the reading rests on the planner's own residual. At 63444f0 the bound was 9.65 cm (shipped worst 6.00, least claimed
+    /// mutant 15.52); the shipped reading rose to 7.03 and the path-never-blocked mutant, 9.81, is separated from it by 1.40, so it is claimed and the bound fell. The bound at e47e3d3, before the feedforward, was 21.78 cm (shipped worst 18.68, least claimed mutant
+    /// 25.41). Not re-measured: spread halved and offset, and the clamped zero-twist swivel.
     /// </summary>
-    private const float GravityWardBound = 0.0965f;
+    private const float GravityWardBound = 0.0830f;
 
     private readonly ITestOutputHelper _out;
 
