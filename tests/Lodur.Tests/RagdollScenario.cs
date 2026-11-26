@@ -15,12 +15,12 @@ internal sealed class RagdollScenario : IDisposable
     public readonly Quat[] Target;
     private int _steps;
 
-    public RagdollScenario(ulong seed)
+    public RagdollScenario(ulong seed, float gravityY = -10f)
     {
         var (bodies, joints, _) = Ragdoll.Needs(Plan);
         Strength = new float[Plan.Joints.Count];
         Target = new Quat[Plan.Joints.Count];
-        World = new Box3DSoaWorld(capacity: bodies + 1, jointCapacity: joints);
+        World = new Box3DSoaWorld(capacity: bodies + 1, gravityY: gravityY, jointCapacity: joints);
         World.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
         Ragdoll = Ragdoll.Build(World, Plan, (0f, 0f), firstStableId: 100);
         Array.Fill(Target, Quat.Identity);

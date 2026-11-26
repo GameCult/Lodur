@@ -89,11 +89,15 @@ public sealed class IkReachTests
     [Fact]
     public void Zero_gravity_reach_lands_the_wrist()
     {
+        // State hashes recorded at origin/main e47e3d3, before the gravity feedforward: in zero gravity Drive writes the PD torque only, so they never move.
+        var recorded = new ulong[] { 2780975657960733482ul, 1878696821643337211ul, 486659158273771449ul };
         var worst = 0f;
-        foreach (var offset in Targets)
+        for (var k = 0; k < Targets.Length; k++)
         {
-            var (error, _) = Reach(offset, gravity: 0f, weldPelvis: false);
-            _out.WriteLine($"zero gravity, offset {offset}: wrist error {error * 100f:F2} cm");
+            var offset = Targets[k];
+            var (error, hash) = Reach(offset, gravity: 0f, weldPelvis: false);
+            _out.WriteLine($"zero gravity, offset {offset}: wrist error {error * 100f:F2} cm, hash {hash}");
+            Assert.Equal(recorded[k], hash);
             worst = MathF.Max(worst, error);
             Assert.True(error < FreeBound, $"wrist error {error * 100f:F2} cm at {offset} exceeds {FreeBound * 100f:F1} cm");
         }
