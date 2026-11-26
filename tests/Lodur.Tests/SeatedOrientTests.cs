@@ -43,26 +43,26 @@ public sealed class SeatedOrientTests
 
     /// <summary>
     /// Without gravity, bound on each wrist's distance to its own ward goal after 2 s at the head-height sounds, metres: the geometric midpoint of the shipped
-    /// worst, 8.11 cm (the arm that the other sound's side blocks, on its via path), and the least claimed mutant, 13.25 cm (no spread: both wrists on the line).
-    /// Also killed: the wrists sent sideways of the head by the ward distance, 35.02 cm; the arms blended at half weight, 46.09 cm. Layers off reads the start,
+    /// worst, 8.11 cm (the arm that the other sound's side blocks, on its via path), and the least claimed mutant, 11.45 cm (the via point's x at the midpoint).
+    /// Also killed: no spread, 13.25 cm; the wrists sent sideways of the head by the ward distance, 35.02 cm; the arms blended at half weight, 46.09 cm. Layers off reads the start,
     /// 81.3 and 83.5 cm. Not re-measured: spread halved and offset, and the clamped zero-twist swivel (64.94 cm before the hand path), each far above the bound.
     /// </summary>
-    private const float WardBound = 0.1037f;
+    private const float WardBound = 0.0964f;
 
     /// <summary>
-    /// Without gravity, bound on the near (left) wrist's distance to its ward goal at the low sound, kept from the cut that set it, not loosened: shipped
-    /// 4.13 cm, then 4.34. Killed: the arms at half weight, 36.48 cm; sideways, 25.90 cm; the via point's x at the midpoint, 7.65 cm. Not killed: no spread reads
+    /// Without gravity, bound on the near (left) wrist's distance to its ward goal at the low sound, the geometric midpoint of the shipped worst, 4.34 cm,
+    /// and the least claimed mutant, 7.65 cm (the via point's x at the midpoint). Also killed: the arms at half weight, 36.48 cm; sideways, 25.90 cm; Not killed: no spread reads
     /// 2.95 cm, the look at half weight 5.01 cm, every reach solved directly 5.19 cm.
     /// </summary>
-    private const float NearWardBound = 0.0704f;
+    private const float NearWardBound = 0.0562f;
 
     /// <summary>
-    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 18.68 cm, and the least claimed mutant, 31.21 cm
-    /// (the wrists sent sideways of the head). Also killed: no spread, 34.79 cm; the arms at half weight, 62.17 cm; the via point's x at the midpoint, 25.41 cm. Not killed: the via point at the trunk front, 23.56 cm. The 11 to 13 cm over the zero-gravity case is
+    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 18.68 cm, and the least claimed mutant, 25.41 cm
+    /// (the via point's x at the midpoint). Also killed: the wrists sent sideways of the head, 31.21 cm; no spread, 34.79 cm; the arms at half weight, 62.17 cm. Not killed: the via point at the trunk front, 23.56 cm. The 11 to 13 cm over the zero-gravity case is
     /// the shoulder sagging under the arm's weight (swing 1.11 against a target of 1.50): follow-up lodur-gravity-feedforward. Not re-measured: spread halved
     /// and offset, and the clamped zero-twist swivel, each far above the bound before this cut.
     /// </summary>
-    private const float GravityWardBound = 0.2414f;
+    private const float GravityWardBound = 0.2178f;
 
     private readonly ITestOutputHelper _out;
 
