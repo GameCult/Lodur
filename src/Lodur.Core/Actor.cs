@@ -93,7 +93,7 @@ namespace Lodur
 
             if (_layered)
             {
-                _rig = new OrientRig(body!, brain);
+                _rig = new OrientRig(body!, brain, tickSeconds);
             }
 
             if (physiology != null && !physiology.TryBind())

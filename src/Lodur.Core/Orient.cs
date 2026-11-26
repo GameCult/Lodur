@@ -187,7 +187,8 @@ namespace Lodur
     /// <summary>
     /// The solvers an Actor's brain needs, resolved once from the body plan: the look chain when any goal looks, wards off or recoils (they read
     /// the head), an arm chain for each side an Arms layer can use. A chain the plan cannot give refuses at construction, naming the goal, so a
-    /// plan the closed form cannot solve fails at spawn and never mid-tick. Holds no per-tick state, and solving allocates nothing.
+    /// plan the closed form cannot solve fails at spawn and never mid-tick. The arm chains are the Actor's arms across ticks and hold each
+    /// arm's swivel from tick to tick (an arm not driven on a tick keeps its last one); the rig holds nothing else, and solving allocates nothing.
     /// </summary>
     internal sealed class OrientRig
     {
@@ -196,7 +197,7 @@ namespace Lodur
         private readonly ArmChain? _left;
         private readonly ArmChain? _right;
 
-        public OrientRig(BodyPlan plan, Brain brain)
+        public OrientRig(BodyPlan plan, Brain brain, double tickSeconds)
         {
             _plan = plan;
             foreach (var goal in brain.Goals)
@@ -223,22 +224,22 @@ namespace Lodur
                 {
                     if (_left == null && arms.Side != ArmSide.Right)
                     {
-                        _left = Arm(plan, goal.Id, Side.Left);
+                        _left = Arm(plan, goal.Id, Side.Left, tickSeconds);
                     }
 
                     if (_right == null && arms.Side != ArmSide.Left)
                     {
-                        _right = Arm(plan, goal.Id, Side.Right);
+                        _right = Arm(plan, goal.Id, Side.Right, tickSeconds);
                     }
                 }
             }
         }
 
-        private static ArmChain Arm(BodyPlan plan, string goal, Side side)
+        private static ArmChain Arm(BodyPlan plan, string goal, Side side, double tickSeconds)
         {
             try
             {
-                return ArmChain.Of(plan, side);
+                return ArmChain.Of(plan, side, tickSeconds);
             }
             catch (ArgumentException e)
             {

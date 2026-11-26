@@ -91,12 +91,39 @@ namespace Lodur
     /// Tolani, Goswami and Badler 2000). When no swivel is feasible, the swivel is the one whose limit violation (swing past the cone plus
     /// twist past its limits) is least, and its swing and twist clamp to the limits; as a goal leaves the feasible set that swivel is the
     /// last feasible one, so the targets move continuously across the edge.
+    /// <para>
+    /// That rule alone is the stateless rule, and mirrored options tie under it: where two swivels are equally good it must jump from one to
+    /// the other somewhere on the tie set. So a chain is one arm's solver across ticks and carries the arm's previous swivel (ruling
+    /// lodur:ruling:ik-swivel-temporal-coherence): each solve stays in the basin of the previous swivel and moves to the stateless choice only
+    /// when that is better by <see cref="BasinMargin"/>, never turning the swivel faster than <see cref="SwivelRate"/>. Better means less limit
+    /// violation, or, both swivels being feasible, less twist. The first solve after construction or <see cref="Reset"/> is the stateless rule.
+    /// Identical goals can therefore give different targets depending on history; the same history gives the same targets.
+    /// </para>
     /// </summary>
     public sealed class ArmChain
     {
         private readonly Quat _parentRestInverse, _frame, _frameInverse;
         private readonly IkVec _parentCentre, _shoulderAnchor, _upper, _lower, _elbowAxis, _twistAxis;
         private readonly float _flexSign, _flexLo, _flexHi, _cone, _twistLo, _twistHi, _coneSin2, _coneSinHalf, _coneCosHalf;
+        private readonly float _maxSwivelStep;
+
+        // The previous solve's shoulder target before clamping, whose swivel the next solve starts from; none after construction or Reset.
+        private Quat _previous;
+        private bool _hasPrevious;
+
+        /// <summary>
+        /// Radians of limit violation, or of twist when both swivels are feasible, by which the stateless choice must beat the held swivel's
+        /// basin before the arm leaves it. Placeholder: no measured pose cost sets it. It must sit far above the solver's resolution (about
+        /// 1e-5 rad), so noise cannot flip a tie, and well below the 1.0-1.57 rad between the mirrored basins Soul measured, so a clearly
+        /// better basin is taken.
+        /// </summary>
+        public const double BasinMargin = 0.05;
+
+        /// <summary>
+        /// The fastest the swivel turns, in radians per second. Placeholder: of the order of a deliberate, unhurried shoulder rotation, not a
+        /// measured one.
+        /// </summary>
+        public const float SwivelRate = 3f;
 
         // Swivel search: steps of Pi / SwivelSteps outward from the zero-twist swivel, then bisection to the feasible boundary. When none is
         // feasible, the least-violating of LeastSteps steps round the circle, refined by golden section.
@@ -109,8 +136,14 @@ namespace Lodur
         // Small against the violation's slope of about one, so it barely moves the least-violating swivel.
         private const double TwistPreference = 1e-5;
 
-        private ArmChain(BodyPlan plan, Side side)
+        private ArmChain(BodyPlan plan, Side side, double tickSeconds)
         {
+            if (!(double.IsFinite(tickSeconds) && tickSeconds > 0.0))
+            {
+                throw new ArgumentException($"the tick length {tickSeconds} s is not finite and positive.");
+            }
+
+            _maxSwivelStep = (float)(SwivelRate * tickSeconds);
             var si = plan.JointIndex("Shoulder", side);
             var ei = plan.JointIndex("Elbow", side);
             var wi = plan.JointIndex("Wrist", side);
@@ -164,7 +197,14 @@ namespace Lodur
         }
 
         /// <summary>Finds the shoulder, elbow and wrist of <paramref name="side"/> by label; <see cref="ArgumentException"/> if the plan has no such arm.</summary>
-        public static ArmChain Of(BodyPlan plan, Side side) => new ArmChain(plan, side);
+        /// <remarks>One chain is one arm's solver across ticks of <paramref name="tickSeconds"/>, which sets how far the swivel turns per solve.</remarks>
+        public static ArmChain Of(BodyPlan plan, Side side, double tickSeconds) => new ArmChain(plan, side, tickSeconds);
+
+        /// <summary>Forgets the previous swivel: the next solve uses the stateless rule.</summary>
+        public void Reset() => _hasPrevious = false;
+
+        /// <summary>The last solve's shoulder target before clamping, whose swivel the next solve holds (identity before any solve); tests read it.</summary>
+        internal Quat Held => _hasPrevious ? _previous : Quat.Identity;
 
         /// <summary>The plan's joint ordinals, where the caller writes the two targets.</summary>
         public int ShoulderJoint { get; }
@@ -185,7 +225,8 @@ namespace Lodur
         /// <summary>
         /// Targets that put the wrist anchor on the world point (tx, ty, tz), given the parent part's world rotation and position.
         /// Returns false when the point was out of reach or a limit clamped; the targets are then the limits-clamped pose of the swivel that
-        /// violates the limits least, continuous with the reached targets at the edge of the feasible set.
+        /// violates the limits least, continuous with the reached targets at the edge of the feasible set, or, while the swivel turns between
+        /// basins, the clamped pose of the swivel on its way. One call is one tick of the arm's history.
         /// </summary>
         public bool Solve(in Quat parentRotation, float px, float py, float pz, float tx, float ty, float tz, out Quat shoulder, out Quat elbow)
         {
@@ -213,11 +254,24 @@ namespace Lodur
             // The target is linear in the half-angle of the swivel: Local(phi) = cos(phi / 2) A + sin(phi / 2) B.
             var a = _frameInverse * arc * _frame;
             var b = _frameInverse * (new Quat(vHat.X, vHat.Y, vHat.Z, 0f) * arc) * _frame;
-            var local = Local(a, b, zeroTwist);
-            if (!InsideCone(local) && !(SomeSwivelInsideCone(a, b) && NearestFeasible(a, b, zeroTwist, out local)))
+            var phi = Stateless(a, b, zeroTwist, out var clamp);
+            if (_hasPrevious)
             {
-                // No swivel is feasible: the least-violating one, its swing and twist clamped to the limits.
-                local = ClampToLimits(Local(a, b, LeastViolating(a, b, zeroTwist)));
+                // The previous target's swivel on this goal's swivel circle: a and b are orthonormal, so the nearest point is a projection.
+                var held = 2f * MathF.Atan2(Dot(_previous, b), Dot(_previous, a));
+                var basin = BasinOptimum(a, b, zeroTwist, held);
+                var want = ClearlyBetter(a, b, phi, basin) ? phi : basin;
+                phi = held + Ik.Clamp(Wrap(want - held), -_maxSwivelStep, _maxSwivelStep);
+                clamp = !Feasible(Local(a, b, phi));
+            }
+
+            var local = Local(a, b, phi);
+            _previous = local;
+            _hasPrevious = true;
+            if (clamp)
+            {
+                // Infeasible: swing and twist clamped to the limits.
+                local = ClampToLimits(local);
                 reached = false;
             }
 
@@ -225,6 +279,67 @@ namespace Lodur
             elbow = Quat.FromAxisAngle(0f, 0f, 1f, flex);
             return reached;
         }
+
+        // The stateless rule: zero twist inside the cone, else the nearest feasible swivel, else the least-violating one (clamp set).
+        private float Stateless(in Quat a, in Quat b, float zeroTwist, out bool clamp)
+        {
+            clamp = false;
+            if (InsideCone(Local(a, b, zeroTwist))) return zeroTwist;
+            if (SomeSwivelInsideCone(a, b) && NearestFeasible(a, b, zeroTwist, out var feasible)) return feasible;
+            clamp = true;
+            return LeastViolating(a, b, zeroTwist);
+        }
+
+        // The best swivel of the held swivel's basin. When some swivel is feasible: from the held swivel, or the feasible one nearest it,
+        // toward zero twist while feasible. When none is: the least violation downhill from the held swivel.
+        private float BasinOptimum(in Quat a, in Quat b, float zeroTwist, float held)
+        {
+            if (SomeSwivelInsideCone(a, b))
+            {
+                if (Feasible(Local(a, b, held))) return TowardZeroTwist(a, b, zeroTwist, held);
+                if (NearestFeasible(a, b, held, out var start)) return TowardZeroTwist(a, b, zeroTwist, start);
+            }
+
+            return LocalLeastViolating(a, b, held);
+        }
+
+        // From the feasible swivel start toward the zero-twist swivel, the way twist shrinks: the zero-twist swivel if every step there is
+        // feasible, else the feasible boundary on the way.
+        private float TowardZeroTwist(in Quat a, in Quat b, float zeroTwist, float start)
+        {
+            var d = Wrap(start - zeroTwist);
+            if (d == 0f) return zeroTwist;
+            var dir = d > 0f ? -1f : 1f;
+            var dist = MathF.Abs(d);
+            const float step = MathF.PI / SwivelSteps;
+            var inside = start;
+            for (var k = 1; k <= SwivelSteps; k++)
+            {
+                var t = MathF.Min(k * step, dist);
+                var phi = start + dir * t;
+                if (!Feasible(Local(a, b, phi))) return Boundary(a, b, inside, phi);
+                if (t >= dist) return zeroTwist;
+                inside = phi;
+            }
+
+            return inside;
+        }
+
+        // Whether swivel x beats swivel y by the margin: less violation, or, both feasible, less twist.
+        private bool ClearlyBetter(in Quat a, in Quat b, float x, float y)
+        {
+            if (Violation(a, b, x) < Violation(a, b, y) - BasinMargin) return true;
+            var lx = Local(a, b, x);
+            var ly = Local(a, b, y);
+            return Feasible(lx) && Feasible(ly) && MathF.Abs(Twist(lx)) < MathF.Abs(Twist(ly)) - (float)BasinMargin;
+        }
+
+        private static float Twist(in Quat local) => 2f * MathF.Atan2(local.Z, local.W);
+
+        private static float Dot(in Quat p, in Quat q) => p.X * q.X + p.Y * q.Y + p.Z * q.Z + p.W * q.W;
+
+        // An angle difference into [-pi, pi]: the swivel's period is a full turn.
+        private static float Wrap(float x) => x - 2f * MathF.PI * MathF.Round(x / (2f * MathF.PI));
 
         // The shoulder target in the joint frame for the swivel phi, with w >= 0.
         private static Quat Local(in Quat a, in Quat b, float phi)
@@ -251,15 +366,28 @@ namespace Lodur
         private bool Feasible(in Quat local)
         {
             if (!InsideCone(local)) return false;
-            var twist = 2f * MathF.Atan2(local.Z, local.W);
+            var twist = Twist(local);
             return twist >= _twistLo && twist <= _twistHi;
+        }
+
+        // Bisection between a feasible and an infeasible swivel to the boundary; the feasible end.
+        private float Boundary(in Quat a, in Quat b, float inside, float outside)
+        {
+            for (var i = 0; i < SwivelBisections; i++)
+            {
+                var mid = 0.5f * (inside + outside);
+                if (Feasible(Local(a, b, mid))) inside = mid;
+                else outside = mid;
+            }
+
+            return inside;
         }
 
         // The feasible swivel nearest phi0: step outward both ways, and at the first step that lands inside, bisect back to the boundary;
         // of the two sides, the one with the smaller twist. False when no swivel is feasible.
-        private bool NearestFeasible(in Quat a, in Quat b, float phi0, out Quat local)
+        private bool NearestFeasible(in Quat a, in Quat b, float phi0, out float swivel)
         {
-            local = default;
+            swivel = 0f;
             const float step = MathF.PI / SwivelSteps;
             for (var k = 1; k <= SwivelSteps; k++)
             {
@@ -269,21 +397,12 @@ namespace Lodur
                 {
                     var phi = phi0 + sign * k * step;
                     if (!Feasible(Local(a, b, phi))) continue;
-                    var inside = phi;
-                    var outside = phi0 + sign * (k - 1) * step;
-                    for (var i = 0; i < SwivelBisections; i++)
-                    {
-                        var mid = 0.5f * (inside + outside);
-                        if (Feasible(Local(a, b, mid))) inside = mid;
-                        else outside = mid;
-                    }
-
-                    var candidate = Local(a, b, inside);
-                    var twist = MathF.Abs(2f * MathF.Atan2(candidate.Z, candidate.W));
+                    var inside = Boundary(a, b, phi, phi0 + sign * (k - 1) * step);
+                    var twist = MathF.Abs(Twist(Local(a, b, inside)));
                     if (twist < bestTwist)
                     {
                         bestTwist = twist;
-                        local = candidate;
+                        swivel = inside;
                         found = true;
                     }
                 }
@@ -334,9 +453,38 @@ namespace Lodur
                 }
             }
 
+            return Golden(a, b, best - step, best + step);
+        }
+
+        // The least-violating swivel of the held swivel's basin: downhill in steps of a LeastSteps-th of the circle while the violation
+        // falls, then golden section within a step either side.
+        private float LocalLeastViolating(in Quat a, in Quat b, float held)
+        {
+            const double step = 2.0 * Math.PI / LeastSteps;
+            var best = (double)held;
+            var least = Violation(a, b, best);
+            var up = Violation(a, b, best + step);
+            var down = Violation(a, b, best - step);
+            if (up < least || down < least)
+            {
+                var dir = up < down ? 1.0 : -1.0;
+                for (var k = 0; k < LeastSteps; k++)
+                {
+                    var next = best + dir * step;
+                    var v = Violation(a, b, next);
+                    if (v >= least) break;
+                    best = next;
+                    least = v;
+                }
+            }
+
+            return Golden(a, b, best - step, best + step);
+        }
+
+        // Golden-section search for the least violation on [lo, hi].
+        private float Golden(in Quat a, in Quat b, double lo, double hi)
+        {
             const double g = 0.6180339887498949;
-            var lo = best - step;
-            var hi = best + step;
             var p = hi - g * (hi - lo);
             var q = lo + g * (hi - lo);
             var fp = Violation(a, b, p);

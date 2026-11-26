@@ -69,7 +69,7 @@ public sealed class OrientTests
 
     private static Brain BrainOf(PoseBehaviour b) => new() { Goals = new[] { new GoalSpec { Id = "g", Behaviour = b } } };
 
-    private static OrientRig RigOf(PoseBehaviour b) => new(Plan, BrainOf(b));
+    private static OrientRig RigOf(PoseBehaviour b) => new(Plan, BrainOf(b), Dt);
 
     private static Percept At((float X, float Y, float Z) p, ulong id = 1) => new(id, Thing, p.X, p.Y, p.Z, 1.0, 0.0);
 
@@ -167,7 +167,7 @@ public sealed class OrientTests
         var t = parts[Torso];
         foreach (var s in new[] { Side.Left, Side.Right })
         {
-            var arm = ArmChain.Of(Plan, s);
+            var arm = ArmChain.Of(Plan, s, Dt);
             var used = side == ArmSide.Both || (side == ArmSide.Left) == (s == Side.Left);
             if (used)
             {
@@ -220,8 +220,8 @@ public sealed class OrientTests
         var meet = Add(head, (u.X * distance, u.Y * distance, u.Z * distance));
         var t = parts[Torso];
         var leftAxis = Rot(t.Rotation * Plan.Parts[Torso].Rotation.Conjugate(), (1f, 0f, 0f));
-        var wristL = Wrist(ArmChain.Of(Plan, Side.Left), t, Unflinch(got, Side.Left, out var elL), elL);
-        var wristR = Wrist(ArmChain.Of(Plan, Side.Right), t, Unflinch(got, Side.Right, out var elR), elR);
+        var wristL = Wrist(ArmChain.Of(Plan, Side.Left, Dt), t, Unflinch(got, Side.Left, out var elL), elL);
+        var wristR = Wrist(ArmChain.Of(Plan, Side.Right, Dt), t, Unflinch(got, Side.Right, out var elR), elR);
         Assert.True(Len(Sub(wristL, meet)) < spread + 1e-3f, $"left wrist {Len(Sub(wristL, meet))} m from the meeting point");
         Assert.True(Len(Sub(wristR, meet)) < spread + 1e-3f, $"right wrist {Len(Sub(wristR, meet))} m from the meeting point");
         // Either side of the line, the left toward the torso's left: the across sign is what separates these from each other.
@@ -234,7 +234,7 @@ public sealed class OrientTests
     // The targets the layer wrote for one arm (the flinch blend is zero here, so they are the solution).
     private static Quat Unflinch(Quat[] targets, Side side, out Quat elbow)
     {
-        var arm = ArmChain.Of(Plan, side);
+        var arm = ArmChain.Of(Plan, side, Dt);
         elbow = targets[arm.ElbowJoint];
         return targets[arm.ShoulderJoint];
     }
@@ -248,8 +248,8 @@ public sealed class OrientTests
         var with = Run(b, parts, At((3f, 1f, -2f)));
         for (var m = 0; m < Joints; m++) SameBits(without[m], with[m]);
         var t = parts[Torso];
-        var wl = Wrist(ArmChain.Of(Plan, Side.Left), t, Unflinch(with, Side.Left, out var el), el);
-        var wr = Wrist(ArmChain.Of(Plan, Side.Right), t, Unflinch(with, Side.Right, out var er), er);
+        var wl = Wrist(ArmChain.Of(Plan, Side.Left, Dt), t, Unflinch(with, Side.Left, out var el), el);
+        var wr = Wrist(ArmChain.Of(Plan, Side.Right, Dt), t, Unflinch(with, Side.Right, out var er), er);
         Assert.True(MathF.Abs(wr.X - -0.2f) < 2e-3f && MathF.Abs(wr.Y - 1.3f) < 2e-3f && MathF.Abs(wr.Z - 0.3f) < 2e-3f, $"right wrist {wr}");
         Assert.True(MathF.Abs(wl.X + wr.X) < 1e-4f && MathF.Abs(wl.Y - wr.Y) < 1e-4f && MathF.Abs(wl.Z - wr.Z) < 1e-4f, $"left {wl} does not mirror right {wr}");
     }
@@ -323,7 +323,7 @@ public sealed class OrientTests
 
         var t = parts[Torso];
         LookChain.Of(Plan).Solve(t.Rotation, t.X, t.Y, t.Z, target.X, target.Y, target.Z, out var neck);
-        var arm = ArmChain.Of(Plan, Side.Right);
+        var arm = ArmChain.Of(Plan, Side.Right, Dt);
         var p = parts[arm.ParentPart];
         arm.Solve(p.Rotation, p.X, p.Y, p.Z, target.X, target.Y, target.Z, out var shoulder, out var elbow);
         for (var m = 0; m < Joints; m++)

@@ -258,7 +258,14 @@ gives up is an authored elbow direction. Where that swivel leaves the cone, the 
 the cone and the twist limits, the feasible swivel range of Tolani, Goswami and Badler (2000) (fact 8). When no
 swivel is feasible, the swivel is the one whose limit violation (swing past the cone plus twist past its range) is
 least, with swing and twist clamped to the limits: at the edge of the feasible set that is the last feasible swivel,
-so a goal crossing the edge moves the targets continuously (the zero-twist clamp it replaces jumped 1.4 rad there). Reach under gravity lands short by PD sag (fact 9); that is its own cut.
+so a goal crossing the edge moves the targets continuously (the zero-twist clamp it replaces jumped 1.4 rad there).
+That choice is stateless, and mirrored swivels tie under it (at the shoulder's sagittal plane, unreached or reached),
+so it must jump somewhere on the tie set. Ruling `ik-swivel-temporal-coherence` makes each `ArmChain` the arm's solver
+across ticks: it holds the previous swivel's basin, takes the stateless choice only when that is better by
+`BasinMargin` (less violation, or less twist when both are feasible), and turns the swivel no faster than
+`SwivelRate`; the first solve after construction or `Reset` is stateless. Both constants are placeholders. What it
+gives up: IK is no longer a pure function of the goal. Not covered: near a half-turn swing the swing-twist split in
+the clamp is singular, so the clamped target can still jump while the held swivel moves smoothly. Reach under gravity lands short by PD sag (fact 9); that is its own cut.
 
 **Goal-target rationale.** A target is tracked by percept Id (fact 11), selection scores (goal, percept) pairs,
 and a retarget inside the goal waits the deliberate latency but not the dwell, held only by the commitment

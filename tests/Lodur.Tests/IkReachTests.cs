@@ -22,7 +22,8 @@ public sealed class IkReachTests
     /// <summary>
     /// Wrist error bound at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 2.98 cm over the three free-floating targets
     /// (probe 3.0, 2.3, 1.0 cm), and the least claimed mutant, 4.78 cm (the parent rotation conjugate dropped in the creation-frame transform): margin 1.27 each side.
-    /// Also killed: swing order flipped, 5.22 cm; the joint frame applied the wrong way round, 5.58 cm. A flipped elbow flex reads 33 cm.
+    /// Also killed: swing order flipped, 5.29 cm (5.22 before the arm held its swivel across ticks); the joint frame applied the wrong way round,
+    /// 5.58 cm. A flipped elbow flex reads 33 cm.
     /// Twist is not this metric's mutant (the arm tracks twist weakly); the Core twist test claims it.
     /// </summary>
     private const float FreeBound = 0.0377f;
@@ -39,7 +40,7 @@ public sealed class IkReachTests
             world.AddJoint(Box3DSoaJointKind.Weld, stool, ragdoll.BodyLane(Plan.PartIndex("Pelvis")), (0f, 1.11f, -0.09f), (0f, 1f, 0f));
         }
 
-        var arm = ArmChain.Of(Plan, Side.Right);
+        var arm = ArmChain.Of(Plan, Side.Right, Dt);
         var strength = new float[Plan.Joints.Count];
         var target = new Quat[Plan.Joints.Count];
         Array.Fill(strength, 1f);
