@@ -375,7 +375,6 @@ namespace Lodur
                     _pending = wanted.Goal;
                     _pendingTarget = wanted.Target;
                     _switchTick = _tick + _latency;
-                    _deliberation?.Adopt();
                 }
                 else if (_deliberation != null)
                 {
@@ -401,8 +400,7 @@ namespace Lodur
                 _rig?.Commit();
                 if (_deliberation != null)
                 {
-                    _deliberation.Commit();
-                    planned = true;
+                    _deliberation.Refresh();   // the pending decision's plan, made up to a latency ago: checked below like any carried plan
                 }
 
                 if (_layered && _brain.Goals[_goal].Behaviour.Arms is { Side: ArmSide.Nearer } && _target != 0UL)

@@ -212,8 +212,8 @@ in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; er
     13.3 ms); `Actor.Tick` over a utility-only Brain, extra 441 us at depth 4 and 924 us at depth 6, the difference
     from Select being the committed pair's plan, a second Plan call with the full budget every tick. A grounding costs
     about 0.1-0.2 us. Deepening across pairs, with the plan made by the Select that chooses the pair and carried with
-    it, as built: decisions that differ are 0 of 100 at 48 things at depths 4, 5, 6, 7 and 8, and 2 of 100 at 64 things
-    at depths 4-8. Paired interleaved medians, 48 things, budget 4096, net10 Release: `Brain.Select` 206, 205 and 206 us at depths 4, 6 and 8
+    it, as built: decisions that differ are a rate, about 0.5% at 48 things and 3% at 64, at every depth (400 seeds, 5000-5399: 1 and 11;
+    seeds 0-399: 1 and 13; seeds 9000-9399: 3 and 23; the first 100 seeds gave 0 and 2, a property of those seeds). Paired interleaved medians, 48 things, budget 4096, net10 Release: `Brain.Select` 206, 205 and 206 us at depths 4, 6 and 8
     (unbounded 205, 208, 206; a Select spends 1592 groundings at the median, 4096 at most), `Actor.Tick` extra over a
     utility-only Brain 68 us at depth 4 and 79 us at depth 6: a tick spends at most one `ThinkBudget`. At depth 4 the move rule's plan cost
     is about 2x on movers and 1.0x elsewhere (Soul s1 on `lodur-planner-moves`, paired medians, 6 wants); the budget

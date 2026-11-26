@@ -378,6 +378,12 @@ public sealed class PlannerSelectTests
         // The door is sensed unlocked while the Select re-chooses the pair: the plan shortens the same tick.
         Run(a, 1, new[] { PlainDoor(1) });
         Assert.Equal(2, a.PlanLength);
+        var shorter = new PlanStep[4];
+        Assert.Equal(2, probe.Plan(See(8, PlainDoor(1)), 0UL, 0f, 0f, 0f, 0, This(Open), 4, shorter));
+        for (var i = 0; i < 2; i++)
+        {
+            Assert.Equal(shorter[i], a.PlanStep(i));   // the re-chosen pair's new steps, not the old ones under a new length
+        }
         // The door is seen open: the pair is no longer offered and the switch is pending, so this tick only checks the plan, and the want holds.
         Run(a, 1, new[] { Thing(1, Door, 6f, 1UL << Open) });
         Assert.Equal(1, a.GoalIndex);
@@ -443,6 +449,179 @@ public sealed class PlannerSelectTests
         Assert.Equal(-1, b.PlanLength);
         Run(b, 1, new[] { Thing(1, Door, 6f, 1UL << Open), Thing(2, Knife, 0.3f) });
         Assert.Equal(0, b.PlanLength);
+    }
+
+    [Fact]
+    public void The_pending_plan_is_checked_on_the_tick_it_takes_force()
+    {
+        // The door is seen on the first tick only and forgotten (0.06 s) before the decision commits (10 ticks): the plan the Select made takes force, and is checked that tick.
+        var brain = new Brain { PlanDepth = 4, Goals = new[] { Goal("idle", 1.0), Goal("open", 3.0, Kinds(Door), This(Open)) } };
+        var a = Build(brain, memory: 0.06);
+        Run(a, 1, new[] { BoltedDoor(1) });
+        var committed = false;
+        for (var i = 0; i < 20 && !committed; i++)
+        {
+            Run(a, 1, Array.Empty<Emitter>());
+            if (a.GoalIndex == 1)
+            {
+                committed = true;
+                Assert.Equal(0, a.PlanLength);   // its target has left memory
+            }
+        }
+
+        Assert.True(committed);
+    }
+
+    [Fact]
+    public void A_refused_select_that_exhausts_its_leftover_budget_keeps_the_plan_in_force()
+    {
+        Brain Make(int budget) => new()
+        {
+            PlanDepth = 4, ThinkBudget = budget,
+            Goals = new[]
+            {
+                Goal("idle", 0.5),
+                Goal("open", 3.0, Kinds(Door), This(Open), Shorter()) with { MinDwellSeconds = 50.0 },
+                Goal("grab", 3.0, Kinds(Knife), This(Held), Shorter()),
+            },
+        };
+
+        var planned = 0;
+        for (var budget = 1; budget <= 60; budget++)
+        {
+            var a = Build(Make(budget));
+            Run(a, Settle, new[] { BoltedDoor(1) });
+            var before = a.PlanLength;
+            Run(a, 1, new[] { BoltedDoor(1), Thing(2, Knife, 0.3f) });
+            var refused = a.PlanLength;
+            Run(a, 1, new[] { BoltedDoor(1), Thing(2, Knife, 0.3f) });
+            if (before == 4)
+            {
+                // Unchanged percepts: a valid plan is never replaced by a search that ran out.
+                Assert.Equal(1, a.GoalIndex);
+                Assert.Equal(4, refused);
+                Assert.Equal(4, a.PlanLength);
+                planned++;
+            }
+        }
+
+        Assert.True(planned > 20);
+        foreach (var budget in new[] { 28, 29 })
+        {
+            var a = Build(Make(budget));
+            Run(a, Settle, new[] { BoltedDoor(1) });
+            Assert.Equal(4, a.PlanLength);
+        }
+    }
+
+    [Fact]
+    public void A_refused_select_checks_the_plan_in_force_against_a_forgotten_target()
+    {
+        var brain = new Brain
+        {
+            PlanDepth = 4,
+            Goals = new[]
+            {
+                Goal("idle", 0.5),
+                Goal("open", 3.0, Kinds(Door), This(Open), Shorter()) with { MinDwellSeconds = 50.0 },
+                Goal("grab", 3.0, Kinds(Knife), This(Held), Shorter()),
+            },
+        };
+        var a = Build(brain, memory: 0.06);
+        Run(a, Settle, new[] { BoltedDoor(1) });
+        Assert.Equal(4, a.PlanLength);
+        // The door goes and a knife comes: the Select would switch, the dwell refuses it, and the plan in force has no target to act on.
+        Run(a, 20, new[] { Thing(2, Knife, 0.3f) });
+        Assert.Equal(1, a.GoalIndex);
+        Assert.Equal(0, a.PlanLength);
+    }
+
+    [Fact]
+    public void A_carried_plan_goes_direct_when_a_step_s_tool_is_forgotten()
+    {
+        const uint Strap = 5, Other = 7;
+        var verbs = new[]
+        {
+            new Verb { Id = "Approach", Gives = new[] { This(Reach) } },
+            new Verb { Id = "Grab", This = Kinds(Knife), Needs = new[] { This(Reach) }, Gives = new[] { This(Held) } },
+            new Verb { Id = "Cut", This = Kinds(Strap), Tool = Kinds(Knife), Needs = new[] { Tool(Held), This(Reach) }, Gives = new[] { This(Open) } },
+        };
+        var brain = new Brain
+        {
+            PlanDepth = 6, ReachMeters = 1.0,
+            Goals = new[] { Goal("idle", 0.5), Goal("free", 2.0, Kinds(Strap), This(Open), Shorter()), Goal("other", 3.0, Kinds(Other)) },
+        };
+        var a = Build(brain, memory: 0.06, verbs: verbs);
+        var room = new[] { Thing(1, Strap, 0.3f), Thing(2, Knife, 5f, 1UL << Held) };   // the knife is already held: the tool appears in one step only, as its Tool
+        Run(a, Settle, room);
+        Assert.Equal(1, a.GoalIndex);
+        Assert.True(a.PlanLength > 0);
+        var tooled = false;
+        for (var i = 0; i < a.PlanLength; i++)
+        {
+            tooled |= a.PlanStep(i).Tool != 0UL;
+        }
+
+        Assert.True(tooled);
+
+        // Something outranks the goal; while that decision is in flight the knife is forgotten and the strap is not.
+        Run(a, 1, new[] { room[0], room[1], Thing(3, Other, 4f) });
+        var lengths = new HashSet<int>();
+        for (var i = 0; i < 9; i++)
+        {
+            Run(a, 1, new[] { room[0], Thing(3, Other, 4f) });
+            if (a.GoalIndex == 1)
+            {
+                lengths.Add(a.PlanLength);
+            }
+        }
+
+        Assert.Contains(-1, lengths);
+    }
+
+    [Fact]
+    public void A_self_goal_s_plan_is_shared_with_its_later_pairs_after_the_budget_is_gone()
+    {
+        var percepts = See(4, Thing(1, Knife, 5f), Thing(2, Knife, 3f), Thing(3, Door, 6f, (1UL << Locked) | (1UL << Latched)));
+        var goals = new[] { Goal("idle", 0.5), Goal("calm", 3.0, Kinds(Knife), Self(Fed), Shorter()), Goal("open", 2.0, Kinds(Door), This(Open), Shorter()) };
+        var rich = new Brain { PlanDepth = 4, Goals = goals };
+        var d = new Deliberation(rich, Catalogue(), 4);
+        d.Begin(percepts, 0f, 0f, 0f);
+        Assert.Equal(0, d.PlanAt(1, Self(Fed), 0, 1));
+        Assert.Equal(2, d.PlanAt(1, Self(Fed), 0, 2));
+        var found = d.Spent;
+
+        // The budget is exactly what the Self want's search cost: another goal's pair finds none left, and the Self goal's second pair still takes the plan found.
+        var poor = rich with { ThinkBudget = found };
+        var d2 = new Deliberation(poor, Catalogue(), 4);
+        d2.Begin(percepts, 0f, 0f, 0f);
+        Assert.Equal(0, d2.PlanAt(1, Self(Fed), 0, 1));
+        Assert.Equal(2, d2.PlanAt(1, Self(Fed), 0, 2));
+        Assert.Equal(-1, d2.PlanAt(2, This(Open), 2, 1));       // gone
+        Assert.Equal(-1, d2.PlanAt(2, This(Open), 2, 2));       // and it stays gone
+        Assert.Equal(2, d2.PlanAt(1, Self(Fed), 1, 2));         // shared at no cost
+        Assert.Equal(found, d2.Spent);
+    }
+
+    [Fact]
+    public void A_kept_self_plan_is_not_overwritten_by_another_goal_s_search()
+    {
+        var percepts = See(4, Thing(1, Knife, 5f), Thing(3, Door, 6f));
+        var brain = new Brain { PlanDepth = 4, Goals = new[] { Goal("idle", 0.5), Goal("calm", 3.0, Kinds(Knife), Self(Fed), Shorter()), Goal("open", 2.0, Kinds(Door), This(Open), Shorter()) } };
+        var d = new Deliberation(brain, Catalogue(), 4);
+        d.Begin(percepts, 0f, 0f, 0f);
+        Assert.Equal(0, d.PlanAt(1, Self(Fed), 0, 1));
+        Assert.Equal(2, d.PlanAt(1, Self(Fed), 0, 2));
+        Assert.Equal(0, d.PlanAt(2, This(Open), 1, 1));
+        Assert.Equal(2, d.PlanAt(2, This(Open), 1, 2));          // the planner's last plan is now the door's: approach, open
+        d.KeepBest(1, 2, true);
+        d.Refresh();
+        var probe = new Planner(Catalogue(), 4, 4, 0.6);
+        var expected = new PlanStep[4];
+        Assert.Equal(2, probe.Plan(percepts, 0UL, 0f, 0f, 0f, 0, Self(Fed), 4, expected));
+        Assert.Equal(2, d.InForceLength);
+        Assert.Equal(expected[0], d.Step(0));
+        Assert.Equal(expected[1], d.Step(1));
     }
 
     [Fact]
@@ -641,10 +820,10 @@ public sealed class PlannerSelectTests
         },
     };
 
-    private static int Differing(int things, int depth, int seeds)
+    private static int Differing(int things, int depth, int firstSeed, int seeds)
     {
         var differ = 0;
-        for (var seed = 0; seed < seeds; seed++)
+        for (var seed = firstSeed; seed < firstSeed + seeds; seed++)
         {
             var rng = new Random(seed);
             var (p, verbs, _) = Crowd(rng, things);
@@ -689,13 +868,16 @@ public sealed class PlannerSelectTests
     [Fact]
     public void A_crowded_room_changes_few_decisions()
     {
+        // A rate, not a bound, and it is depth-independent: a bounded budget changes 1 of 400 decisions at 48 things and 11 of 400 at 64 (seeds 5000-5399; seeds 0-399 give 1 and 13,
+        // seeds 9000-9399 give 3 and 23). The seeds are fixed so the counts are exact; the ceilings sit well above every range measured, so the pin is a margin, not one seed set.
         foreach (var depth in new[] { 4, 5, 6, 8 })
         {
-            Assert.Equal(0, Differing(48, depth, 100));
+            Assert.InRange(Differing(48, depth, 5000, 400), 0, Differ48Of400Max);
         }
 
-        Assert.Equal(CrowdedDepth6At64Differing, Differing(64, 6, 100));
+        Assert.InRange(Differing(64, 6, 5000, 400), 0, Differ64Of400Max);
     }
 
-    private const int CrowdedDepth6At64Differing = 2;
+    private const int Differ48Of400Max = 8;     // 2%: above 3 of 400, the worst of three ranges
+    private const int Differ64Of400Max = 40;    // 10%: above 23 of 400, the worst of three ranges
 }
