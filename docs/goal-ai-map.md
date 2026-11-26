@@ -361,7 +361,10 @@ shoulder and elbow targets move toward the solution no faster than `MaxAngularRa
 arm speed), everywhere, and the singular-band special case is deleted. What that gives up: a leaping goal is followed
 at the rate, not at once. The slew holds across the hand-off too (cut `lodur-reach-path`, fact 27): an arm that engages
 slews from the base pose, one the layer stops driving slews back to it, and `OrientRig.Compose` runs on every tick of an
-Actor with a rig, so the written arm targets move at most `MaxAngularRate` times the tick throughout. Reach under gravity
+Actor with a rig, so the arm layer's own contribution to the written arm targets moves at most `MaxAngularRate` times the tick across engage
+and disengage while the base pose is constant. A goal switch to a different key pose steps the base itself, and the written arm targets
+with it by the base difference (0.2-0.4 rad measured at weights 0.2-0.5), as every other joint's target steps by its key difference;
+that step is not slewed. Reach under gravity
 lands short by PD sag (facts 9, 23); that is follow-up `lodur-gravity-feedforward`.
 
 **Reach rationale (pass `reach-tracking-map`, ruling `reach-clears-body-by-via-point`).** One owner of an arm's motion
