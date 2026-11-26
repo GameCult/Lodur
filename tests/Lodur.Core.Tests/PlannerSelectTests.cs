@@ -361,6 +361,20 @@ public sealed class PlannerSelectTests
             Assert.Equal(expected[i], a.PlanStep(i));
         }
 
+        // The pending plan becomes the plan in force on the tick the decision commits, before any later Select could make it again.
+        var c = Build(brain);
+        for (var i = 0; i < 60 && c.GoalIndex != 1; i++)
+        {
+            Run(c, 1, new[] { BoltedDoor(1) });
+        }
+
+        Assert.Equal(1, c.GoalIndex);
+        Assert.Equal(4, c.PlanLength);
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.Equal(expected[i], c.PlanStep(i));
+        }
+
         // The door is sensed unlocked while the Select re-chooses the pair: the plan shortens the same tick.
         Run(a, 1, new[] { PlainDoor(1) });
         Assert.Equal(2, a.PlanLength);
