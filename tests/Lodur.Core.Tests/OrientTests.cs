@@ -308,6 +308,35 @@ public sealed class OrientTests
     }
 
     [Fact]
+    public void Recoil_applies_before_look_and_arms_so_a_partial_look_or_reach_blends_from_the_recoiled_pose()
+    {
+        var recoil = Recoiling();
+        var b = Behaviour(new LookLayer { Weight = 0.5 }, new ArmLayer { Mode = ArmMode.Reach, Side = ArmSide.Right, Weight = 0.5 }, recoil);
+        var parts = Rest();
+        var target = Bearing(0.5f, 0.5f);
+        var got = Run(b, parts, At(target));
+
+        var depth = (float)recoil.Proximity.Response(0.5);
+        var key = Key();
+        var recoiled = new Quat[Joints];
+        for (var m = 0; m < Joints; m++) recoiled[m] = Quat.Nlerp(Quat.Nlerp(key[m], recoil.Left[m], depth * 0.75f), recoil.Right[m], depth * 0.25f);
+
+        var t = parts[Torso];
+        LookChain.Of(Plan).Solve(t.Rotation, t.X, t.Y, t.Z, target.X, target.Y, target.Z, out var neck);
+        var arm = ArmChain.Of(Plan, Side.Right);
+        var p = parts[arm.ParentPart];
+        arm.Solve(p.Rotation, p.X, p.Y, p.Z, target.X, target.Y, target.Z, out var shoulder, out var elbow);
+        for (var m = 0; m < Joints; m++)
+        {
+            var want = m == Neck ? Quat.Nlerp(recoiled[m], neck, 0.5f)
+                : m == arm.ShoulderJoint ? Quat.Nlerp(recoiled[m], shoulder, 0.5f)
+                : m == arm.ElbowJoint ? Quat.Nlerp(recoiled[m], elbow, 0.5f)
+                : recoiled[m];
+            Same(want, got[m], 1e-5f);
+        }
+    }
+
+    [Fact]
     public void The_flinch_applies_after_the_layers_and_strength_stays_the_pose_rule()
     {
         var parts = Rest();
