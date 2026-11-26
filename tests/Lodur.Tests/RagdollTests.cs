@@ -170,17 +170,64 @@ public sealed class RagdollTests
     [Fact]
     public void A_hinge_takes_torque_about_its_own_axis_only_and_a_ball_joint_takes_any()
     {
+        // The gravity feedforward is the same under either target, so what differs is the PD term alone: the hinge turns what it can (its target's off-axis part changes nothing,
+        // bit for bit) and the ball joint takes the swing it is told.
         using var s = new RagdollScenario(seed: 1);
         Array.Clear(s.Strength);
-        var offAxis = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f); // about the joint frame's x: not the hinge axis (z)
-        s.Target[s.Plan.JointIndex("Elbow", Side.Left)] = offAxis;
-        s.Target[s.Plan.JointIndex("Hip", Side.Left)] = offAxis;
-        s.Strength[s.Plan.JointIndex("Elbow", Side.Left)] = 1f;
-        s.Strength[s.Plan.JointIndex("Hip", Side.Left)] = 1f;
+        var elbow = s.Plan.JointIndex("Elbow", Side.Left);
+        var hip = s.Plan.JointIndex("Hip", Side.Left);
+        var forearm = s.Plan.PartIndex("LowerArm", Side.Left);
+        var thigh = s.Plan.PartIndex("Thigh", Side.Left);
+        s.Strength[elbow] = 1f;
+        s.Strength[hip] = 1f;
+        (float X, float Y, float Z) Torque(int part) { var v = s.World.View; var i = s.Ragdoll.BodyLane(part); return (v.TorqueX[i], v.TorqueY[i], v.TorqueZ[i]); }
+
+        s.Target[elbow] = Quat.Identity;
+        s.Target[hip] = Quat.Identity;
         ClearTorques(s);
         s.Ragdoll.Drive(s.Strength, s.Target);
-        Assert.Equal(0f, TorqueNorm(s, s.Plan.PartIndex("LowerArm", Side.Left)));  // the hinge ignores what it cannot turn
-        Assert.True(TorqueNorm(s, s.Plan.PartIndex("Thigh", Side.Left)) > 1f);     // the ball joint does not
+        var straightForearm = Torque(forearm);
+        var straightThigh = Torque(thigh);
+
+        var offAxis = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f); // about the joint frame's x: not the hinge axis (z)
+        s.Target[elbow] = offAxis;
+        s.Target[hip] = offAxis;
+        ClearTorques(s);
+        s.Ragdoll.Drive(s.Strength, s.Target);
+        Assert.Equal(straightForearm, Torque(forearm)); // the hinge ignores what it cannot turn
+        var t = Torque(thigh);
+        var change = MathF.Sqrt((t.X - straightThigh.X) * (t.X - straightThigh.X) + (t.Y - straightThigh.Y) * (t.Y - straightThigh.Y) + (t.Z - straightThigh.Z) * (t.Z - straightThigh.Z));
+        Assert.True(change > 1f, $"the ball joint's thigh torque moved {change} N m"); // the ball joint does not
+    }
+
+    [Fact]
+    public void The_gravity_feedforward_on_a_hinge_acts_about_its_axis_only()
+    {
+        // A forearm held out of the vertical (shoulder raised, elbow bent, everything at full strength for 1 s), then only the elbow strong: the load's torque about the elbow
+        // is not zero there, and what the forearm gets is along the elbow's axis, though the load's own torque is not (the hinge has twist gains only).
+        using var s = new RagdollScenario(seed: 1);
+        var shoulder = s.Plan.JointIndex("Shoulder", Side.Left);
+        var elbow = s.Plan.JointIndex("Elbow", Side.Left);
+        s.Target[shoulder] = Quat.FromAxisAngle(1f, 0f, 0f, -1.2f);
+        s.Target[elbow] = Quat.FromAxisAngle(0f, 0f, 1f, 0.8f);
+        s.Run(1f);
+        var forearm = s.Plan.PartIndex("LowerArm", Side.Left);
+        Array.Clear(s.Strength);
+        ClearTorques(s);
+        s.Ragdoll.Drive(s.Strength, s.Target);
+        var v = s.World.View;
+        var i = s.Ragdoll.BodyLane(forearm);
+        var (x0, y0, z0) = (v.TorqueX[i], v.TorqueY[i], v.TorqueZ[i]); // the wrist's and the elbow's tissue damping alone, which the difference below removes
+        s.Strength[elbow] = 1f;
+        ClearTorques(s);
+        s.Ragdoll.Drive(s.Strength, s.Target);
+        var (dx, dy, dz) = (v.TorqueX[i] - x0, v.TorqueY[i] - y0, v.TorqueZ[i] - z0);
+        var j = s.Ragdoll.JointLane(elbow);
+        new Quat(v.JointFrameX[j], v.JointFrameY[j], v.JointFrameZ[j], v.JointFrameW[j]).Rotate(0f, 0f, 1f, out var ax, out var ay, out var az);
+        var total = MathF.Sqrt(dx * dx + dy * dy + dz * dz);
+        var along = dx * ax + dy * ay + dz * az;
+        Assert.True(total > 0.5f, $"the held-out forearm gets {total} N m");
+        Assert.True(MathF.Abs(along) > total * 0.99999f, $"{total} N m on the forearm, {along} of it along the elbow axis");
     }
 
     /// <summary>

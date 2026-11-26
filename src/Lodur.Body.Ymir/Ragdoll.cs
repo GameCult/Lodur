@@ -8,7 +8,9 @@ namespace Lodur.Body.Ymir
     /// in plan order, the stable id firstStableId + part ordinal, the limb lane the part ordinal, the parent lane the lane of the part's
     /// parent in the plan. The game owns the physics world: Build adds bodies to the caller's world and Lodur never creates or steps one.
     /// <see cref="Drive"/> is the muscle layer: it turns caller-owned strengths and target rotations into torques on the world's
-    /// torque lanes and does nothing else to the physics. The binding holds no body numbers; the plan owns them.
+    /// torque lanes and does nothing else to the physics. Each muscle's torque is a PD term toward its target plus the gravity load of the
+    /// muscle's unsupported subtree times its strength, projected on the axes it has gains for (ruling gravity-feedforward-all-muscles), so
+    /// sag comes only from weakness; the load reads Ymir's Mass, ContactCount, JointOrigin and Gravity, and a body in contact carries none. The binding holds no body numbers; the plan owns them.
     /// In a world with a particle system Build also places one liquid sensor per plan airway opening, and <see cref="ReadAirway"/> reads them.
     /// </summary>
     public sealed class Ragdoll
@@ -18,6 +20,8 @@ namespace Lodur.Body.Ymir
         private readonly int[] _jointLane;
         private readonly int[] _sensorLane;
         private readonly MuscleGains[] _gains;
+        // Subtree mass and mass-weighted position per part: scratch rebuilt every Drive, never read across ticks.
+        private readonly float[] _mass, _momentX, _momentY, _momentZ;
 
         private Ragdoll(Box3DSoaWorld world, BodyPlan plan)
         {
@@ -28,6 +32,10 @@ namespace Lodur.Body.Ymir
             _sensorLane = new int[plan.AirwayOpenings.Count];
             Array.Fill(_sensorLane, -1);
             _gains = new MuscleGains[plan.Joints.Count];
+            _mass = new float[plan.Parts.Count];
+            _momentX = new float[plan.Parts.Count];
+            _momentY = new float[plan.Parts.Count];
+            _momentZ = new float[plan.Parts.Count];
         }
 
         /// <summary>The plan this ragdoll was built from.</summary>
@@ -104,7 +112,9 @@ namespace Lodur.Body.Ymir
         /// <summary>
         /// Writes this tick's muscle torques onto the world's torque lanes: for each joint a PD torque toward
         /// <paramref name="targets"/>[joint] (the child's rotation relative to the parent in the joint frame, whose z axis is a hinge's axis; a hinge has no swing gains, so it takes torque about that axis only) scaled by <paramref name="strengths"/>[joint], applied to the child
-        /// and, equal and opposite, to the parent. Both arrays are the caller's, one entry per plan joint;
+        /// and, equal and opposite, to the parent, plus the gravity feedforward: the torque about the joint origin that holds up the weight of the child's
+        /// subtree, except every body in contact with anything (a supported body, one lying or leaning, carries no load: ruling gravity-feedforward-count-gate),
+        /// times the strength and kept to the joint frame axes the muscle has gains for. A world with no gravity skips it. Both arrays are the caller's, one entry per plan joint;
         /// nothing is copied or retained. Allocates nothing. Call once per step, before <c>world.Step</c>; the
         /// world clears the lanes when it applies them.
         /// </summary>
@@ -124,6 +134,52 @@ namespace Lodur.Body.Ymir
                     targets[m], _gains[m], strengths[m], out var tx, out var ty, out var tz);
                 new Quat(v.JointFrameX[j], v.JointFrameY[j], v.JointFrameZ[j], v.JointFrameW[j])
                     .Rotate(tx, ty, tz, out var wx, out var wy, out var wz);
+                var child = v.JointBodyB[j];
+                var parent = v.JointBodyA[j];
+                v.TorqueX[child] += wx; v.TorqueY[child] += wy; v.TorqueZ[child] += wz;
+                v.TorqueX[parent] -= wx; v.TorqueY[parent] -= wy; v.TorqueZ[parent] -= wz;
+            }
+
+            var (gx, gy, gz) = _world.Gravity;
+            if (gx == 0f && gy == 0f && gz == 0f) return;
+            var n = _mass.Length;
+            for (var p = 0; p < n; p++)
+            {
+                var b = _bodyLane[p];
+                var load = v.ContactCount[b] > 0 ? 0f : v.Mass[b];
+                _mass[p] = load;
+                _momentX[p] = load * v.PositionX[b];
+                _momentY[p] = load * v.PositionY[b];
+                _momentZ[p] = load * v.PositionZ[b];
+            }
+
+            for (var p = n - 1; p > 0; p--) // BodyPlan puts every parent before its child
+            {
+                var q = Plan.ParentOf(p);
+                if (q < 0) continue;
+                _mass[q] += _mass[p];
+                _momentX[q] += _momentX[p];
+                _momentY[q] += _momentY[p];
+                _momentZ[q] += _momentZ[p];
+            }
+
+            for (var m = 0; m < _gains.Length; m++)
+            {
+                var j = _jointLane[m];
+                var c = Plan.Joints[m].Child;
+                var rx = _momentX[c] - _mass[c] * v.JointOriginX[j];
+                var ry = _momentY[c] - _mass[c] * v.JointOriginY[j];
+                var rz = _momentZ[c] - _mass[c] * v.JointOriginZ[j];
+                var k = MathF.Max(strengths[m], 0f);
+                // The muscle holds the load up: minus the gravity torque of the subtree's weight about the joint origin.
+                var tx = -k * (ry * gz - rz * gy);
+                var ty = -k * (rz * gx - rx * gz);
+                var tz = -k * (rx * gy - ry * gx);
+                var frame = new Quat(v.JointFrameX[j], v.JointFrameY[j], v.JointFrameZ[j], v.JointFrameW[j]);
+                frame.Conjugate().Rotate(tx, ty, tz, out var lx, out var ly, out var lz);
+                if (_gains[m].SwingStiffness <= 0f) { lx = 0f; ly = 0f; }
+                if (_gains[m].TwistStiffness <= 0f) lz = 0f;
+                frame.Rotate(lx, ly, lz, out var wx, out var wy, out var wz);
                 var child = v.JointBodyB[j];
                 var parent = v.JointBodyA[j];
                 v.TorqueX[child] += wx; v.TorqueY[child] += wy; v.TorqueZ[child] += wz;
