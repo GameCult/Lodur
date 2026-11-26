@@ -364,9 +364,10 @@ public sealed class IkTests
     }
 
     // deterministic-bound-margin for the held swivel's per-tick turn at Dt = 0.01 s (a 0.03 rad swivel step): the geometric mean of the
-    // shipped worst and the least claimed mutant, the stateless argmin (the chain reset every tick). Shipped worst over
-    // the tie lines, the random jumps and the basin switch: 0.0333 rad. Least mutant: 0.5039 rad (a random jump; the tie lines least is 0.9995).
-    // Bound sqrt(0.0333 * 0.5039) = 0.129.
+    // shipped worst and the least claimed mutant. Claimed mutants: the stateless argmin (the chain reset every tick), and the clamp along the
+    // fresh swing direction at the half-turn swing (no hold). Shipped worst over the tie lines, all 81 random jumps and the basin switch:
+    // 0.0333 rad. Least mutant: 0.5039 rad, the stateless argmin at a random jump (tie lines least 0.9995); the fresh-direction clamp turns
+    // 2.27 to 3.00 rad at 18 of the 20 half-turn jumps (2.98 right, 3.00 left worst). Bound sqrt(0.0333 * 0.5039) = 0.129.
     private const float HeldTurnBound = 0.129f;
 
     [Fact]
@@ -407,9 +408,8 @@ public sealed class IkTests
         // Soul's probe: random segments about the shoulder walked in 0.4 mm steps; each step the stateless rule turns over 0.5 rad is
         // bisected to a gap under 2 microns, where it persists. The held chain walks 2 mm up to the near side, across the gap in one
         // tick, and 2 mm on.
-        // Excluded and counted: jumps where the held target swings past HalfTurnSwing. Near a half-turn swing the swing-twist split is
-        // singular, so the clamp to the limits turns the target by up to 3 rad for a swivel step of 0.03 rad: the held swivel is
-        // continuous there and the clamped target is not. That is the clamp's defect, outside the temporal-coherence ruling.
+        // Counted: jumps where the held target swings past HalfTurnSwing, where the swing-twist split is singular and the clamp holds the
+        // previous swing direction; the tripwire keeps the bound testing that band.
         const float HalfTurnSwing = 3.0f;
         var arm = ArmChain.Of(Plan, side, Dt);
         var s = arm.ShoulderAnchor;
@@ -432,7 +432,7 @@ public sealed class IkTests
         }
 
         static (float X, float Y, float Z) Lerp((float X, float Y, float Z) a, (float X, float Y, float Z) b, float u) => (a.X + (b.X - a.X) * u, a.Y + (b.Y - a.Y) * u, a.Z + (b.Z - a.Z) * u);
-        var (found, held, singular, worst, mutant) = (0, 0, 0, 0f, float.MaxValue);
+        var (found, singular, worst, mutant) = (0, 0, 0f, float.MaxValue);
         var path = new (float X, float Y, float Z)[12];
         for (var k = 0; k < 400 && found < 40; k++)
         {
@@ -461,25 +461,18 @@ public sealed class IkTests
                     for (var j = 0; j < 6; j++) path[j] = Lerp(lo, Add(lo, u), (j - 5) * step);
                     for (var j = 0; j < 6; j++) path[6 + j] = Lerp(hi, Add(hi, u), j * step);
                     var walk = Walk(arm, path, false);
-                    if (walk.HeldSwing > HalfTurnSwing)
-                    {
-                        singular++;
-                    }
-                    else
-                    {
-                        held++;
-                        worst = MathF.Max(worst, walk.Turn);
-                        mutant = MathF.Min(mutant, Walk(arm, path, true).Turn);
-                    }
+                    if (walk.HeldSwing > HalfTurnSwing) singular++;
+                    worst = MathF.Max(worst, walk.Turn);
+                    mutant = MathF.Min(mutant, Walk(arm, path, true).Turn);
                 }
 
                 prev = q1;
             }
         }
 
-        _output.WriteLine($"{side}: {found} stateless jumps, {held} held (worst {worst:F4} rad per tick, least stateless worst {mutant:F4}), {singular} at the half-turn swing");
+        _output.WriteLine($"{side}: {found} stateless jumps (worst held {worst:F4} rad per tick, least stateless worst {mutant:F4}), {singular} at the half-turn swing");
         Assert.True(found >= 40, $"only {found} stateless jumps found; the probe no longer finds the ties");
-        Assert.True(held >= 25, $"only {held} jumps away from the half-turn swing; the bound no longer tests many");
+        Assert.True(singular >= 5, $"only {singular} jumps at the half-turn swing; the bound no longer tests the singular clamp");
         Assert.True(worst < HeldTurnBound, $"the shoulder target turned {worst} rad in one tick at a stateless jump");
     }
 

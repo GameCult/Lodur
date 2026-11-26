@@ -168,6 +168,12 @@ namespace Lodur
             _drive.Attention = attention;
         }
 
+        /// <summary>
+        /// Forgets the arms' history: each arm's next solve is the stateless rule, as on the first tick. For a caller that moves the body
+        /// discontinuously (a teleport, a respawn) so the arms do not carry a swivel from the old place. Nothing for an actor without arms.
+        /// </summary>
+        public void ResetArms() => _rig?.ResetArms();
+
         public Brain Brain => _brain;
 
         /// <summary>The index in <see cref="Brain"/>'s goals of the goal in force; it changes only on the tick that reports <see cref="TickEvents.GoalChanged"/>.</summary>

@@ -491,6 +491,46 @@ public sealed class OrientTests
         Same(baseline[left], targets[left]);
     }
 
+    [Theory]
+    [InlineData(Side.Right)]
+    [InlineData(Side.Left)]
+    public void ResetArms_makes_both_arms_solve_the_stateless_rule_again(Side side)
+    {
+        // Reach with both arms along the feasible tie of one arm's shoulder (goal (dx, -0.25, -0.25) from it, mirrored for the left), from
+        // dx -10 mm to 2 mm past the tie: that arm holds its basin, away from the stateless target. After ResetArms the next tick writes the
+        // stateless solve for both arms, bit for bit.
+        var b = Behaviour(arms: new ArmLayer { Mode = ArmMode.Reach, Side = ArmSide.Both });
+        var a = Watcher(Watching(b), Plan);
+        var parts = Rest();
+        var targets = new Quat[Joints];
+        var arms = new[] { ArmChain.Of(Plan, Side.Left, Dt), ArmChain.Of(Plan, Side.Right, Dt) };
+        var tie = side == Side.Left ? arms[0] : arms[1];
+        var sign = side == Side.Left ? -1f : 1f;
+        var s = tie.ShoulderAnchor;
+        (float X, float Y, float Z) Goal(float dx) => (s.X + sign * dx, s.Y - 0.25f, s.Z - 0.25f);
+        for (var i = 0; i < 40; i++) Step(a, parts, targets, Emit(1, Goal(-0.01f)));
+        Assert.Equal(1UL, a.TargetId);
+        for (var i = -50; i <= 10; i++) Step(a, parts, targets, Emit(1, Goal(i * 0.0002f)));
+        var held = (Quat[])targets.Clone();
+        a.ResetArms();
+        Step(a, parts, targets, Emit(1, Goal(0.002f)));
+
+        var t = a.Target;
+        Assert.Equal(Goal(0.002f), (t.X, t.Y, t.Z));
+        foreach (var arm in arms)
+        {
+            var p = parts[arm.ParentPart];
+            arm.Solve(p.Rotation, p.X, p.Y, p.Z, t.X, t.Y, t.Z, out var shoulder, out var elbow);
+            SameBits(Flinched(shoulder, Quat.Identity, 0f), targets[arm.ShoulderJoint]);
+            SameBits(Flinched(elbow, Quat.Identity, 0f), targets[arm.ElbowJoint]);
+        }
+
+        var held2 = held[tie.ShoulderJoint];
+        var reset = targets[tie.ShoulderJoint];
+        var turn = 2f * MathF.Acos(MathF.Min(1f, MathF.Abs(held2.X * reset.X + held2.Y * reset.Y + held2.Z * reset.Z + held2.W * reset.W)));
+        Assert.True(turn > 1f, $"the held {side} arm was only {turn} rad from the stateless target, so the reset proves nothing");
+    }
+
     [Fact]
     public void A_tie_goes_to_the_right_arm()
     {
