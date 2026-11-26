@@ -255,8 +255,10 @@ muscle layer and the will mix and graft mask see IK like any other layer. Arms a
 so the analytic solve is exact; FABRIK and CCD wait for graft chains that are not two-bone. The elbow swivel is
 the one needing no shoulder twist, because the shoulder's twist muscle tracks a twist weakly (fact 7); what this
 gives up is an authored elbow direction. Where that swivel leaves the cone, the swivel is the nearest one inside
-the cone and the twist limits, the feasible swivel range of Tolani, Goswami and Badler (2000); the swing clamps
-only when no swivel is feasible (fact 8). Reach under gravity lands short by PD sag (fact 9); that is its own cut.
+the cone and the twist limits, the feasible swivel range of Tolani, Goswami and Badler (2000) (fact 8). When no
+swivel is feasible, the swivel is the one whose limit violation (swing past the cone plus twist past its range) is
+least, with swing and twist clamped to the limits: at the edge of the feasible set that is the last feasible swivel,
+so a goal crossing the edge moves the targets continuously (the zero-twist clamp it replaces jumped 1.4 rad there). Reach under gravity lands short by PD sag (fact 9); that is its own cut.
 
 **Goal-target rationale.** A target is tracked by percept Id (fact 11), selection scores (goal, percept) pairs,
 and a retarget inside the goal waits the deliberate latency but not the dwell, held only by the commitment
