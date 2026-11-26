@@ -174,6 +174,31 @@ in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; er
 27. **The hand-off jump.** `OrientRig.Compose` runs only while the goal in force has layers (`Actor.Tick`,
     `PoseBehaviour.Write`), and an arm not driven keeps its slewed output, so engaging slews from stale targets and
     disengaging writes the base pose at once (Soul s4 on `lodur-orient-goals`: 0.65 rad in a tick).
+28. **Feedforward on a supported body makes it weightless (probe, pass `gravity-cuts-map`).** The hand-rest bodies
+    that keep turning (fact 24) belong to a fallen body: `RagdollScenario` lies on the ground after 5 s (head at
+    0.11 m). Feedforward cancels the weight that gave the floor contact its friction, so palm, thumb and fingers
+    drift at 0.07-0.80, 0.21-1.20 and 0.12-0.94 rad/s (off: 0.000-0.012). Skipping feedforward on the hand joints
+    leaves them drifting (thumb 0.13-2.88): the load comes from the arms and trunk. Reading the anchor from Ymir's
+    `JointOrigin` lane instead of the plan changes nothing measurable. A gate that gives a body touching anything
+    (`ContactCount > 0`) no load settles every hand body (0.000-0.007 rad/s) and passes all five hand-rest tests.
+    A continuous gate (load minus `ContactImpulse / dt`) is worse than none (thumb 1.5-1.9 rad/s): the one-step
+    lag rings. The count gate also counts self-contact: thumb against fingers, a forearm on its own thigh.
+29. **The pain-box hold re-solved, and its survival curve (probe).** At the base pose (shoulder -1.0, elbow -0.6)
+    feedforward lifts the palm from (-0.207, 1.121, 0.446) to (-0.174, 1.395, 0.572), out of the box, and no seed
+    of 20 breaks in 60 s. A grid fit of the two hold angles to put the settled palm (seed 1, 3-4 s, box at
+    intensity 0) at the box centre gives shoulder -0.66, elbow -0.28 (0.49 cm) without the gate and -0.70, -0.36
+    (0.34 cm) with it. Seeds 1-20, 60 s limit, break / first flinch in s: at base 14.12-19.23 / 6.86-9.34, median
+    break 15.9 s, every seed breaks by 19.3 s (no censoring); re-solved pose with gate within +0.03 s of base on
+    every seed's break and first flinch within 0.11 s (seed 13; the rest equal). Hand in the box after 2 s: 99-100% at
+    base, 94-98% gated.
+30. **What moves with the gate and the re-solved pose (probe, gravity hard-coded so the two zero-gravity tests are
+    probe artefacts).** `Lodur.Tests`: 5 of 60 (13 ungated): the seed-1 replay golden; the leak test, whose hand
+    now leaves the box at tick 1756, 18 ticks before the break at 1774 (box half 0.125 was sized against sag); the
+    wrist cone, 1.0616 against the 1.06 bound both sides; the hinge-torque test (the wrist's feedforward reaches the
+    forearm). BDS `3d6e735` against it: 69 of 71 (70 of 71 ungated): the body hand-in-box test (one excursion
+    before the break) and, gated only, the flinch control (tracks 5.5 cm apart before the first flinch, 6.0 after).
+    Office body tests, the CLI goldens and `tools/PainSweep` (engine-free, no body) do not move. Probe:
+    `F:\aeth-wt\imag-gravity-probe\` (patch, harness, logs).
 
 ## Prior art (research pass `goal-ai-prior-art`)
 
