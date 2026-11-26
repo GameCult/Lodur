@@ -218,6 +218,34 @@ in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; er
     utility-only Brain 68 us at depth 4 and 79 us at depth 6: a tick spends at most one `ThinkBudget`. At depth 4 the move rule's plan cost
     is about 2x on movers and 1.0x elsewhere (Soul s1 on `lodur-planner-moves`, paired medians, 6 wants); the budget
     bounds it, so no work on it here.
+32. **Self-contact under the count gate, and the subtree-external gate (probe, pass `gravity2-map`).** At `63444f0` the
+    count gate's self-contact cost shows in tests: the gravity reach reads 3.01, 3.16, 3.97 cm (ungated 0.89, 0.13,
+    0.54) because the right thumb and fingers touch. Probed gate: each body's load is deposited at the lowest common
+    ancestor of it and every body it touches (a body touching nothing deposits at itself; a touch outside the ragdoll
+    deposits nowhere, as the count gate), then summed bottom-up as at `63444f0`, so a joint carries a body unless a
+    touch outside the joint's subtree supports it. Touching pairs were kept in the probe from Ymir's Begin/End facts
+    and equal `ContactCount` on every body every step (2,614,540 body-steps, 0 mismatches). Readings: gravity reach
+    0.77, 0.16, 0.72 cm; half strength 19.00, 13.85, 22.79 cm; seated ward under gravity 7.03 cm worst (count 6.00,
+    ungated 7.59, zero gravity 8.11: the ward is not gravity-limited); hand-rest tests pass (ungated: 5 fail). In
+    the chamber hold at 3 s, 5 of the 7 touching pairs are self-contacts. Cost per `Drive` from a per-step pair list
+    (lanes mapped by offset, LCA by depth walk), 20000 calls x 41 paired interleaved rounds, net10 Release: +0.227,
+    +0.230, +0.255 us over the count gate's 1.58-1.93 us. Probe: `F:\aeth-wt\imag-gravity2-probe-lodur.patch`
+    (scratch modes `LODUR_GATE=count|subtree|none`), logs `F:\aeth-wt\imag-gravity2-*.txt`.
+33. **The pain-box hold under the subtree-external gate (probe).** The count-gate pose -0.70, -0.36 settles the palm
+    4.74 cm from Box (count 0.24). Grid 0.04 then 0.01: -0.68, -0.25 at 0.15 cm (count-gate refit -0.73, -0.30 at
+    0.15 cm: the fit is a ridge). Seeds 1-20, 60 s: median break 15.90 s (14.16-19.26), holding at 10/15/20 s
+    1.00/0.70/0.00, censored 0, median first flinch 7.55 s (`63444f0`: 15.88 s, 1.00/0.70/0.00, 7.55). Box half by
+    the shipped-run rule (seed 1, ticks out from 2 s to the break): 0.145 3, 0.150 2, 0.155 0. `Lodur.Tests` then
+    fail 2: the seed-1 replay golden and the strain shake (shipped 2.68 cm in second 8, bound 3 cm).
+34. **BDS `c55770f` against the gravity feedforward (probe).** Against `63444f0`: 66 of 81 (the report's 15). With
+    Lodur's pose -0.70, -0.36 and box half 0.145 only: 79 of 81, left the flinch control (seed 1 gap before the
+    first flinch 5.50 cm, after 6.15) and office settle (seed 100 hand 0.0292 m/s). The same content under the
+    subtree-external gate: 80 of 81 (only the idle drift, 5.7 cm: the pose was fit for the count gate). With the
+    subtree refit (-0.68, -0.25, half 0.155): 80 of 81, the flinch control on seed 3 (before 2.06 cm, after 3.98;
+    rule before < after / 2). The pre-flinch gap is the leak, not a contact: in the Lodur fixture full and
+    flinch-gain-0 runs part at tick 39-40 (the box ramp), first flinch at 843-1043, and forcing the feedforward's
+    strength factor to 1 leaves the gap (seeds 1-3 before 1.70-2.69 cm). BDS's world is Lodur's fixture (same
+    ground, stool, weld, lane order). Probe: `F:\aeth-wt\imag-gravity2-probe-bds.patch`.
 
 ## Prior art (research pass `goal-ai-prior-art`)
 
@@ -356,6 +384,7 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
 | 3b | `lodur-reach-path` | Lodur | hand path through a clearance via point when blocked; arm hand-off slewed both ways | 3, 4 | M, landed |
 | 3c | `ymir-world-gravity`, then `lodur-gravity-feedforward` | Ymir, Lodur (+ BDS content) | the world reports its gravity; muscles carry their subtree's weight times strength | Q `gravity-feedforward-scope` | S, M |
+| 3d | `ymir-touching-pairs`, then `lodur-gravity-subtree-support`, then `bds-gravity-feedforward-content` | Ymir, Lodur, BDS | the world publishes each step's touching pairs (ABI 20); only a touch outside a joint's subtree supports it (facts 32-33); the chamber re-authored against it (fact 34); Lodur and BDS land in one sitting | 3c | S, S, S |
 | 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off and recoil as layers; fetal (a key-pose goal) and stare-at-hands (Look and Reach on a phantom) are data; seated Fella demo | 2, 3 | M |
 | 5 | `lodur-phantom-percepts` + `bds-thought-bubble` | Lodur, BDS | phantom things by hallucination type; the bubble reads their kinds | 1, 4 | M, S |
 | 6 | `lodur-assist-pin` | Lodur | upright assist | none | S |
