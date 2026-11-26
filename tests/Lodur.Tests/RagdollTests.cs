@@ -183,6 +183,25 @@ public sealed class RagdollTests
         Assert.True(TorqueNorm(s, s.Plan.PartIndex("Thigh", Side.Left)) > 1f);     // the ball joint does not
     }
 
+    /// <summary>
+    /// Zero gravity: Drive writes the PD torque and nothing else (the feedforward is skipped), so the 2 s state hash of a free ragdoll, seeds 1-3, is the one recorded at
+    /// origin/main e47e3d3, before the gravity feedforward. Goldens move only where a ruling says; this one pins that the feedforward is zero where gravity is.
+    /// </summary>
+    [Fact]
+    public void A_zero_gravity_world_replays_the_hash_recorded_before_the_gravity_feedforward()
+    {
+        var recorded = new ulong[] { 4596821165163159072ul, 2187121869401780341ul, 2995211072229544614ul };
+        var got = new ulong[3];
+        for (var k = 0; k < 3; k++)
+        {
+            using var s = new RagdollScenario((ulong)(k + 1), gravityY: 0f);
+            s.Run(2f);
+            got[k] = s.StateHash();
+        }
+
+        Assert.True(recorded.SequenceEqual(got), string.Join(", ", got));
+    }
+
     [Fact]
     public void Driving_a_tick_allocates_nothing()
     {
