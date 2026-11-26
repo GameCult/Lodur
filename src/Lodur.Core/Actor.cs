@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Lodur
 {
@@ -61,12 +62,15 @@ namespace Lodur
         private readonly OrientRig? _rig;
         private readonly bool _layered;
         private Side _arm = Side.Right;
+        // The want gate's thinking space (null when no goal has a want) and the plan length of the committed pair, derived each tick.
+        private readonly Deliberation? _deliberation;
+        private int _planLength;
 
         public Actor(
             double tickSeconds, int regionCount,
             NerveParameters nerve, WithdrawalParameters withdrawal, DriveParameters drive, Brain brain,
             NerveParameters? senses = null, int senseRegion = 0, PerceptParameters? percepts = null, Physiology? physiology = null,
-            WithdrawalParameters? breath = null, BodyPlan? body = null)
+            WithdrawalParameters? breath = null, BodyPlan? body = null, IReadOnlyList<Verb>? verbs = null)
         {
             brain.Validate();
             drive.Validate();
@@ -141,6 +145,16 @@ namespace Lodur
             }
 
             _perception = new Perception(nerve, tickSeconds, regionCount, senses, senseRegion, percepts);
+            if (brain.HasWants)
+            {
+                if (_perception.PerceptCount == 0)
+                {
+                    throw new ArgumentException("A Brain with a want needs percepts: the planner reads the percepts' facts.");
+                }
+
+                _deliberation = new Deliberation(brain, verbs ?? Array.Empty<Verb>(), _perception.PerceptCount);
+            }
+
             _reflexes = new WithdrawalReflex[regionCount];
             for (var r = 0; r < regionCount; r++)
             {
@@ -201,6 +215,23 @@ namespace Lodur
         /// <summary>The id of the percept the committed goal targets; 0 for an untargeted goal. Only the Brain's choice, committed after the latency, writes it.</summary>
         public ulong TargetId => _target;
 
+        /// <summary>
+        /// The length of the plan to the committed pair's want, derived each tick from the percepts (never kept across ticks): n steps, -1 when he goes at it direct (no plan within
+        /// <see cref="Brain.PlanDepth"/>), 0 when the goal has no want, the want holds, or its target is no longer in memory.
+        /// </summary>
+        public int PlanLength => _planLength;
+
+        /// <summary>Step <paramref name="i"/> of the committed pair's plan, for i below <see cref="PlanLength"/>: a verb of the Actor's list and the percept ids it is grounded on.</summary>
+        public PlanStep PlanStep(int i)
+        {
+            if ((uint)i >= (uint)Math.Max(_planLength, 0))
+            {
+                throw new ArgumentOutOfRangeException(nameof(i), "There is no such step in the plan.");
+            }
+
+            return _deliberation!.Step(i);
+        }
+
         /// <summary>The slot whose Id equals <see cref="TargetId"/>; default (Id 0) when the target is 0 or forgotten.</summary>
         public Percept Target
         {
@@ -227,12 +258,18 @@ namespace Lodur
         /// and targets spans one entry per muscle, written for the body to follow. The emitters are the game's point
         /// sources, sensed at the sense region's point. The airway is what the caller finds at the body's airway openings; nothing by default.
         /// The parts are the body's part poses (one per plan part), read when the goal in force has orient layers and ignored otherwise.
+        /// <paramref name="selfFacts"/> are the actor's own facts for the planner (the game's; bit 63 is refused), read only by a Brain with wants.
         /// </summary>
         public TickEvents Tick(
             ReadOnlySpan<float> regionX, ReadOnlySpan<float> regionY, ReadOnlySpan<float> regionZ,
             ReadOnlySpan<BoxStimulus> sources, Span<float> strengths, Span<Quat> targets,
-            ReadOnlySpan<Emitter> emitters = default, in AirwaySample airway = default, ReadOnlySpan<PartPose> parts = default)
+            ReadOnlySpan<Emitter> emitters = default, in AirwaySample airway = default, ReadOnlySpan<PartPose> parts = default, ulong selfFacts = 0UL)
         {
+            if ((selfFacts & Perception.InReachFact) != 0UL)
+            {
+                throw new ArgumentException("Bit 63 is Lodur's reach; the actor's own facts have none.", nameof(selfFacts));
+            }
+
             // The goal that will write this tick: a decision due now commits before the behaviour runs, and one made now cannot (the latency is a tick at least).
             if (_layered && _brain.Goals[_pending >= 0 && _tick == _switchTick ? _pending : _goal].Behaviour.HasLayers && parts.Length != Body!.Parts.Count)
             {
@@ -323,7 +360,13 @@ namespace Lodur
             if (_pending < 0)
             {
                 var sr = _perception.SenseRegion;
-                var wanted = _brain.Select(_drive, _perception, regionX[sr], regionY[sr], regionZ[sr], new Choice(_goal, _target));
+                var now = new Choice(_goal, _target);
+                if (_deliberation != null)
+                {
+                    _deliberation.SelfFacts = selfFacts;
+                }
+
+                var wanted = _brain.Select(_drive, _perception, regionX[sr], regionY[sr], regionZ[sr], now, _deliberation);
                 if (wanted != new Choice(_goal, _target)
                     && (wanted.Goal == _goal || _tick - _goalSince >= _dwell[_goal] || _brain.Goals[wanted.Goal].Priority > _brain.Goals[_goal].Priority))
                 {
@@ -361,6 +404,15 @@ namespace Lodur
                         _drive.Enter(_driveP, entry);
                     }
                 }
+            }
+
+            // The committed pair's plan, derived afresh from the percepts of this tick with the whole think budget.
+            _planLength = 0;
+            if (_deliberation != null && _brain.Goals[_goal].Want is { } committedWant)
+            {
+                var sr = _perception.SenseRegion;
+                _deliberation.SelfFacts = selfFacts;
+                _planLength = _deliberation.Derive(_perception, regionX[sr], regionY[sr], regionZ[sr], committedWant, _target);
             }
 
             // For EntrySeconds after a takeover the Actor, not the drive, takes the gain (and the arousal, if the goal declares one) from their values at

@@ -66,7 +66,8 @@ public sealed class GoalTargetTests
         Assert.Equal(new Choice(2, 0), Pick(brain, hears, new Choice(2, 0), calm));
         Assert.Equal(new Choice(1, 0), Pick(brain, hears, new Choice(3, 0), calm));
         var none = new Brain { Goals = new[] { Goal("x", 1.0, when: new Condition(DriveQuantity.Pain, ConditionOp.AtLeast, 0.5)) } };
-        Assert.Equal(new Choice(0, 77), Pick(none, hears, new Choice(0, 77), calm));
+        // Nothing eligible: the goal in force stays and lets go of its target.
+        Assert.Equal(new Choice(0, 0), Pick(none, hears, new Choice(0, 77), calm));
     }
 
     [Fact]
@@ -81,10 +82,10 @@ public sealed class GoalTargetTests
         var rightKind = Hearing(At(1, 1f, Thing), At(2, 3f, Other));
         Assert.Equal(new Choice(1, 2), Pick(brain, rightKind, new Choice(0, 0)));
 
-        // Only targeted goals, none with a percept: the current choice stays.
+        // Only targeted goals, none with a percept: the goal in force stays and lets go of its target (finding stale-target-without-pair).
         var only = new Brain { Goals = new[] { Goal("chase", 5.0, Kinds(Other)) } };
         Assert.Equal(new Choice(0, 0), Pick(only, wrongKind, new Choice(0, 0)));
-        Assert.Equal(new Choice(0, 55), Pick(only, wrongKind, new Choice(0, 55)));
+        Assert.Equal(new Choice(0, 0), Pick(only, wrongKind, new Choice(0, 55)));
     }
 
     [Fact]
@@ -429,4 +430,46 @@ public sealed class GoalTargetTests
         Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
         Assert.NotEqual(0UL, a.TargetId);
     }
+
+    [Fact]
+    public void Ticking_with_a_want_goal_allocates_nothing()
+    {
+        const int Open = 0, Locked = 1;
+        var fact = new Fact(FactSubject.This, Open, true);
+        var brain = new Brain
+        {
+            PlanDepth = 4, TargetCommitment = 1.2,
+            Goals = new[]
+            {
+                Goal("idle", 0.5),
+                Goal("chase", 1.0, Kinds(Thing), new[] { Nearer(30.0) }) with { Want = fact },
+                Goal("other", 1.0, Kinds(Other), new[] { new Consideration(ConsiderationInput.PlanSteps, 1.0, 9.0, 1.0, 0.0) }) with { Want = fact },
+            },
+        };
+        var verbs = new[]
+        {
+            new Verb { Id = "Approach", Gives = new[] { new Fact(FactSubject.This, 63, true) } },
+            new Verb { Id = "Unlock", This = Kinds(Thing, Other), Needs = new[] { new Fact(FactSubject.This, 63, true), new Fact(FactSubject.This, Locked, true) }, Gives = new[] { new Fact(FactSubject.This, Locked, false) } },
+            new Verb { Id = "Open", This = Kinds(Thing, Other), Needs = new[] { new Fact(FactSubject.This, 63, true), new Fact(FactSubject.This, Locked, false) }, Gives = new[] { fact } },
+        };
+        var a = new Actor(Dt, 1, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), brain,
+            new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0, ConductionDelaySeconds = 0.0 }, 0,
+            new PerceptParameters { Capacity = 4, MemorySeconds = 5.0 }, verbs: verbs);
+        var emitters = new[] { At(1, 5f), At(2, 9f), At(3, 2f, Other) };
+        emitters[0].Facts = 1UL << Locked;
+        for (var i = 0; i < 50; i++) a.Tick(Zero, Zero, Zero, NoBoxes, new float[2], new Quat[2], emitters);
+        var strengths = new float[2];
+        var targets = new Quat[2];
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 10000; i++)
+        {
+            emitters[1] = At(2, 9f - (i % 8));
+            a.Tick(Zero, Zero, Zero, NoBoxes, strengths, targets, emitters, selfFacts: (ulong)(i & 3));
+        }
+
+        Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+        Assert.NotEqual(0UL, a.TargetId);
+        Assert.NotEqual(0, a.PlanLength);
+    }
 }
+
