@@ -12,13 +12,14 @@ public sealed class AirwayTests
     private const float DropVolume = (2f * R) * (2f * R) * (2f * R);
     private static readonly uint FluidPhase = Box3DSoaPhase.Of(0, fluid: true);
 
-    // Bounds, from deterministic-bound-margin (readings are identical run to run). Side-lying falls (12 seeds): shipped worst drop 0.0132 m, least mutant (a head read from the pelvis's lane)
-    // reads at or below 0 on 5 of 12, counted as one unit of 1 mm by the zero-reading convention: bound sqrt(0.0132 x 0.001) = 0.0036 m, separation 13.
-    private const float SideDropBound = 0.0036f;
+    // Bounds, from deterministic-bound-margin (readings are identical run to run), read as max(signed drop, 0) as AirwaySample.Of floors them. Side-lying falls (12 seeds): shipped worst drop 0.01323 m,
+    // least claimed mutant (the opening's offset rotated about z only) 0.00914 m, separation 1.45: bound sqrt(0.01323 x 0.00914) = 0.0110 m. An opening read from lane 0, a sump read from lane 0, the rim subtracted, the sump offset unrotated or its lane's rotation ignored, the pharynx sump moved and the rim read as a cosine
+    // (0.00117) are further off; most read 0 on some seed. The zero-reading convention was not needed: the least claimed mutant reads above 0.
+    private const float SideDropBound = 0.0110f;
 
-    // Upright (creation pose -0.0467, welded stool at full strength -0.0461 m): least mutant, the shallowest sump, reads +0.005. A bound across zero has no geometric midpoint: the
-    // arithmetic one, -0.0206 m, sits 0.0255 m from each side.
-    private const float UprightBound = -0.0206f;
+    // Upright (creation pose -0.04671, welded stool at full strength -0.04615 m): clearance below the sump, shipped worst 0.04615 m, least claimed mutant (the glottis sump 1 cm shallower) 0.03615 m, separation 1.28:
+    // bound sqrt(0.04615 x 0.03615) = 0.0408 m, so a reading below -0.0408. The 2 cm shallower sump (0.02615) and the mutants reading at or above 0 are further off; the zero-reading convention was not needed.
+    private const float UprightBound = -0.0408f;
 
     // Limp seated falls (40 seeds): shipped 31 drain, the pelvis-lane mutant 0 (counted as 1): bound sqrt(31 x 1) = 5.6, so at least 6 drain.
     private const int SeatedDraining = 6;
@@ -270,8 +271,8 @@ public sealed class AirwayTests
     [Fact]
     public void A_side_lying_limp_humanoid_drains()
     {
-        // The twelve falls of the 240-seed sweep that end on the side (torso face y within 0.3 of level) each read a drop above the bound. Kills a head read from the pelvis's lane
-        // (5 of the 12 read at or below 0: the pelvis stays upright).
+        // The twelve falls of the 240-seed sweep that end on the side (torso face y within 0.3 of level) each read a drop above the bound. Kills the opening's offset rotated about z only (least claimed, 0.00914) and the
+        // mutants further off (a lane read from the pelvis reads 0 on 5 of the 12: the pelvis stays upright).
         foreach (var seed in new ulong[] { 6, 10, 11, 18, 39, 66, 92, 120, 133, 151, 171, 208 })
         {
             var (drop, faceY) = Fall(seed);

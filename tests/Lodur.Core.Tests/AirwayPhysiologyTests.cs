@@ -233,6 +233,23 @@ public sealed class AirwayPhysiologyTests
         Assert.True(p.AirwayLiquid < 1e-6, $"airway liquid {p.AirwayLiquid}");
     }
 
+    [Theory]
+    [InlineData(0.0, 0.0)]
+    [InlineData(0.0125, 0.25)]
+    [InlineData(0.025, 0.5)]
+    [InlineData(0.05, 1.0)]
+    [InlineData(0.1, 1.0)]
+    public void The_drain_is_linear_in_drop_up_to_DrainDrop(double drop, double fraction)
+    {
+        // One step on the full airway with nothing at the openings: the cough is zero below 0.3 consciousness (he is out at 0.1), so what drained is dt x DrainPerSecond x clamp01(drop / DrainDrop) x Capacity,
+        // exact arithmetic (1e-12), not a measured bound. Half the rate at a pure side pose (drop 0.025, the mouth's half-width); the binary-drain and doubled-slope mutants read 1 at 0.025, and the quarter
+        // point (0.0125) kills a step at half.
+        var p = Drowned();
+        p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, drop)));
+        Assert.Equal(0.0, p.Coughed);
+        Assert.Equal(fraction, p.Drained / (Dt * PhysiologyPlans.Humanoid().Airway.DrainPerSecond * Capacity), 12);
+    }
+
     [Fact]
     public void Face_up_the_airway_stays_full_and_he_dies_through_consciousness()
     {
