@@ -329,6 +329,84 @@ public sealed class ArmPathTests
     }
 
     [Fact]
+    public void The_hand_path_has_no_break_at_the_via_point_and_ends_on_the_goal()
+    {
+        // A static blocked goal: the aim moves no more than a minimum-jerk tick all the way (peak speed 1.875 D / T), through the hand-off between
+        // the two segments, and a segment that began on the via point instead of the goal would jump 0.3 m at the segment time.
+        var arm = ArmChain.Of(Plan, Side.Right, Dt);
+        var goal = (-0.04f, 1.60f, 0.24f);
+        var previous = arm.WristAnchor;
+        var worst = 0f;
+        for (var i = 0; i < 80; i++)
+        {
+            Drive(arm, goal, Quat.Identity, Quat.Identity, 1.0, out _, out _);
+            if (i > 0) worst = MathF.Max(worst, Gap(arm.Aim, previous));
+            previous = arm.Aim;
+        }
+
+        Assert.True(arm.PathBlocked);
+        Assert.True(worst < 0.05f, $"the aim moved {worst} m in one tick");
+        Assert.True(Gap(arm.Aim, goal) < 1e-4f);
+    }
+
+    [Fact]
+    public void An_arm_engaged_again_from_releasing_starts_a_new_path_from_the_measured_wrist()
+    {
+        var arm = ArmChain.Of(Plan, Side.Right, Dt);
+        var goal = (-0.04f, 1.60f, 0.24f);
+        for (var i = 0; i < 100; i++) Drive(arm, goal, Quat.Identity, Quat.Identity, 1.0, out _, out _);
+        Assert.True(Gap(arm.Aim, goal) < 1e-4f);
+
+        // Still releasing, not yet back on the base (the slew takes more than three ticks).
+        for (var i = 0; i < 3; i++) arm.Release(Quat.Identity, Quat.Identity, out _, out _);
+        Drive(arm, goal, Quat.Identity, Quat.Identity, 1.0, out _, out _);
+        Assert.True(arm.PathBlocked);
+        Assert.True(Gap(arm.Aim, arm.WristAnchor) < 1e-4f, $"an arm engaged again from releasing starts its path at the measured wrist, not {arm.Aim}");
+    }
+
+    [Fact]
+    public void Restart_keeps_the_held_swivel()
+    {
+        var arm = ArmChain.Of(Plan, Side.Right, Dt);
+        var goal = (-0.04f, 1.60f, 0.24f);
+        for (var i = 0; i < 100; i++) Drive(arm, goal, Quat.Identity, Quat.Identity, 1.0, out _, out _);
+        var held = arm.Held;
+        Assert.False(held.Equals(Quat.Identity), "the arm holds no swivel to keep");
+        arm.Restart();
+        Assert.Equal(held, arm.Held);
+    }
+
+    [Fact]
+    public void The_minimum_jerk_profile_is_the_quintic()
+    {
+        // Flash and Hogan: 10 t^3 - 15 t^4 + 6 t^5. Smoothstep shares the ends, the midpoint and the zero first velocity but not these.
+        Assert.Equal(0.103515625f, ArmChain.MinimumJerk(0.25f), 6);
+        Assert.Equal(0.896484375f, ArmChain.MinimumJerk(0.75f), 6);
+        Assert.Equal(0.00856f, ArmChain.MinimumJerk(0.1f), 5);
+        Assert.Equal(0f, ArmChain.MinimumJerk(-1f));
+        Assert.Equal(1f, ArmChain.MinimumJerk(2f));
+    }
+
+    [Theory]
+    [InlineData(Side.Right)]
+    [InlineData(Side.Left)]
+    public void Blocked_means_within_the_forearm_radius_of_the_trunk(Side side)
+    {
+        // A vertical segment in front of the trunk's front face at a distance d from it: blocked within the radius and not beyond, to a tenth.
+        var arm = ArmChain.Of(Plan, side, Dt);
+        var fore = Plan.Parts[arm.ForearmPart];
+        var radius = fore.Shape == PartShape.Box ? MathF.Min(fore.Size.X, MathF.Min(fore.Size.Y, fore.Size.Z)) : fore.Size.X;
+        const float front = 0.09f;
+        foreach (var (factor, blocked) in new[] { (0.5f, true), (0.95f, true), (1.05f, false), (1.5f, false) })
+        {
+            var z = front + factor * radius;
+            arm.Reset();
+            Drive(arm, (0f, 1.45f, z), Quat.Identity, Quat.Identity, 1.0, out _, out _, wrist: (0f, 1.25f, z));
+            Assert.Equal(blocked, arm.PathBlocked);
+        }
+    }
+
+    [Fact]
     public void An_engaging_arm_takes_the_short_way_from_a_base_given_with_the_opposite_sign()
     {
         // The same rotation as q and as -q: engaging from -q must not turn the long way round to the solution q.
