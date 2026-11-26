@@ -116,6 +116,34 @@ public sealed class PlannerTests
     }
 
     [Fact]
+    public void FromDepth_searches_exactly_that_depth()
+    {
+        var planner = Build();
+        var p = World();
+        var steps = new PlanStep[8];
+        var off = SlotOf(p, 3);
+        var cut = SlotOf(p, 2);
+
+        // Switching off is four steps: found at exactly four, none at exactly three.
+        Assert.Equal(4, planner.Plan(p, 0UL, 0f, 0f, 0f, off, This(Off), 4, steps, Planner.NodeBudget, 4));
+        Expect(steps, (GrabV, 1, 0), (CutStrapV, 2, 1), (ApproachV, 3, 0), (SwitchOffV, 3, 0));
+        Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, off, This(Off), 3, steps, Planner.NodeBudget, 3));
+        Assert.False(planner.LastExhausted);
+
+        // Cutting the strap is two: a search that starts at three returns no shallower plan.
+        Assert.Equal(2, planner.Plan(p, 0UL, 0f, 0f, 0f, cut, This(Cut), 2, steps, Planner.NodeBudget, 2));
+        Assert.Equal(-1, planner.Plan(p, 0UL, 0f, 0f, 0f, cut, This(Cut), 3, steps, Planner.NodeBudget, 3));
+        Assert.Equal(2, planner.Plan(p, 0UL, 0f, 0f, 0f, cut, This(Cut), 3, steps));
+
+        // A want that holds is still 0, whatever the first depth.
+        Assert.Equal(0, planner.Plan(p, 0UL, 0f, 0f, 0f, SlotOf(p, 4), This(Locked, false), 3, steps, Planner.NodeBudget, 3));
+
+        Assert.ThrowsAny<ArgumentException>(() => planner.Plan(p, 0UL, 0f, 0f, 0f, off, This(Off), 4, steps, Planner.NodeBudget, 0));
+        Assert.ThrowsAny<ArgumentException>(() => planner.Plan(p, 0UL, 0f, 0f, 0f, off, This(Off), 4, steps, Planner.NodeBudget, 5));
+        Assert.ThrowsAny<ArgumentException>(() => planner.Plan(p, 0UL, 0f, 0f, 0f, off, This(Off), 0, steps, Planner.NodeBudget, 2));
+    }
+
+    [Fact]
     public void Opening_the_locked_door_needs_seven_and_six_finds_none()
     {
         var planner = Build();

@@ -174,10 +174,12 @@ namespace Lodur
         /// A thing's facts are those it was last sensed with, bit 63 replaced by whether it is within reach of the point.
         /// A step that gives its This reach (bit 63 true) is a move: after it, another thing is in reach exactly when it is within reach of that This.
         /// <paramref name="budget"/> is the most groundings the call may regress, at least 1; a call that spends it returns -1 and sets <see cref="LastExhausted"/>.
+        /// <paramref name="fromDepth"/> (1..max(depth, 1)) is where the deepening starts: a call with depth k and fromDepth k searches for a plan of exactly k steps and returns none shallower
+        /// (0 still means the want holds).
         /// </summary>
-        public int Plan(Perception perception, ulong selfFacts, float ox, float oy, float oz, int targetSlot, Fact want, int depth, Span<PlanStep> plan, int budget = NodeBudget)
+        public int Plan(Perception perception, ulong selfFacts, float ox, float oy, float oz, int targetSlot, Fact want, int depth, Span<PlanStep> plan, int budget = NodeBudget, int fromDepth = 1)
         {
-            Check(perception, targetSlot, want, depth, plan.Length, budget);
+            Check(perception, targetSlot, want, depth, plan.Length, budget, fromDepth);
             _nodes = 0;
             _budget = budget;
             _exhausted = false;
@@ -207,7 +209,7 @@ namespace Lodur
                 return 0;
             }
 
-            for (var d = 1; d <= depth; d++)
+            for (var d = fromDepth; d <= depth; d++)
             {
                 _set[d * _stride] = wantLit;
                 _setCount[d] = 1;
@@ -513,7 +515,7 @@ namespace Lodur
 
         private static PlanStep Step(int verb, ulong thisId, ulong toolId) => new PlanStep(verb, thisId, toolId);
 
-        private void Check(Perception perception, int targetSlot, Fact want, int depth, int planLength, int budget)
+        private void Check(Perception perception, int targetSlot, Fact want, int depth, int planLength, int budget, int fromDepth)
         {
             if (budget < 1)
             {
@@ -533,6 +535,11 @@ namespace Lodur
             if (depth < 0 || depth > MaxDepth)
             {
                 throw new ArgumentOutOfRangeException(nameof(depth), $"The depth must be in 0..{MaxDepth}.");
+            }
+
+            if (fromDepth < 1 || fromDepth > Math.Max(depth, 1))
+            {
+                throw new ArgumentOutOfRangeException(nameof(fromDepth), "The first depth must be in 1..max(depth, 1).");
             }
 
             if (planLength < depth)
