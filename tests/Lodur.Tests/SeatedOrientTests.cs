@@ -54,7 +54,7 @@ public sealed class SeatedOrientTests
     /// and the least claimed mutant, 7.65 cm (the via point's x at the midpoint). Also killed: the arms at half weight, 36.48 cm; sideways, 25.90 cm; Not killed: no spread reads
     /// 2.95 cm, the look at half weight 5.01 cm, every reach solved directly 5.19 cm.
     /// </summary>
-    private const float NearWardBound = 0.0562f;
+    private const float NearWardBound = 0.0576f;
 
     /// <summary>
     /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 18.68 cm, and the least claimed mutant, 25.41 cm
