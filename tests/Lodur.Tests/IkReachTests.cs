@@ -29,7 +29,7 @@ public sealed class IkReachTests
     private const float FreeBound = 0.0377f;
 
     /// <summary>Runs the right arm toward shoulder + offset for four seconds and returns the wrist error, the final state hash and the torso drift.</summary>
-    private static (float Error, ulong Hash) Reach((float X, float Y, float Z) offset, float gravity, bool weldPelvis)
+    private static (float Error, ulong Hash) Reach((float X, float Y, float Z) offset, float gravity, bool weldPelvis, float strengthValue = 1f)
     {
         var (bodies, joints, _) = Ragdoll.Needs(Plan);
         using var world = new Box3DSoaWorld(capacity: bodies + (weldPelvis ? 1 : 0), gravityY: gravity, jointCapacity: joints + (weldPelvis ? 1 : 0));
@@ -43,7 +43,7 @@ public sealed class IkReachTests
         var arm = ArmChain.Of(Plan, Side.Right, Dt);
         var strength = new float[Plan.Joints.Count];
         var target = new Quat[Plan.Joints.Count];
-        Array.Fill(strength, 1f);
+        Array.Fill(strength, strengthValue);
         Array.Fill(target, Quat.Identity);
         var goal = (X: arm.ShoulderAnchor.X + offset.X, Y: arm.ShoulderAnchor.Y + offset.Y, Z: arm.ShoulderAnchor.Z + offset.Z);
         var torso = ragdoll.BodyLane(arm.ParentPart);
@@ -105,14 +105,44 @@ public sealed class IkReachTests
         _out.WriteLine($"shipped worst {worst * 100f:F2} cm, bound {FreeBound * 100f:F1} cm");
     }
 
+    /// <summary>
+    /// Gravity reach bound at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 3.97 cm over the three targets with the pelvis welded (3.01, 3.16, 3.97),
+    /// and the least claimed mutant, 24.01 cm (the feedforward off: 13.69, 10.16, 24.01): margin 2.46 each side. The controller no longer sags: zero gravity reads 0.89 cm here.
+    /// With the count gate off the shipped worst reads 0.89 cm: the right hand's thumb and fingers touch each other, so their weight leaves the arm's load (ruling
+    /// gravity-feedforward-count-gate, given up: self-contact counts as support; follow-up gravity-support-subtree-external).
+    /// </summary>
+    private const float GravityBound = 0.0976f;
+
     [Fact]
-    public void Gravity_reach_error_is_reported()
+    public void Gravity_reach_lands_the_wrist_at_full_strength()
     {
+        var worst = 0f;
         foreach (var offset in Targets)
         {
             var (error, _) = Reach(offset, gravity: -10f, weldPelvis: true);
-            _out.WriteLine($"gravity on, pelvis welded, offset {offset}: wrist error {error * 100f:F1} cm (no bound; follow-up lodur-reach-tracking)");
-            Assert.True(float.IsFinite(error));
+            _out.WriteLine($"gravity on, pelvis welded, offset {offset}: wrist error {error * 100f:F2} cm");
+            worst = MathF.Max(worst, error);
+            Assert.True(error < GravityBound, $"wrist error {error * 100f:F2} cm at {offset} exceeds {GravityBound * 100f:F2} cm");
+        }
+
+        _out.WriteLine($"shipped worst {worst * 100f:F2} cm, bound {GravityBound * 100f:F2} cm");
+    }
+
+    /// <summary>
+    /// The least a half-strength arm sags at any target, at the geometric midpoint of the shipped least (13.38 cm; 20.31, 13.38, 25.01) and the least claimed mutant (1.47 cm:
+    /// the feedforward without its strength factor, which holds the weight up at half strength; 18.95, 5.47, 1.47): margin 3.0 each side. A weak will sags (strength 0.5 is
+    /// weakness, not the controller), and the feedforward off reads 22.45, 17.18, 38.77 there.
+    /// </summary>
+    private const float WeakSag = 0.0443f;
+
+    [Fact]
+    public void A_half_strength_arm_still_sags_under_gravity_at_every_target()
+    {
+        foreach (var offset in Targets)
+        {
+            var (error, _) = Reach(offset, gravity: -10f, weldPelvis: true, strengthValue: 0.5f);
+            _out.WriteLine($"gravity on, pelvis welded, half strength, offset {offset}: wrist error {error * 100f:F2} cm");
+            Assert.True(error > WeakSag, $"half strength landed within {error * 100f:F2} cm at {offset}, under {WeakSag * 100f:F2} cm: weakness did not sag");
         }
     }
 

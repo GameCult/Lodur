@@ -36,8 +36,8 @@ public sealed class SeatedOrientTests
 
     /// <summary>
     /// Head forward error bound after 2 s, degrees, set at the geometric midpoint (deterministic-bound-margin) of the shipped worst then, 1.030 deg, and the
-    /// least claimed mutant, 15.233 deg (the look blended at half weight), and not loosened since: the shipped worst is now 1.080 deg over the two sounds with and
-    /// without gravity, the half-weight mutant 15.729 deg. Layers off reads 29.7 deg.
+    /// least claimed mutant, 15.233 deg (the look blended at half weight), and not loosened since: the shipped worst is now 1.946 deg over the two sounds under gravity (1.080 without it; the
+    /// feedforward lifts the head's look to 1.946 from 0.814), the half-weight mutant 15.729 deg. Layers off reads 29.7 deg.
     /// </summary>
     private const float LookBoundDegrees = 3.961f;
 
@@ -57,12 +57,14 @@ public sealed class SeatedOrientTests
     private const float NearWardBound = 0.0576f;
 
     /// <summary>
-    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 18.68 cm, and the least claimed mutant, 25.41 cm
-    /// (the via point's x at the midpoint). Also killed: the wrists sent sideways of the head, 31.21 cm; no spread, 34.79 cm; the arms at half weight, 62.17 cm. Not killed: the via point at the trunk front, 23.56 cm. The 11 to 13 cm over the zero-gravity case is
-    /// the shoulder sagging under the arm's weight (swing 1.11 against a target of 1.50): follow-up lodur-gravity-feedforward. Not re-measured: spread halved
-    /// and offset, and the clamped zero-twist swivel, each far above the bound before this cut.
+    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 6.00 cm, and the least claimed mutant, 15.52 cm (the via point
+    /// at the trunk front, clearance 0): margin 1.61 each side. Also killed: the gravity feedforward off, 18.68 cm (the controller's own sag, which was the shipped
+    /// worst before it, 18.68); the wrists sent sideways of the head, 33.87 cm; the via point's x at the midpoint, 29.77 cm; no spread, 28.38 cm; the arms at half weight, 54.60 cm.
+    /// Not killed: every reach solved directly, 7.20 cm. The bound at e47e3d3, before the feedforward, was 21.78 cm (shipped worst 18.68, least claimed mutant 25.41, the via
+    /// point's x at the midpoint). With the count gate off the shipped worst reads 7.59 cm: bodies in self-contact leave the arm's load
+    /// (ruling gravity-feedforward-count-gate, given up: self-contact counts as support). Not re-measured: spread halved and offset, and the clamped zero-twist swivel.
     /// </summary>
-    private const float GravityWardBound = 0.2178f;
+    private const float GravityWardBound = 0.0965f;
 
     private readonly ITestOutputHelper _out;
 

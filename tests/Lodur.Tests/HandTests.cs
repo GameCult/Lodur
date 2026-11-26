@@ -273,6 +273,13 @@ public sealed class HandTests
         Assert.InRange(Reach(3f), -0.45f, -0.30f); // 0.35 past straight, a soft stop gives a little
     }
 
+    /// <summary>
+    /// How far past its cone a hand joint may swing, at the geometric midpoint (deterministic-bound-margin) of the shipped worst and the least claimed mutant:
+    /// 0.0621 rad (wrist, seeds 1-3, four directions, both sides; 0.0557 thumb) against 0.6048 (the wrist added without its cone limit; the thumb reads 0.894), margin 3.1 each side.
+    /// The gravity feedforward lets the muscle press its full torque on Box3D's soft limit, which gives 0.0621 where the controller at e47e3d3 sagged off it (0.0587), and the old 0.06 bound.
+    /// </summary>
+    private const float ConeOvershoot = 0.194f;
+
     [Theory]
     [InlineData("Wrist", Side.Left, 1.0f)]
     [InlineData("Wrist", Side.Right, 1.0f)]
@@ -288,7 +295,7 @@ public sealed class HandTests
             s.Target[joint] = Quat.FromAxisAngle(ax, ay, 0f, 2.5f);
             s.Run(2f);
             var swing = Swing(s, joint);
-            Assert.True(swing < cone + 0.06f, $"{label} {side} swung {swing} past its cone {cone} toward ({ax}, {ay})");
+            Assert.True(swing < cone + ConeOvershoot, $"{label} {side} swung {swing} past its cone {cone} toward ({ax}, {ay})");
             reached = MathF.Max(reached, swing);
         }
         Assert.True(reached > cone - 0.15f, $"{label} {side} only swung {reached} of its cone {cone} in any direction");

@@ -12,9 +12,13 @@ namespace Lodur.Tests;
 internal sealed class ConnectedPainBox : IDisposable
 {
     public const double Dt = 1.0 / 120.0;
-    /// <summary>The stimulus box's half extent: 0.12 held the leak-free hand in the box until the break with the hand a forearm tip; the palm hangs 4 ticks early, so 0.125.</summary>
-    public const float BoxHalf = 0.125f;
-    /// <summary>Where the right palm settles at the hold pose (the box and the shoulder-right strength-1 pose are fixed; measured seed 1 from 3 s).</summary>
+    /// <summary>
+    /// The stimulus box's half extent, the smallest in 0.005 m steps that holds the shipped run's hand (seed 1) in the box from 2 s until the break. At e47e3d3 that was 0.125
+    /// (0.120 let the palm out 4 ticks early). With the gravity feedforward the will's failing sag, which the break no longer outruns, leaves the box earlier:
+    /// 0.125 lets it out 18 ticks early, 0.140 eight, 0.145 none. Limit 0.150: past it the hold no longer holds by intent.
+    /// </summary>
+    public const float BoxHalf = 0.145f;
+    /// <summary>The hold point: where the hold pose is solved to put the strength-1 right palm (the shoulder-right and elbow-right angles below; settled seed 1, 3-4 s, no leak), no longer where the controller sags it to.</summary>
     public static readonly (float X, float Y, float Z) Box = (-0.210f, 1.116f, 0.441f);
 
     public readonly Box3DSoaWorld World;
@@ -45,8 +49,11 @@ internal sealed class ConnectedPainBox : IDisposable
         var withdrawPose = new Quat[Plan.Joints.Count];
         Array.Fill(holdPose, Quat.Identity);
         Array.Fill(withdrawPose, Quat.Identity);
-        holdPose[Plan.JointIndex("Shoulder", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, -1.0f);
-        holdPose[Plan.JointIndex("Elbow", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, -0.6f);
+        // The hold pose is solved by intent: the shoulder and elbow angles that put the settled strength-1 palm on Box (grid then refine over both, seed 1, 3-4 s,
+        // box silent): -0.70 and -0.36, 0.34 cm off. At e47e3d3 the same fit was -1.0 and -0.6, a pose that gravity sagged onto Box; with the feedforward the
+        // controller no longer sags, and -1.0, -0.6 would hold the palm well above it.
+        holdPose[Plan.JointIndex("Shoulder", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, -0.70f);
+        holdPose[Plan.JointIndex("Elbow", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, -0.36f);
         withdrawPose[Plan.JointIndex("Shoulder", Side.Right)] = Quat.FromAxisAngle(1f, 0f, 0f, 0.3f);
         withdrawPose[Plan.JointIndex("Elbow", Side.Right)] = Quat.FromAxisAngle(0f, 0f, 1f, -2.0f);
 
@@ -206,10 +213,20 @@ public sealed class ConnectedPainBoxTests
     public void A_failing_will_sags_the_hold_even_with_no_leak_and_no_shake_while_a_strong_will_holds_still()
     {
         var plain = Run(seed: 1, new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 }, maxSeconds: 16.0);
-        // Early, resolve is high and the weight near 1: the hand stays within 2.3 cm of the hold point (seed 1 measured 0.2-2.0 cm to 8 s).
+        // Early, resolve is high and the weight near 1: the hand stays within 2.3 cm of the hold point (seed 1 measured 0.1-1.7 cm over 3-6 s with the gravity feedforward; 0.2-2.0 cm to 8 s at e47e3d3).
         for (var i = 3 * Hz; i < 6 * Hz; i++) Assert.True(Dist(plain.Hand[i].Hand, Centre) <= 0.023f, $"drift {Dist(plain.Hand[i].Hand, Centre)} at tick {i}");
-        // Late, the will is nearly gone: the voluntary hold has gone slack and the arm sags well out of the box before the break (measured 0.155 m at 14.3 s).
+        // Late, the will is nearly gone: the voluntary hold has gone slack and the arm sags well out of the box before the break (measured 0.199 m at 14.3 s with the gravity feedforward, the will's weakness the only sag left; 0.155 m at e47e3d3).
         Assert.True(Dist(plain.Hand[(int)plain.Broke - 60].Hand, Centre) > 0.1f);
+    }
+
+    [Fact]
+    public void The_hold_pose_puts_the_settled_palm_on_the_box_centre_at_full_strength()
+    {
+        // The pose is solved for this (0.34 cm at the fit): with a flat will and no leak the palm's mean from 3 to 4 s is within 0.5 cm of the hold point (0.24 cm measured).
+        var t = Run(seed: 1, new HoldParameters { FlinchGain = 0.0, StrainShake = 0.0 }, maxSeconds: 5.0, new DriveParameters { WillCurve = 0.001 });
+        var settled = t.Hand.Skip(3 * Hz).Take(Hz).ToList();
+        var mean = (X: settled.Average(h => h.Hand.X), Y: settled.Average(h => h.Hand.Y), Z: settled.Average(h => h.Hand.Z));
+        Assert.True(Dist(mean, Centre) <= 0.005f, $"settled palm {Dist(mean, Centre) * 100f:F2} cm from the hold point");
     }
 
     private static float VerticalPeakToPeak(Timeline t, int fromSecond)
@@ -222,7 +239,7 @@ public sealed class ConnectedPainBoxTests
     public void Strain_shows_as_a_visible_shake_of_the_hand_which_the_shipped_amplitude_makes_and_zero_does_not()
     {
         // Seconds 8 to 13 of seed 1: strain is about 3, the will has not broken (it breaks at 14.75 s). Measured at the
-        // palm with the shipped StrainShake 0.08 / ShakeHz 3.5: 3.2-5.5 cm peak to peak in hand height per second; at 0, 0.6-1.2 cm.
+        // palm with the shipped StrainShake 0.08 / ShakeHz 3.5: 3.3-4.6 cm peak to peak in hand height per second; at 0, 0.2-1.4 cm (3.2-5.5 and 0.6-1.2 cm at e47e3d3).
         // (The shake was 0.03 on the forearm-tip hand, 3.9-4.7 cm there; the hands' mass damps the arm and the default rose to keep the rule.)
         var shaking = Run(seed: 1, new HoldParameters(), maxSeconds: 16.0);
         var still = Run(seed: 1, new HoldParameters { StrainShake = 0.0 }, maxSeconds: 16.0);
@@ -265,10 +282,11 @@ public sealed class ConnectedPainBoxTests
     [Fact]
     public void Seed_1_to_16_seconds_replays_the_world_the_break_and_the_deliberate_switch_recorded_at_the_will_mix()
     {
-        // Recorded at the ragdoll hands (palm region, hand-mass damping, StrainShake 0.08, box half 0.125); the line before was the will mix's
-        // (broke=1770 withdrew=1782 flinches=16 hand=a0fafe85c80e98f7 world=83155f2abf0e7e91); the break moved two ticks, the flinch count did not.
+        // Recorded with the gravity feedforward and the re-solved hold (pose -0.70, -0.36, box half 0.145); the line before was recorded at e47e3d3, the ragdoll hands
+        // (palm region, hand-mass damping, StrainShake 0.08, box half 0.125, pose -1.0, -0.6): broke=1772 withdrew=1784 flinches=16 hand=17416bc7c2d12853 world=9f710f8186aff900.
+        // The break moved one tick, the flinch count did not; the hand and the world moved because the muscles now carry the arm's weight.
         var t = Run(seed: 1, maxSeconds: 16.0);
-        Assert.Equal("broke=1772 withdrew=1784 flinches=16 hand=17416bc7c2d12853 world=9f710f8186aff900",
+        Assert.Equal("broke=1773 withdrew=1785 flinches=16 hand=6db1f8d175e3e635 world=348765d9a09a27cf",
             $"broke={t.Broke} withdrew={t.Withdrew} flinches={t.Flinches.Count} hand={HandTrackHash(t):x16} world={t.Hash:x16}");
     }
 }
