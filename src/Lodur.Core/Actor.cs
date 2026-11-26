@@ -170,7 +170,7 @@ namespace Lodur
 
         /// <summary>
         /// Forgets the arms' history: each arm's next solve is the stateless rule, as on the first tick. For a caller that moves the body
-        /// discontinuously (a teleport, a respawn) so the arms do not carry a swivel from the old place. Nothing for an actor without arms.
+        /// discontinuously (a teleport, a respawn) so the arms neither carry a swivel from the old place nor slew from its targets. Nothing for an actor without arms.
         /// </summary>
         public void ResetArms() => _rig?.ResetArms();
 

@@ -100,10 +100,11 @@ namespace Lodur
     /// Identical goals can therefore give different targets depending on history; the same history gives the same targets.
     /// </para>
     /// <para>
-    /// The clamp splits the target into swing and twist, and that split is singular at a half-turn swing, where the swing direction turns by
-    /// up to a half turn for a small change in the target. Within <see cref="SingularBand"/> of it the clamp keeps the previous tick's swing
-    /// direction, blending from the fresh one across the band's width again (ruling lodur:ruling:ik-clamp-singular-uses-previous); the first
-    /// solve after construction or <see cref="Reset"/> clamps along the fresh direction.
+    /// The solved targets can still jump where the solution is discontinuous in the goal (the clamp's swing-twist split at a half-turn swing,
+    /// a basin change, a goal that leaps). So the targets the chain returns move toward the solved ones no faster than
+    /// <see cref="MaxAngularRate"/>: per solve the shoulder target turns, and the elbow target flexes, by at most MaxAngularRate times the
+    /// tick (ruling lodur:ruling:ik-output-slew-limit). While the goal holds still they converge on the solution. A goal that leaps is
+    /// followed at that rate, not at once. The first solve after construction or <see cref="Reset"/> returns the solution itself.
     /// </para>
     /// </summary>
     public sealed class ArmChain
@@ -111,14 +112,13 @@ namespace Lodur
         private readonly Quat _parentRestInverse, _frame, _frameInverse;
         private readonly IkVec _parentCentre, _shoulderAnchor, _upper, _lower, _elbowAxis, _twistAxis;
         private readonly float _flexSign, _flexLo, _flexHi, _cone, _twistLo, _twistHi, _coneSin2, _coneSinHalf, _coneCosHalf;
-        private readonly float _maxSwivelStep;
+        private readonly float _maxSwivelStep, _maxStep, _cosHalfMaxStep, _sinHalfMaxStep;
 
         // The previous solve's shoulder target before clamping, whose swivel the next solve starts from; none after construction or Reset.
-        private Quat _previous;
+        // The targets the previous solve returned, which the next one slews from, share the flag.
+        private Quat _previous, _shoulderOut;
+        private float _flexOut;
         private bool _hasPrevious;
-
-        // The previous solve's swing direction, the angle of the shoulder target's swing axis in the frame's xy plane, after clamping.
-        private float _swingDirection;
 
         /// <summary>
         /// Radians of limit violation, or of twist when both swivels are feasible, by which the stateless choice must beat the held swivel's
@@ -135,11 +135,10 @@ namespace Lodur
         public const float SwivelRate = 3f;
 
         /// <summary>
-        /// Radians of swing short of a half turn within which the clamp keeps the previous tick's swing direction; across the band's width
-        /// again beyond it the direction blends from the fresh one. Placeholder: it covers the half-turn jumps of the random-jump test
-        /// (held swing 3.005 to 3.141 rad), and is not derived from a measured cost.
+        /// The fastest the returned targets move, in radians per second: the shoulder target's turn and the elbow target's flex per solve are at
+        /// most this times the tick. Placeholder: near human peak arm angular speed, not measured for this body.
         /// </summary>
-        public const float SingularBand = 0.25f;
+        public const float MaxAngularRate = 10f;
 
         // Swivel search: steps of Pi / SwivelSteps outward from the zero-twist swivel, then bisection to the feasible boundary. When none is
         // feasible, the least-violating of LeastSteps steps round the circle, refined by golden section.
@@ -160,6 +159,9 @@ namespace Lodur
             }
 
             _maxSwivelStep = (float)(SwivelRate * tickSeconds);
+            _maxStep = (float)(MaxAngularRate * tickSeconds);
+            _cosHalfMaxStep = MathF.Cos(0.5f * _maxStep);
+            _sinHalfMaxStep = MathF.Sin(0.5f * _maxStep);
             var si = plan.JointIndex("Shoulder", side);
             var ei = plan.JointIndex("Elbow", side);
             var wi = plan.JointIndex("Wrist", side);
@@ -216,7 +218,7 @@ namespace Lodur
         /// <remarks>One chain is one arm's solver across ticks of <paramref name="tickSeconds"/>, which sets how far the swivel turns per solve.</remarks>
         public static ArmChain Of(BodyPlan plan, Side side, double tickSeconds) => new ArmChain(plan, side, tickSeconds);
 
-        /// <summary>Forgets the previous swivel and swing direction: the next solve uses the stateless rule.</summary>
+        /// <summary>Forgets the previous swivel and returned targets: the next solve uses the stateless rule and returns its solution unslewed.</summary>
         public void Reset() => _hasPrevious = false;
 
         /// <summary>The last solve's shoulder target before clamping, whose swivel the next solve holds (identity before any solve); tests read it.</summary>
@@ -242,7 +244,8 @@ namespace Lodur
         /// Targets that put the wrist anchor on the world point (tx, ty, tz), given the parent part's world rotation and position.
         /// Returns false when the point was out of reach or a limit clamped; the targets are then the limits-clamped pose of the swivel that
         /// violates the limits least, continuous with the reached targets at the edge of the feasible set, or, while the swivel turns between
-        /// basins, the clamped pose of the swivel on its way. One call is one tick of the arm's history.
+        /// basins, the clamped pose of the swivel on its way. The returned targets are slewed toward that solution at
+        /// <see cref="MaxAngularRate"/>; the return value describes the solution. One call is one tick of the arm's history.
         /// </summary>
         public bool Solve(in Quat parentRotation, float px, float py, float pz, float tx, float ty, float tz, out Quat shoulder, out Quat elbow)
         {
@@ -282,23 +285,44 @@ namespace Lodur
             }
 
             var local = Local(a, b, phi);
-            var hold = _hasPrevious;
+            var slew = _hasPrevious;
             _previous = local;
             _hasPrevious = true;
             if (clamp)
             {
                 // Infeasible: swing and twist clamped to the limits.
-                local = ClampToLimits(local, hold);
+                local = ClampToLimits(local);
                 reached = false;
+            }
+
+            if (slew)
+            {
+                _shoulderOut = Toward(_shoulderOut, local);
+                _flexOut += Ik.Clamp(flex - _flexOut, -_maxStep, _maxStep);
             }
             else
             {
-                _swingDirection = SwingDirection(local);
+                (_shoulderOut, _flexOut) = (local, flex);
             }
 
-            shoulder = local;
-            elbow = Quat.FromAxisAngle(0f, 0f, 1f, flex);
+            shoulder = _shoulderOut;
+            elbow = Quat.FromAxisAngle(0f, 0f, 1f, _flexOut);
             return reached;
+        }
+
+        // The rotation from current toward target, turned by at most the per-solve step: the target itself when it is within the step.
+        private Quat Toward(in Quat current, in Quat target)
+        {
+            var d = current.Conjugate() * target;
+            var s = d.W < 0f ? -1f : 1f;
+            var (x, y, z, w) = (s * d.X, s * d.Y, s * d.Z, s * d.W);
+            var sinHalf = MathF.Sqrt(x * x + y * y + z * z);
+            if (2f * MathF.Atan2(sinHalf, w) <= _maxStep) return target;
+            var k = _sinHalfMaxStep / sinHalf;
+            // Renormalised, so a goal outrunning the rate for many ticks does not drift the target off the unit sphere.
+            var r = current * new Quat(x * k, y * k, z * k, _cosHalfMaxStep);
+            var n = 1f / MathF.Sqrt(r.X * r.X + r.Y * r.Y + r.Z * r.Z + r.W * r.W);
+            return new Quat(r.X * n, r.Y * n, r.Z * n, r.W * n);
         }
 
         // The stateless rule: zero twist inside the cone, else the nearest feasible swivel, else the least-violating one (clamp set).
@@ -533,47 +557,17 @@ namespace Lodur
             return (float)(fp <= fq ? p : q);
         }
 
-        // The swing-twist split: the twist about the frame z as (tz, tw), the half-angle's sine and cosine, and the swing as (sx, sy, sw), its
-        // axis in the xy plane; local = swing * twist. At a half-turn swing the twist is undefined: read it as none.
-        private static void Split(in Quat local, out float tz, out float tw, out float sx, out float sy, out float sw)
+        // Twist clamped to its range and swing to the cone, the swing direction kept. The target is swing * twist, the twist about the frame
+        // z and the swing about an axis in its xy plane.
+        private Quat ClampToLimits(in Quat local)
         {
-            sw = MathF.Sqrt(local.Z * local.Z + local.W * local.W);
-            tz = sw > 1e-6f ? local.Z / sw : 0f;
-            tw = sw > 1e-6f ? local.W / sw : 1f;
-            sx = tw * local.X - tz * local.Y;
-            sy = tz * local.X + tw * local.Y;
-        }
-
-        private static float SwingDirection(in Quat local)
-        {
-            Split(local, out _, out _, out var sx, out var sy, out _);
-            return MathF.Atan2(sy, sx);
-        }
-
-        // Twist clamped to its range and swing to the cone, the swing direction kept. Near a half-turn swing the split is singular: the swing
-        // direction turns by up to a half turn for a small change in the target. There, with a previous solve (hold), the direction is the
-        // previous tick's (ruling lodur:ruling:ik-clamp-singular-uses-previous), blended continuously from the fresh one across the band's
-        // outer edge, and the twist is read against that direction; the direction used is kept for the next tick.
-        private Quat ClampToLimits(in Quat local, bool hold)
-        {
-            Split(local, out var tz, out var tw, out var sx, out var sy, out var sw);
-            var sl = MathF.Sqrt(sx * sx + sy * sy);
-            var weight = hold ? Ik.Clamp((2f * MathF.Atan2(sl, sw) - (MathF.PI - 2f * SingularBand)) / SingularBand, 0f, 1f) : 0f;
-            if (weight > 0f)
-            {
-                var fresh = MathF.Atan2(sy, sx);
-                var dir = fresh + weight * Wrap(_swingDirection - fresh);
-                // The swing about dir that carries the target's xy part: the twist half-angle is dir less the xy part's angle, taken in
-                // [-pi / 2, pi / 2] (a half turn of the half-angle is the same rotation).
-                var half = dir - MathF.Atan2(local.Y, local.X);
-                half -= MathF.PI * MathF.Round(half / MathF.PI);
-                tz = MathF.Sin(half);
-                tw = MathF.Cos(half);
-                sx = sl * MathF.Cos(dir);
-                sy = sl * MathF.Sin(dir);
-            }
-
-            _swingDirection = MathF.Atan2(sy, sx);
+            // At a half-turn swing the twist is undefined: read it as none.
+            var tl = MathF.Sqrt(local.Z * local.Z + local.W * local.W);
+            var tz = tl > 1e-6f ? local.Z / tl : 0f;
+            var tw = tl > 1e-6f ? local.W / tl : 1f;
+            var sx = tw * local.X - tz * local.Y;
+            var sy = tz * local.X + tw * local.Y;
+            var sw = tl;
             var s2 = sx * sx + sy * sy;
             if (s2 > _coneSin2)
             {
@@ -583,9 +577,9 @@ namespace Lodur
                 sw = _coneCosHalf;
             }
 
-            var twistHalf = 0.5f * Ik.Clamp(2f * MathF.Atan2(tz, tw), _twistLo, _twistHi);
-            tz = MathF.Sin(twistHalf);
-            tw = MathF.Cos(twistHalf);
+            var half = 0.5f * Ik.Clamp(2f * MathF.Atan2(tz, tw), _twistLo, _twistHi);
+            tz = MathF.Sin(half);
+            tw = MathF.Cos(half);
             return new Quat(tw * sx + tz * sy, tw * sy - tz * sx, sw * tz, sw * tw);
         }
     }

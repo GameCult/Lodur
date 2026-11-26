@@ -150,12 +150,12 @@ public sealed class IkTests
         var arm = ArmChain.Of(Plan, side, Dt);
         var centre = Plan.Parts[arm.ParentPart].Position;
         var s = arm.ShoulderAnchor;
-        var (worstTurn, worstMove) = (0f, 0f);
+        var (worstTurn, worstFlex, worstMove) = (0f, 0f, 0f);
         foreach (var (from, to) in new[] { (0.25f, 0.33f), (2.65f, 2.74f) })
         {
             const int steps = 2000;
             var crossings = 0;
-            var (lastReached, lastShoulder, lastWrist) = (false, Quat.Identity, (0f, 0f, 0f));
+            var (lastReached, lastShoulder, lastElbow, lastWrist) = (false, Quat.Identity, Quat.Identity, (0f, 0f, 0f));
             // Each stretch is its own path.
             arm.Reset();
             for (var i = 0; i <= steps; i++)
@@ -167,23 +167,24 @@ public sealed class IkTests
                 if (i > 0)
                 {
                     if (reached != lastReached) crossings++;
-                    var dot = MathF.Abs(sq.X * lastShoulder.X + sq.Y * lastShoulder.Y + sq.Z * lastShoulder.Z + sq.W * lastShoulder.W);
-                    worstTurn = MathF.Max(worstTurn, 2f * MathF.Acos(MathF.Min(1f, dot)));
+                    worstTurn = MathF.Max(worstTurn, Turn(sq, lastShoulder));
+                    worstFlex = MathF.Max(worstFlex, Turn(eq, lastElbow));
                     worstMove = MathF.Max(worstMove, Len(Sub(wrist, lastWrist)));
                 }
 
-                (lastReached, lastShoulder, lastWrist) = (reached, sq, wrist);
+                (lastReached, lastShoulder, lastElbow, lastWrist) = (reached, sq, eq, wrist);
             }
 
             // Tripwire: the stretch still crosses the edge, so the bounds below still test a crossing.
             Assert.Equal(1, crossings);
         }
 
-        _output.WriteLine($"{side}: largest step of the shoulder target {worstTurn:F4} rad, of the wrist {worstMove * 1000f:F4} mm");
-        // deterministic-bound-margin: each bound is the geometric mean of the shipped worst and the least mutant. Shipped worst, both
-        // arms: 0.0117 rad and 0.0216 mm. Mutant, the zero-twist swing clamped to the cone past the edge (the fallback before this test):
-        // 1.3752 rad and 269.72 mm. Bounds sqrt(0.0117 * 1.3752) = 0.127 rad and sqrt(0.0216 * 269.72) = 2.41 mm.
-        Assert.True(worstTurn < 0.127f, $"the shoulder target jumped {worstTurn} rad in one step");
+        _output.WriteLine($"{side}: largest step of the shoulder target {worstTurn:F4} rad, of the elbow {worstFlex:F4} rad, of the wrist {worstMove * 1000f:F4} mm");
+        // The turns are bounded by the rate (StepBound). deterministic-bound-margin for the wrist: the geometric mean of the shipped worst
+        // and the least mutant. Shipped worst, both arms: 0.0216 mm. Mutant, the zero-twist swing clamped to the cone past the edge (the
+        // fallback before this test): 269.72 mm. Bound sqrt(0.0216 * 269.72) = 2.41 mm.
+        Assert.True(worstTurn <= StepBound, $"the shoulder target jumped {worstTurn} rad in one step");
+        Assert.True(worstFlex <= StepBound, $"the elbow target jumped {worstFlex} rad in one step");
         Assert.True(worstMove < 0.00241f, $"the wrist jumped {worstMove} m in one step");
     }
 
@@ -335,27 +336,27 @@ public sealed class IkTests
     private static readonly (float Y, float Z)[] TieLines = { (0.12f, -0.4f), (0.2f, -0.2f), (0.25f, 0f), (0.3f, -0.1f), (-0.224f, -0.2f), (-0.25f, -0.25f) };
 
     /// <summary>
-    /// Walks one chain along goals, one solve per tick, from a fresh state: the largest per-tick turn of the shoulder target and the largest
-    /// swing of the held (unclamped) target. With <paramref name="stateless"/> the chain is reset before every solve: the stateless argmin,
-    /// the claimed mutant.
+    /// Walks one chain along goals, one solve per tick, from a fresh state: the largest per-tick turn of the shoulder target, the largest
+    /// swing of the held (unclamped) target, and the largest per-tick turn of the elbow target. With <paramref name="stateless"/> the chain
+    /// is reset before every solve, so it returns the stateless solution unslewed: the claimed mutant.
     /// </summary>
-    private static (float Turn, float HeldSwing) Walk(ArmChain arm, IEnumerable<(float X, float Y, float Z)> goals, bool stateless, Quat[]? record = null)
+    private static (float Turn, float HeldSwing, float Flex) Walk(ArmChain arm, IEnumerable<(float X, float Y, float Z)> goals, bool stateless, Quat[]? record = null)
     {
         var c = Plan.Parts[arm.ParentPart].Position;
-        var (worst, swing, last, i) = (0f, 0f, Quat.Identity, 0);
+        var (worst, flex, swing, last, lastE, i) = (0f, 0f, 0f, Quat.Identity, Quat.Identity, 0);
         arm.Reset();
         foreach (var g in goals)
         {
             if (stateless) arm.Reset();
-            arm.Solve(Quat.Identity, c.X, c.Y, c.Z, g.X, g.Y, g.Z, out var sq, out _);
-            if (i > 0) worst = MathF.Max(worst, Turn(sq, last));
+            arm.Solve(Quat.Identity, c.X, c.Y, c.Z, g.X, g.Y, g.Z, out var sq, out var eq);
+            if (i > 0) (worst, flex) = (MathF.Max(worst, Turn(sq, last)), MathF.Max(flex, Turn(eq, lastE)));
             swing = MathF.Max(swing, Swing(arm.Held));
             if (record != null) record[i] = sq;
-            last = sq;
+            (last, lastE) = (sq, eq);
             i++;
         }
 
-        return (worst, swing);
+        return (worst, swing, flex);
     }
 
     private static IEnumerable<(float X, float Y, float Z)> Line((float X, float Y, float Z) s, float y, float z, float sign, int from, int to, float step)
@@ -363,12 +364,10 @@ public sealed class IkTests
         for (var i = from; i <= to; i++) yield return (s.X + sign * i * step, s.Y + y, s.Z + z);
     }
 
-    // deterministic-bound-margin for the held swivel's per-tick turn at Dt = 0.01 s (a 0.03 rad swivel step): the geometric mean of the
-    // shipped worst and the least claimed mutant. Claimed mutants: the stateless argmin (the chain reset every tick), and the clamp along the
-    // fresh swing direction at the half-turn swing (no hold). Shipped worst over the tie lines, all 81 random jumps and the basin switch:
-    // 0.0333 rad. Least mutant: 0.5039 rad, the stateless argmin at a random jump (tie lines least 0.9995); the fresh-direction clamp turns
-    // 2.27 to 3.00 rad at 18 of the 20 half-turn jumps (2.98 right, 3.00 left worst). Bound sqrt(0.0333 * 0.5039) = 0.129.
-    private const float HeldTurnBound = 0.129f;
+    // The per-tick turn of either returned target is at most MaxAngularRate * Dt (0.1 rad) by construction (ruling
+    // lodur:ruling:ik-output-slew-limit); 1e-5 rad covers the float reading of the turn. Claimed mutants: no slew (the raw solution, as the
+    // stateless walk returns it), and the slew on the shoulder only (the leap test's elbow).
+    private static readonly float StepBound = ArmChain.MaxAngularRate * (float)Dt + 1e-5f;
 
     [Fact]
     public void Across_a_tie_line_the_arm_keeps_its_swivel_and_the_arms_mirror()
@@ -397,7 +396,7 @@ public sealed class IkTests
         _output.WriteLine($"worst held {worst:F4}, least stateless worst {mutant:F4}");
         // Tripwire: every line still ties under the stateless rule, so the bound still tests a tie.
         Assert.True(mutant > 0.9f, $"a tie line no longer ties: the stateless rule turns only {mutant} rad");
-        Assert.True(worst < HeldTurnBound, $"the shoulder target turned {worst} rad in one tick across a tie");
+        Assert.True(worst <= StepBound, $"the shoulder target turned {worst} rad in one tick across a tie");
     }
 
     [Theory]
@@ -408,8 +407,9 @@ public sealed class IkTests
         // Soul's probe: random segments about the shoulder walked in 0.4 mm steps; each step the stateless rule turns over 0.5 rad is
         // bisected to a gap under 2 microns, where it persists. The held chain walks 2 mm up to the near side, across the gap in one
         // tick, and 2 mm on.
-        // Counted: jumps where the held target swings past HalfTurnSwing, where the swing-twist split is singular and the clamp holds the
-        // previous swing direction; the tripwire keeps the bound testing that band.
+        // Counted: jumps where the held target swings past HalfTurnSwing, where the clamp's swing-twist split is singular and the clamped
+        // solution itself jumps; the tripwire keeps the bound testing that band. Each of those is also walked 20 cm along its segment
+        // (1001 ticks of 0.2 mm), entering and leaving the band.
         const float HalfTurnSwing = 3.0f;
         var arm = ArmChain.Of(Plan, side, Dt);
         var s = arm.ShoulderAnchor;
@@ -434,6 +434,8 @@ public sealed class IkTests
         static (float X, float Y, float Z) Lerp((float X, float Y, float Z) a, (float X, float Y, float Z) b, float u) => (a.X + (b.X - a.X) * u, a.Y + (b.Y - a.Y) * u, a.Z + (b.Z - a.Z) * u);
         var (found, singular, worst, mutant) = (0, 0, 0f, float.MaxValue);
         var path = new (float X, float Y, float Z)[12];
+        var band = new (float X, float Y, float Z)[1001];
+        var (bandWorst, bandRaw) = (0f, float.MaxValue);
         for (var k = 0; k < 400 && found < 40; k++)
         {
             var a = Pt();
@@ -461,8 +463,23 @@ public sealed class IkTests
                     for (var j = 0; j < 6; j++) path[j] = Lerp(lo, Add(lo, u), (j - 5) * step);
                     for (var j = 0; j < 6; j++) path[6 + j] = Lerp(hi, Add(hi, u), j * step);
                     var walk = Walk(arm, path, false);
-                    if (walk.HeldSwing > HalfTurnSwing) singular++;
-                    worst = MathF.Max(worst, walk.Turn);
+                    if (walk.HeldSwing > HalfTurnSwing)
+                    {
+                        singular++;
+                        var uh = 1f / Len(u);
+                        for (var j = 0; j < band.Length; j++)
+                        {
+                            var t = (j - 500) * 0.0002f * uh;
+                            band[j] = (lo.X + u.X * t, lo.Y + u.Y * t, lo.Z + u.Z * t);
+                        }
+
+                        var through = Walk(arm, band, false);
+                        bandWorst = MathF.Max(bandWorst, MathF.Max(through.Turn, through.Flex));
+                        var raw = Walk(arm, band, true);
+                        bandRaw = MathF.Min(bandRaw, MathF.Max(raw.Turn, raw.Flex));
+                    }
+
+                    worst = MathF.Max(worst, MathF.Max(walk.Turn, walk.Flex));
                     mutant = MathF.Min(mutant, Walk(arm, path, true).Turn);
                 }
 
@@ -471,9 +488,96 @@ public sealed class IkTests
         }
 
         _output.WriteLine($"{side}: {found} stateless jumps (worst held {worst:F4} rad per tick, least stateless worst {mutant:F4}), {singular} at the half-turn swing");
+        _output.WriteLine($"{side}: 20 cm walks through the half-turn band: worst {bandWorst:F4} rad per tick, least raw worst {bandRaw:F4}");
         Assert.True(found >= 40, $"only {found} stateless jumps found; the probe no longer finds the ties");
         Assert.True(singular >= 5, $"only {singular} jumps at the half-turn swing; the bound no longer tests the singular clamp");
-        Assert.True(worst < HeldTurnBound, $"the shoulder target turned {worst} rad in one tick at a stateless jump");
+        Assert.True(bandWorst <= StepBound, $"a target turned {bandWorst} rad in one tick on a walk through the half-turn band");
+        Assert.True(worst <= StepBound, $"a target turned {worst} rad in one tick at a stateless jump");
+    }
+
+    [Theory]
+    [InlineData(Side.Left)]
+    [InlineData(Side.Right)]
+    public void A_goal_circling_the_shoulder_moves_the_targets_at_most_the_rate(Side side)
+    {
+        // Full circles about the shoulder in its horizontal plane and above and below it, 1 mm per tick, two laps each from a fresh chain.
+        var arm = ArmChain.Of(Plan, side, Dt);
+        var s = arm.ShoulderAnchor;
+        var (worst, raw) = (0f, 0f);
+        foreach (var (y, r) in new[] { (-0.3f, 0.35f), (0f, 0.45f), (0.2f, 0.4f) })
+        {
+            var steps = (int)(2f * MathF.PI * r / 0.001f);
+            var path = new (float X, float Y, float Z)[2 * steps + 1];
+            for (var i = 0; i < path.Length; i++)
+            {
+                var th = 2f * MathF.PI * i / steps;
+                path[i] = (s.X + r * MathF.Sin(th), s.Y + y, s.Z + r * MathF.Cos(th));
+            }
+
+            var walk = Walk(arm, path, false);
+            worst = MathF.Max(worst, MathF.Max(walk.Turn, walk.Flex));
+            var mutant = Walk(arm, path, true);
+            raw = MathF.Max(raw, MathF.Max(mutant.Turn, mutant.Flex));
+        }
+
+        _output.WriteLine($"{side}: worst {worst:F4} rad per tick; the raw solution's worst {raw:F4}");
+        // Tripwire: the raw solution jumps somewhere on the circles, so the bound tests a jump.
+        Assert.True(raw > 0.5f, $"the raw solution turns only {raw} rad per tick on the circles");
+        Assert.True(worst <= StepBound, $"a target turned {worst} rad in one tick on a circle");
+    }
+
+    [Theory]
+    [InlineData(Side.Left)]
+    [InlineData(Side.Right)]
+    public void A_leaping_goal_is_followed_at_the_rate_and_settles_on_the_solution(Side side)
+    {
+        // The goal leaps between offsets from the shoulder (mirrored for the left) and holds each for Hold ticks. Every tick both targets
+        // move at most the step; within Hold ticks they settle on the solution a fresh chain gives there. A second chain walking the same
+        // goals returns the same bits.
+        const int Hold = 200;
+        var sign = side == Side.Left ? -1f : 1f;
+        var arm = ArmChain.Of(Plan, side, Dt);
+        var twin = ArmChain.Of(Plan, side, Dt);
+        var fresh = ArmChain.Of(Plan, side, Dt);
+        var s = arm.ShoulderAnchor;
+        var c = Plan.Parts[arm.ParentPart].Position;
+        var offsets = new[] { (0f, -0.25f, 0.35f), (0f, -0.12f, 0.1f), (0f, 0.05f, 0.45f), (-0.15f, -0.3f, 0.25f), (0.1f, -0.1f, 0.15f), (0f, -0.25f, 0.35f) };
+        var (worstTurn, worstFlex, rawTurn, rawFlex, slowest) = (0f, 0f, 0f, 0f, 0);
+        var (last, lastE) = (Quat.Identity, Quat.Identity);
+        for (var k = 0; k < offsets.Length; k++)
+        {
+            var g = (X: s.X + sign * offsets[k].Item1, Y: s.Y + offsets[k].Item2, Z: s.Z + offsets[k].Item3);
+            fresh.Reset();
+            fresh.Solve(Quat.Identity, c.X, c.Y, c.Z, g.X, g.Y, g.Z, out var want, out var wantE);
+            if (k > 0) (rawTurn, rawFlex) = (MathF.Max(rawTurn, Turn(want, last)), MathF.Max(rawFlex, Turn(wantE, lastE)));
+            var settled = -1;
+            for (var i = 0; i < Hold; i++)
+            {
+                arm.Solve(Quat.Identity, c.X, c.Y, c.Z, g.X, g.Y, g.Z, out var q, out var e);
+                twin.Solve(Quat.Identity, c.X, c.Y, c.Z, g.X, g.Y, g.Z, out var tq, out var te);
+                Assert.Equal(q, tq);
+                Assert.Equal(e, te);
+                if (k > 0 || i > 0) (worstTurn, worstFlex) = (MathF.Max(worstTurn, Turn(q, last)), MathF.Max(worstFlex, Turn(e, lastE)));
+                if (settled < 0 && Near(q, want) && Near(e, wantE)) settled = i;
+                if (settled >= 0) Assert.True(Near(q, want) && Near(e, wantE), $"leap {k}: the targets left the solution after settling at tick {settled}");
+                (last, lastE) = (q, e);
+            }
+
+            Assert.True(settled >= 0, $"leap {k}: the targets did not settle on the solution within {Hold} ticks");
+            slowest = Math.Max(slowest, settled);
+        }
+
+        _output.WriteLine($"{side}: worst {worstTurn:F4} rad shoulder, {worstFlex:F4} elbow per tick; raw leaps up to {rawTurn:F3} and {rawFlex:F3}; settled by tick {slowest}");
+        // Tripwire: the raw solution leaps at both joints, so the slew on the shoulder only would trip the elbow's bound.
+        Assert.True(rawTurn > 0.5f && rawFlex > 0.5f, $"the leaps are too small to test the slew: {rawTurn}, {rawFlex} rad");
+        Assert.True(worstTurn <= StepBound, $"the shoulder target turned {worstTurn} rad in one tick");
+        Assert.True(worstFlex <= StepBound, $"the elbow target turned {worstFlex} rad in one tick");
+
+        static bool Near(Quat a, Quat b)
+        {
+            var sg = a.X * b.X + a.Y * b.Y + a.Z * b.Z + a.W * b.W < 0f ? -1f : 1f;
+            return MathF.Abs(a.X - sg * b.X) < 1e-4f && MathF.Abs(a.Y - sg * b.Y) < 1e-4f && MathF.Abs(a.Z - sg * b.Z) < 1e-4f && MathF.Abs(a.W - sg * b.W) < 1e-4f;
+        }
     }
 
     [Fact]
@@ -513,7 +617,7 @@ public sealed class IkTests
         _output.WriteLine($"2 mm past the tie: {heldAt:F3} rad from the stateless target; switched by dx {switchedAt * 1000f:F1} mm; worst {worst:F4} rad per tick");
         Assert.True(heldAt > 1f, $"2 mm past the tie the arm left its basin ({heldAt} rad from the stateless target)");
         Assert.False(float.IsNaN(switchedAt), "the arm never took the clearly better basin");
-        Assert.True(worst < HeldTurnBound, $"the shoulder target turned {worst} rad in one tick");
+        Assert.True(worst <= StepBound, $"the shoulder target turned {worst} rad in one tick");
 
         // Reset forgets the swivel: the next solve is the stateless rule, bit for bit, where the held arm differs.
         arm.Reset();
