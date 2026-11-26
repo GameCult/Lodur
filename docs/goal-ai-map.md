@@ -44,6 +44,13 @@ scratch project `imag-goals/probe` (not committed); humanoid, 120 Hz, 4 substeps
 8. **Zero-twist two-bone solve (probe).** Choosing the elbow swivel so the shoulder target has no twist is
    closed form: `R = Rot(v, phi) * Arc(p, v)`, `phi/2 = atan2(-Q.y, w v.y + (v x Q).y)` with `(Q, w) = Arc(p, v)`
    and y the creation-pose bone axis; the result is unique. Arm lengths: L1 0.310 m, L2 0.265 m (anchors).
+   That swivel can push the swing past the shoulder cone where another swivel reaches: the seated ward-off goals at
+   head height (`(0.30, 1.74, 0.26)` left, `(0.00, 1.74, 0.26)` right) clamp 20.5 and 22.6 cm short at zero twist and
+   are reached at twist 0.27 and 0.52 inside the [-1, 1] limits. At gravity 0 the twist muscle holds those to 0.54
+   and 0.44 and the wrists land 7.0 and 2.8 cm off (probe, cut `lodur-orient-goals` s1 fix).
+   Across the body, a goal the zero-twist swivel reaches can still be missed: the right arm swinging toward
+   `(-0.04, 1.60, 0.24)` drives its forearm into the side of the trunk and wedges there, 45 cm short at gravity 0
+   (two forearm contacts, swing 0.20 against 1.50); a forward via point for 0.6 s first brings it to 9.8 cm.
 9. **Reach on the ragdoll (probe).** Solving each step from the measured torso frame, wrist error after 4 s,
    right arm, targets at shoulder plus an offset. Gravity 0, free-floating: `(0,-0.25,0.35)` 3.0 cm,
    `(0.12,-0.1,0.4)` 11.1 cm (swing 1.22 near the 1.5 cone, across the body), `(-0.15,-0.3,0.25)` 2.3 cm,
@@ -246,8 +253,10 @@ consideration input to its Select.
 Lodur.Core, as Final IK feeds PuppetMaster's target pose, not a solver in the binding: the binding stays the
 muscle layer and the will mix and graft mask see IK like any other layer. Arms are two-bone with a hinge elbow,
 so the analytic solve is exact; FABRIK and CCD wait for graft chains that are not two-bone. The elbow swivel is
-the one needing no shoulder twist, because the shoulder's twist muscle cannot hold one (fact 7); what this gives
-up is an authored elbow direction. Reach under gravity lands short by PD sag (fact 9); that is its own cut.
+the one needing no shoulder twist, because the shoulder's twist muscle tracks a twist weakly (fact 7); what this
+gives up is an authored elbow direction. Where that swivel leaves the cone, the swivel is the nearest one inside
+the cone and the twist limits, the feasible swivel range of Tolani, Goswami and Badler (2000); the swing clamps
+only when no swivel is feasible (fact 8). Reach under gravity lands short by PD sag (fact 9); that is its own cut.
 
 **Goal-target rationale.** A target is tracked by percept Id (fact 11), selection scores (goal, percept) pairs,
 and a retarget inside the goal waits the deliberate latency but not the dwell, held only by the commitment

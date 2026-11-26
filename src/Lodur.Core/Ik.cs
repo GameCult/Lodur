@@ -85,14 +85,20 @@ namespace Lodur
 
     /// <summary>
     /// A two-bone arm: shoulder (spherical), elbow (revolute) and wrist anchors of one side, found by label in the plan. Solves a world
-    /// point for the wrist anchor with zero shoulder twist: the elbow flex is fixed by the distance, and the swivel about the shoulder-to-wrist
-    /// line is the one that leaves the shoulder target no twist.
+    /// point for the wrist anchor: the elbow flex is fixed by the distance, and the swivel about the shoulder-to-wrist line is the one that
+    /// leaves the shoulder target no twist, the shoulder's twist muscle being weak. When that swivel puts the swing past the cone, the swivel
+    /// is the one nearest it whose swing is inside the cone and whose twist is inside the twist limits (the joint-limit-feasible swivel range of
+    /// Tolani, Goswami and Badler 2000); only when no swivel is feasible does the swing clamp to the cone.
     /// </summary>
     public sealed class ArmChain
     {
         private readonly Quat _parentRestInverse, _frame, _frameInverse;
         private readonly IkVec _parentCentre, _shoulderAnchor, _upper, _lower, _elbowAxis, _twistAxis;
-        private readonly float _flexSign, _flexLo, _flexHi, _cone;
+        private readonly float _flexSign, _flexLo, _flexHi, _cone, _twistLo, _twistHi, _coneSin2;
+
+        // Swivel search: steps of Pi / SwivelSteps outward from the zero-twist swivel, then bisection to the feasible boundary.
+        private const int SwivelSteps = 90;
+        private const int SwivelBisections = 16;
 
         private ArmChain(BodyPlan plan, Side side)
         {
@@ -132,6 +138,10 @@ namespace Lodur
             _flexLo = e.Lower;
             _flexHi = e.Upper;
             _cone = s.Cone;
+            _twistLo = s.Lower;
+            _twistHi = s.Upper;
+            var half = MathF.Sin(0.5f * _cone);
+            _coneSin2 = half * half;
             _shoulderAnchor = shoulder;
             _frame = Ik.JointFrame(s);
             _frameInverse = _frame.Conjugate();
@@ -188,14 +198,13 @@ namespace Lodur
             var q = new IkVec(arc.X, arc.Y, arc.Z);
             var num = -q.Dot(_twistAxis);
             var den = arc.W * vHat.Dot(_twistAxis) + vHat.Cross(q).Dot(_twistAxis);
-            var swing = Ik.About(vHat, 2f * MathF.Atan2(num, den)) * arc;
-
-            var local = _frameInverse * swing * _frame;
-            if (local.W < 0f) local = new Quat(-local.X, -local.Y, -local.Z, -local.W);
-            var vecLen = MathF.Sqrt(local.X * local.X + local.Y * local.Y + local.Z * local.Z);
-            var angle = 2f * MathF.Atan2(vecLen, local.W);
-            if (angle > _cone)
+            var zeroTwist = 2f * MathF.Atan2(num, den);
+            var local = Local(vHat, arc, zeroTwist);
+            if (!InsideCone(local) && !NearestFeasible(vHat, arc, zeroTwist, out local))
             {
+                // No swivel is feasible: the zero-twist swing, clamped to the cone.
+                local = Local(vHat, arc, zeroTwist);
+                var vecLen = MathF.Sqrt(local.X * local.X + local.Y * local.Y + local.Z * local.Z);
                 local = Quat.FromAxisAngle(local.X / vecLen, local.Y / vecLen, local.Z / vecLen, _cone);
                 reached = false;
             }
@@ -203,6 +212,62 @@ namespace Lodur
             shoulder = local;
             elbow = Quat.FromAxisAngle(0f, 0f, 1f, flex);
             return reached;
+        }
+
+        // The shoulder target in the joint frame for the swivel phi about vHat, with w >= 0.
+        private Quat Local(IkVec vHat, in Quat arc, float phi)
+        {
+            var local = _frameInverse * (Ik.About(vHat, phi) * arc) * _frame;
+            return local.W < 0f ? new Quat(-local.X, -local.Y, -local.Z, -local.W) : local;
+        }
+
+        // Swing is the angle between the frame z and its image: inside the cone when sin^2(swing / 2) = x^2 + y^2 <= sin^2(cone / 2).
+        private bool InsideCone(in Quat local) => local.X * local.X + local.Y * local.Y <= _coneSin2;
+
+        private bool Feasible(in Quat local)
+        {
+            if (!InsideCone(local)) return false;
+            var twist = 2f * MathF.Atan2(local.Z, local.W);
+            return twist >= _twistLo && twist <= _twistHi;
+        }
+
+        // The feasible swivel nearest phi0: step outward both ways, and at the first step that lands inside, bisect back to the boundary;
+        // of the two sides, the one with the smaller twist. False when no swivel is feasible.
+        private bool NearestFeasible(IkVec vHat, in Quat arc, float phi0, out Quat local)
+        {
+            local = default;
+            const float step = MathF.PI / SwivelSteps;
+            for (var k = 1; k <= SwivelSteps; k++)
+            {
+                var found = false;
+                var bestTwist = float.MaxValue;
+                for (var sign = -1; sign <= 1; sign += 2)
+                {
+                    var phi = phi0 + sign * k * step;
+                    if (!Feasible(Local(vHat, arc, phi))) continue;
+                    var inside = phi;
+                    var outside = phi0 + sign * (k - 1) * step;
+                    for (var b = 0; b < SwivelBisections; b++)
+                    {
+                        var mid = 0.5f * (inside + outside);
+                        if (Feasible(Local(vHat, arc, mid))) inside = mid;
+                        else outside = mid;
+                    }
+
+                    var candidate = Local(vHat, arc, inside);
+                    var twist = MathF.Abs(2f * MathF.Atan2(candidate.Z, candidate.W));
+                    if (twist < bestTwist)
+                    {
+                        bestTwist = twist;
+                        local = candidate;
+                        found = true;
+                    }
+                }
+
+                if (found) return true;
+            }
+
+            return false;
         }
     }
 

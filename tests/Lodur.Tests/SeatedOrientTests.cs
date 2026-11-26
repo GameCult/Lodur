@@ -6,7 +6,7 @@ using Ymir.Box3D;
 namespace Lodur.Tests;
 
 /// <summary>
-/// The orient layers on the real body: a ragdoll seated on a stool welded to the pelvis, gravity on, a sound at one side. An Actor whose goal looks
+/// The orient layers on the real body: a ragdoll seated on a stool welded to the pelvis, without and with gravity, a sound at one side. An Actor whose goal looks
 /// at it and wards it off drives the ragdoll through strengths and targets only; the game (this scenario) reads the part poses, owns the world and steps it.
 /// </summary>
 public sealed class SeatedOrientTests
@@ -14,25 +14,45 @@ public sealed class SeatedOrientTests
     private const float Dt = 1f / 120f;
     private const uint Thing = 7;
     private const float WardDistance = 0.3f;
+    private const float Spread = 0.15f;
     private static readonly BodyPlan Plan = BodyPlans.Humanoid();
 
     /// <summary>Where the sound sits for each case: well to one side and a little ahead, at head height and beyond the arms reach.</summary>
     private static readonly (float X, float Y, float Z)[] Sounds = { (0.4f, 1.74f, 0.7f), (-0.4f, 1.74f, 0.7f) };
 
     /// <summary>
-    /// Head forward error bound after 2 s, degrees, at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 0.040 deg over the two
-    /// sounds, and the least claimed mutant, 15.157 deg (the look blended at half weight): separation 379. Also killed: look not applied, 30.6 deg;
-    /// the look aimed at the target mirrored in x, 60.2 deg. Layers off reads 29.9 deg.
+    /// A lower sound to the left, whose ward goals the near (left) arm reaches with zero shoulder twist. The far arm's goal crosses the midline, and
+    /// its swing toward it drives the forearm into the side of the trunk, where it wedges (44.6 cm off, gravity or not): the far arm is not claimed here.
     /// </summary>
-    private const float LookBoundDegrees = 0.78f;
+    private static readonly (float X, float Y, float Z) LowSound = (0.4f, 1.2f, 0.9f);
 
     /// <summary>
-    /// Bound on the mean wrist distance to the head-to-sound line after 2 s, metres, at the geometric midpoint of the shipped worst, 51.67 cm, and the least
-    /// claimed mutant, 78.67 cm (the arms layer not applied, which reads the spawn value): separation 1.52. The ward-off wrists sit short of the line under gravity
-    /// (follow-up lodur-reach-tracking), so the bound proves they rose toward it, not that they met it. Unclaimed: the wrists sent sideways of the line by the
-    /// ward distance instead of along it reads 62.44 and 57.76 cm, separation 1.12 against the shipped worst, which this metric does not separate.
+    /// Head forward error bound after 2 s, degrees, at the geometric midpoint (deterministic-bound-margin) of the shipped worst, 1.030 deg over the two
+    /// sounds with and without gravity, and the least claimed mutant, 15.233 deg (the look blended at half weight): separation 14.8. Layers off reads 29.7 deg.
     /// </summary>
-    private const float WardBound = 0.6376f;
+    private const float LookBoundDegrees = 3.961f;
+
+    /// <summary>
+    /// Without gravity, bound on each wrist's distance to its own ward goal after 2 s at the head-height sounds, metres: the geometric midpoint of the shipped
+    /// worst, 7.00 cm, and the least claimed mutant, 16.23 cm (no spread: both wrists on the line). Also killed: the wrists sent sideways of the head by the
+    /// ward distance, 27.72 cm; spread halved and offset 0.1 m, 19.36 cm; the arms blended at half weight, 27.51 cm; the zero-twist swivel clamped to the
+    /// shoulder cone (the solver before the feasible-swivel search), 64.94 cm. Layers off reads the start, 81.3 and 83.5 cm.
+    /// </summary>
+    private const float WardBound = 0.1066f;
+
+    /// <summary>
+    /// Without gravity, bound on the near (left) wrist's distance to its ward goal at the low sound: the geometric midpoint of the shipped 4.34 cm and the
+    /// least claimed mutant, 11.41 cm (the arms at half weight). Also killed: sideways, 16.64 cm; no spread, 20.10 cm.
+    /// </summary>
+    private const float NearWardBound = 0.0704f;
+
+    /// <summary>
+    /// Under gravity, the head-height bound on each wrist: the geometric midpoint of the shipped worst, 17.79 cm, and the least claimed mutant, 36.84 cm (no
+    /// spread). Also killed: spread halved and offset, 53.28 cm; the arms at half weight, 44.24 cm; the clamped zero-twist swivel, 68.58 cm. The 11 to 13 cm
+    /// over the zero-gravity case is the shoulder sagging under the arm's weight (swing 1.11 against a target of 1.50): follow-up lodur-reach-tracking.
+    /// Unclaimed: the sideways mutant reads 23.92 cm, separation 1.34.
+    /// </summary>
+    private const float GravityWardBound = 0.2560f;
 
     private readonly ITestOutputHelper _out;
 
@@ -54,7 +74,7 @@ public sealed class SeatedOrientTests
         return pose;
     }
 
-    private static Brain Watching(bool layered) => new()
+    private static Brain Watching() => new()
     {
         Goals = new[]
         {
@@ -66,25 +86,25 @@ public sealed class SeatedOrientTests
                 Behaviour = new PoseBehaviour
                 {
                     Keys = new[] { Held() }, FlinchPose = Held(),
-                    Look = layered ? new LookLayer() : null,
-                    Arms = layered ? new ArmLayer { Mode = ArmMode.WardOff, Side = ArmSide.Both, Distance = WardDistance, Spread = 0.15f } : null,
+                    Look = new LookLayer(),
+                    Arms = new ArmLayer { Mode = ArmMode.WardOff, Side = ArmSide.Both, Distance = WardDistance, Spread = Spread },
                 },
             },
         },
     };
 
-    /// <summary>Seats the body, sounds the emitter for two seconds and returns the head forward's error to the sound bearing (radians) and the mean wrist distance to the head-to-sound line, at the end and at the start.</summary>
-    private static (float Look, float WardEnd, float WardStart, ulong Target) Run((float X, float Y, float Z) sound, bool layered)
+    /// <summary>Seats the body, sounds the emitter for two seconds and returns the head forward's error to the sound bearing (radians) and each wrist's distance to its ward goal at the end and at the start.</summary>
+    private static (float Look, float Left, float Right, float LeftStart, float RightStart, ulong Target) Run((float X, float Y, float Z) sound, float gravity)
     {
         var (bodies, joints, _) = Ragdoll.Needs(Plan);
-        using var world = new Box3DSoaWorld(capacity: bodies + 2, jointCapacity: joints + 1);
+        using var world = new Box3DSoaWorld(capacity: bodies + 2, gravityY: gravity, jointCapacity: joints + 1);
         world.AddStaticBox(1, (0f, -0.5f, 0f), (20f, 0.5f, 20f), friction: 0.8f);
         var stool = world.AddStaticBox(2, (0f, 1.11f, -0.115f), (0.05f, 0.05f, 0.025f), friction: 0.8f);
         var ragdoll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
         world.AddJoint(Box3DSoaJointKind.Weld, stool, ragdoll.BodyLane(Plan.PartIndex("Pelvis")), (0f, 1.11f, -0.09f), (0f, 1f, 0f));
 
         var senseHead = Plan.SenseIndex("Head");
-        var actor = new Actor(Dt, Plan.SensePoints.Count, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), Watching(layered),
+        var actor = new Actor(Dt, Plan.SensePoints.Count, new NerveParameters(), new WithdrawalParameters(), new DriveParameters(), Watching(),
             new NerveParameters { Threshold = 0.05, SensitisationGrowth = 0.0, ConductionDelaySeconds = 0.0 }, senseHead,
             new PerceptParameters { Capacity = 4, MemorySeconds = 5.0 }, body: Plan);
         var x = new float[Plan.SensePoints.Count]; var y = new float[x.Length]; var z = new float[x.Length];
@@ -95,27 +115,26 @@ public sealed class SeatedOrientTests
         var head = Plan.PartIndex("Head");
         var wrists = new[] { Plan.JointIndex("Wrist", Side.Left), Plan.JointIndex("Wrist", Side.Right) };
 
-        float WristError()
+        var torso = Plan.PartIndex("Torso");
+
+        // Each wrist's distance to its own ward-off goal: the head centre plus Distance toward the sound plus Spread along the torso's left
+        // axis, the left wrist to the left. The goal is rebuilt from the measured head and torso, as the layer builds it.
+        float WristError(int k)
         {
             var h = parts[head];
             var u = Unit((sound.X - h.X, sound.Y - h.Y, sound.Z - h.Z));
-            var sum = 0f;
-            foreach (var w in wrists)
-            {
-                var j = Plan.Joints[w];
-                var fore = parts[j.Parent];
-                var c = Plan.Parts[j.Parent].Position;
-                fore.Rotation.Rotate(j.Anchor.X - c.X, j.Anchor.Y - c.Y, j.Anchor.Z - c.Z, out var ox, out var oy, out var oz);
-                var q = (X: fore.X + ox - h.X, Y: fore.Y + oy - h.Y, Z: fore.Z + oz - h.Z);
-                var along = q.X * u.X + q.Y * u.Y + q.Z * u.Z;
-                sum += MathF.Sqrt(MathF.Max(0f, q.X * q.X + q.Y * q.Y + q.Z * q.Z - along * along));
-            }
-
-            return sum / wrists.Length;
+            parts[torso].Rotation.Rotate(1f, 0f, 0f, out var lx, out var ly, out var lz);
+            var across = k == 0 ? Spread : -Spread;
+            var goal = (h.X + u.X * WardDistance + lx * across, h.Y + u.Y * WardDistance + ly * across, h.Z + u.Z * WardDistance + lz * across);
+            var j = Plan.Joints[wrists[k]];
+            var fore = parts[j.Parent];
+            var c = Plan.Parts[j.Parent].Position;
+            fore.Rotation.Rotate(j.Anchor.X - c.X, j.Anchor.Y - c.Y, j.Anchor.Z - c.Z, out var ox, out var oy, out var oz);
+            return Dist((fore.X + ox, fore.Y + oy, fore.Z + oz), goal);
         }
 
         ragdoll.ReadPartPoses(parts);
-        var start = WristError();
+        var (leftStart, rightStart) = (WristError(0), WristError(1));
         for (var i = 0; i < (int)MathF.Round(2f / Dt); i++)
         {
             ragdoll.ReadSensePoints(x, y, z);
@@ -130,7 +149,7 @@ public sealed class SeatedOrientTests
         hp.Rotation.Rotate(0f, 0f, 1f, out var fx, out var fy, out var fz);
         var bearing = Unit((sound.X - hp.X, sound.Y - hp.Y, sound.Z - hp.Z));
         var cos = Math.Clamp(fx * bearing.X + fy * bearing.Y + fz * bearing.Z, -1f, 1f);
-        return (MathF.Acos(cos), WristError(), start, actor.TargetId);
+        return (MathF.Acos(cos), WristError(0), WristError(1), leftStart, rightStart, actor.TargetId);
     }
 
     [Fact]
@@ -158,16 +177,32 @@ public sealed class SeatedOrientTests
     }
 
     [Fact]
-    public void A_seated_body_looks_at_the_sound_and_wards_it_off()
+    public void Without_gravity_a_seated_body_looks_at_the_sound_and_its_wrists_meet_the_ward_goals()
     {
         for (var s = 0; s < Sounds.Length; s++)
         {
-            var (look, wardEnd, wardStart, target) = Run(Sounds[s], layered: true);
-            var (lookOff, wardOff, _, _) = Run(Sounds[s], layered: false);
-            _out.WriteLine($"sound {s}: head error {look * 57.2958f:F3} deg (layers off {lookOff * 57.2958f:F3}), wrists to the head-sound line {wardEnd * 100f:F2} cm (start {wardStart * 100f:F2}, layers off {wardOff * 100f:F2}), target {target}");
-            Assert.Equal(1UL, target);
-            Assert.True(look * 57.2958f < LookBoundDegrees, $"head forward is {look * 57.2958f:F2} deg off the sound, bound {LookBoundDegrees} deg");
-            Assert.True(wardEnd < WardBound && wardEnd < wardStart, $"wrists are {wardEnd * 100f:F1} cm from the head-sound line (start {wardStart * 100f:F1}), bound {WardBound * 100f:F1} cm");
+            var r = Run(Sounds[s], gravity: 0f);
+            _out.WriteLine($"sound {s}: head error {r.Look * 57.2958f:F3} deg, wrists to their goals {r.Left * 100f:F2} and {r.Right * 100f:F2} cm (start {r.LeftStart * 100f:F2} and {r.RightStart * 100f:F2}), target {r.Target}");
+            Assert.Equal(1UL, r.Target);
+            Assert.True(r.Look * 57.2958f < LookBoundDegrees, $"head forward is {r.Look * 57.2958f:F2} deg off the sound, bound {LookBoundDegrees} deg");
+            Assert.True(r.Left < WardBound && r.Right < WardBound, $"wrists are {r.Left * 100f:F1} and {r.Right * 100f:F1} cm from their goals, bound {WardBound * 100f:F1} cm");
+        }
+
+        var low = Run(LowSound, gravity: 0f);
+        _out.WriteLine($"low sound: wrists to their goals {low.Left * 100f:F2} and {low.Right * 100f:F2} cm");
+        Assert.True(low.Left < NearWardBound, $"the near wrist is {low.Left * 100f:F1} cm from its goal, bound {NearWardBound * 100f:F1} cm");
+    }
+
+    [Fact]
+    public void Under_gravity_a_seated_body_looks_at_the_sound_and_its_wrists_rise_toward_the_ward_goals()
+    {
+        for (var s = 0; s < Sounds.Length; s++)
+        {
+            var r = Run(Sounds[s], gravity: -10f);
+            _out.WriteLine($"sound {s}: head error {r.Look * 57.2958f:F3} deg, wrists to their goals {r.Left * 100f:F2} and {r.Right * 100f:F2} cm (start {r.LeftStart * 100f:F2} and {r.RightStart * 100f:F2}), target {r.Target}");
+            Assert.Equal(1UL, r.Target);
+            Assert.True(r.Look * 57.2958f < LookBoundDegrees, $"head forward is {r.Look * 57.2958f:F2} deg off the sound, bound {LookBoundDegrees} deg");
+            Assert.True(r.Left < GravityWardBound && r.Right < GravityWardBound, $"wrists are {r.Left * 100f:F1} and {r.Right * 100f:F1} cm from their goals, bound {GravityWardBound * 100f:F1} cm");
         }
     }
 }

@@ -86,18 +86,46 @@ public sealed class IkTests
     [Theory]
     [InlineData(Side.Left)]
     [InlineData(Side.Right)]
-    public void Arm_solve_never_twists_the_shoulder(Side side)
+    public void Arm_solve_twists_the_shoulder_only_where_zero_twist_would_leave_the_cone(Side side)
     {
         var arm = ArmChain.Of(Plan, side);
-        var n = 0;
+        var joint = Plan.Joints[arm.ShoulderJoint];
+        var (n, twisted) = (0, 0);
         foreach (var (rot, pos, target) in Grid(arm, 21 + (int)side, 600))
         {
             arm.Solve(rot, pos.X, pos.Y, pos.Z, target.X, target.Y, target.Z, out var sq, out _);
-            Assert.True(ZTwist(sq) < 1e-5f, $"shoulder target twists by {ZTwist(sq)} rad for {target}");
+            var swing = 2f * MathF.Asin(MathF.Min(1f, MathF.Sqrt(sq.X * sq.X + sq.Y * sq.Y)));
+            var twist = 2f * MathF.Atan2(sq.Z, sq.W);
+            Assert.True(swing <= joint.Cone + 1e-4f, $"swing {swing} past the cone {joint.Cone} for {target}");
+            Assert.True(twist >= joint.Lower - 1e-4f && twist <= joint.Upper + 1e-4f, $"twist {twist} outside [{joint.Lower}, {joint.Upper}] for {target}");
+            if (MathF.Abs(twist) > 1e-5f)
+            {
+                // A twist is taken only to keep the swing inside the cone, so the swivel sits on the boundary of the feasible range.
+                twisted++;
+                var onLimit = MathF.Abs(swing - joint.Cone) < 1e-3f || MathF.Abs(twist - joint.Lower) < 1e-3f || MathF.Abs(twist - joint.Upper) < 1e-3f;
+                Assert.True(onLimit, $"shoulder target twists by {twist} rad at swing {swing} for {target}, off every limit");
+            }
+
             n++;
         }
 
         Assert.Equal(600, n);
+        Assert.InRange(twisted, 1, n / 2);
+    }
+
+    [Fact]
+    public void A_wrist_goal_the_zero_twist_swivel_cannot_reach_is_reached_by_twisting_inside_the_limits()
+    {
+        // The left ward-off wrist goal for a sound at head height, ahead and to the left: zero twist saturates the cone 20 cm short.
+        var arm = ArmChain.Of(Plan, Side.Left);
+        var joint = Plan.Joints[arm.ShoulderJoint];
+        var centre = Plan.Parts[arm.ParentPart].Position;
+        var goal = (0.2988f, 1.74f, 0.2605f);
+        Assert.True(arm.Solve(Quat.Identity, centre.X, centre.Y, centre.Z, goal.Item1, goal.Item2, goal.Item3, out var sq, out var eq));
+        var wrist = Wrist(arm, Quat.Identity, centre, sq, eq);
+        Assert.True(Len(Sub(wrist, goal)) < 1e-3f, $"wrist {wrist} missed {goal} by {Len(Sub(wrist, goal))} m");
+        var twist = 2f * MathF.Atan2(sq.Z, sq.W);
+        Assert.True(MathF.Abs(twist) > 0.05f && twist >= joint.Lower && twist <= joint.Upper, $"twist {twist}");
     }
 
     [Fact]
