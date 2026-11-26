@@ -337,6 +337,20 @@ public sealed class OrientTests
     }
 
     [Fact]
+    public void The_layers_treat_a_phantom_target_as_they_treat_a_real_one_at_the_same_place()
+    {
+        // Stare-at-hands is Look and Reach on a phantom at the actor's own hand: the layers read the percept's place, never its id.
+        var b = Behaviour(new LookLayer(), new ArmLayer { Mode = ArmMode.Reach, Side = ArmSide.Both }, Recoiling());
+        foreach (var parts in new[] { Rest(), Turned() })
+        {
+            var real = Run(b, parts, At(Ahead, 1UL));
+            var phantom = Run(b, parts, At(Ahead, Perception.PhantomIdBit | 1UL));
+            for (var m = 0; m < Joints; m++) SameBits(real[m], phantom[m]);
+            Assert.NotEqual(Base(b)[Neck], phantom[Neck]);
+        }
+    }
+
+    [Fact]
     public void The_flinch_applies_after_the_layers_and_strength_stays_the_pose_rule()
     {
         var parts = Rest();

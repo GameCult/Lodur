@@ -234,7 +234,7 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
 | 2c | `lodur-planner-select` | Lodur | wants, Select admission, direct tries at a discount and frustration (`bds-unplannable-tries-direct`), plan on the Actor | 2b, Actor.cs cuts in flight | M |
 | 3 | `lodur-ik-goals` | Lodur | Look, ArmL, ArmR as a Core producer of joint targets (legs later) | none (parallel to 2) | M |
 | 3b | `lodur-reach-tracking` | Lodur | reach under gravity: feedforward or a damped error loop | 3 | S-M |
-| 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off, recoil, fetal and stare-at-hands as layers; seated Fella demo | 2, 3 | M |
+| 4 | `lodur-orient-goals` | Lodur + BDS | look, reach, ward off and recoil as layers; fetal (a key-pose goal) and stare-at-hands (Look and Reach on a phantom) are data; seated Fella demo | 2, 3 | M |
 | 5 | `lodur-phantom-percepts` + `bds-thought-bubble` | Lodur, BDS | phantom things by hallucination type; the bubble reads their kinds | 1, 4 | M, S |
 | 6 | `lodur-assist-pin` | Lodur | upright assist | none | S |
 | 7 | `lodur-stand` | Lodur + BDS | standing puppet scene, stool weld dropped | 6 | S |

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- Engine-free core (invariant core-engine-free): no engine, no physics, no Ymir. Unity-consumable. -->
+  <!-- Engine-free core (invariant core-engine-free): no engine, no physics binding. Unity-consumable. -->
   <PropertyGroup>
     <TargetFramework>netstandard2.1</TargetFramework>
     <LangVersion>12.0</LangVersion>

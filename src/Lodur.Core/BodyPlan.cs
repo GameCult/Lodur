@@ -37,7 +37,7 @@ namespace Lodur
 
     /// <summary>
     /// A body as data: parts, the joints that are also its tree, sense points and airway openings, each named by label and side.
-    /// Engine-free; a binding (Lodur.Body.Ymir) builds it into a physics world. Validated at construction.
+    /// Engine-free; a physics binding builds it into a world. Validated at construction.
     /// </summary>
     public sealed class BodyPlan
     {
