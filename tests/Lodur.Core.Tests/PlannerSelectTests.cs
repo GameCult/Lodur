@@ -651,6 +651,28 @@ public sealed class PlannerSelectTests
     }
 
     [Fact]
+    public void Ticking_a_crowded_room_allocates_nothing()
+    {
+        // Rounds of deepening, deferral, the decision plan swaps, and the carried check all run in these ticks; each Select spends the whole budget at depth 6.
+        var (_, verbs, emitters) = Crowd(new Random(3), 48);
+        var a = Build(Crowded(6, Planner.NodeBudget), 48, 5.0, verbs);
+        var strengths = new float[2];
+        var targets = new Quat[2];
+        for (var i = 0; i < 80; i++)
+        {
+            a.Tick(Zero, Zero, Zero, NoBoxes, strengths, targets, emitters);
+        }
+
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 200; i++)
+        {
+            a.Tick(Zero, Zero, Zero, NoBoxes, strengths, targets, emitters);
+        }
+
+        Assert.Equal(0L, GC.GetAllocatedBytesForCurrentThread() - before);
+    }
+
+    [Fact]
     public void A_crowded_room_changes_few_decisions()
     {
         foreach (var depth in new[] { 4, 5, 6, 8 })

@@ -199,10 +199,11 @@ in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; er
     before the break) and, gated only, the flinch control (tracks 5.5 cm apart before the first flinch, 6.0 after).
     Office body tests, the CLI goldens and `tools/PainSweep` (engine-free, no body) do not move. Probe:
     `F:\aeth-wt\imag-gravity-probe\` (patch, harness, logs).
-31. **The built gate in a crowded room (probe, `PlannerSelectTests`).** Room of 48 things (a strap at 0.3 m, a knife at
+31. **The built gate in a crowded room (probe, `PlannerSelectTests`).** The first build planned pairs best raw first, a whole
+    depth each. Room of 48 things (a strap at 0.3 m, a knife at
     0.5 m, then knives, keys, doors 70% locked, switches and four junk kinds within 12 m; the test catalogue plus `Pry`,
     `Fiddle`, `Stack`; wants on every door, switch, knife and the strap; doors outrank the strap), 100 seeds, ThinkBudget
-    4096 against `int.MaxValue`: decisions that differ are 0 at depth 4, 37 at 5, 59 at 6 and 62 at 8 (at 64 things, 8
+    4096 against `int.MaxValue`: decisions that differ were 0 at depth 4, 37 at 5, 59 at 6 and 62 at 8 (at 64 things, 8
     at depth 4). This is far above fact 21's 4-7%: the first pair in raw order is a locked door no plan within depth 6
     reaches, it spends the whole budget searching, and the strap he could cut is starved to a direct try. The count is
     a property of the world's priorities (a crowd of high-raw unplannable wants), not of the gate; fact 21's room did
@@ -210,7 +211,11 @@ in `F:\aeth-wt\imag-reach-lodur`, net8 Release; humanoid, 120 Hz, 4 substeps; er
     workstation): `Brain.Select` alone, budget 4096, 406 us at depth 4 and 766 us at depth 6 (unbounded: 259 us and
     13.3 ms); `Actor.Tick` over a utility-only Brain, extra 441 us at depth 4 and 924 us at depth 6, the difference
     from Select being the committed pair's plan, a second Plan call with the full budget every tick. A grounding costs
-    about 0.1-0.2 us, so the budget bounds a tick near 2 x ThinkBudget x 0.2 us. At depth 4 the move rule's plan cost
+    about 0.1-0.2 us. Deepening across pairs, with the plan made by the Select that chooses the pair and carried with
+    it, as built: decisions that differ are 0 of 100 at 48 things at depths 4, 5, 6, 7 and 8, and 2 of 100 at 64 things
+    at depths 4-8. Paired interleaved medians, 48 things, budget 4096, net10 Release: `Brain.Select` 206, 205 and 206 us at depths 4, 6 and 8
+    (unbounded 205, 208, 206; a Select spends 1592 groundings at the median, 4096 at most), `Actor.Tick` extra over a
+    utility-only Brain 68 us at depth 4 and 79 us at depth 6: a tick spends at most one `ThinkBudget`. At depth 4 the move rule's plan cost
     is about 2x on movers and 1.0x elsewhere (Soul s1 on `lodur-planner-moves`, paired medians, 6 wants); the budget
     bounds it, so no work on it here.
 
@@ -280,10 +285,14 @@ a pair planned within `PlanDepth` steps scores raw times the `PlanSteps` respons
 plan (none within the depth, or the think budget gone) is tried direct at `DirectDiscount`, reading `PlanSteps`
 at depth + 1 (ruling `bds-unplannable-tries-direct`, which answers `bds-unplannable-goal`: he goes at the target
 and fails where the player can see it; the frustration that ends a futile try is follow-up `lodur-planner-frustration`,
-so until it lands a direct try lasts while it wins). One `ThinkBudget` serves a whole Select, spent on pairs by raw
-score, best first; a want about himself is planned once per goal. The plan is derived state on the Actor, recomputed
-each tick from current percepts for the committed pair (`PlanLength`, `PlanStep(i)`, never kept across ticks; fact 13
-says it can be); the pair's commitment keeps the choice stable. A plan step is a verb on a percept, and a phantom
+so until it lands a direct try lasts while it wins). One `ThinkBudget` serves a whole Select, spent by deepening
+across the pairs (Korf's iterative deepening, anytime): round k asks every live pair for a plan of exactly k steps,
+by a bound on what the pair can still score, so short plans are found first and one pair's dead end cannot starve the
+rest; a want about himself is planned once per goal. The plan is the decision's: made by the Select that chose or
+re-chose the pair and carried with it to the Actor's commit (`PlanLength`, `PlanStep(i)`), checked against the
+percepts on a tick that decides nothing (its want holds, or a thing it names left memory), and made again for the
+pair in force when the dwell refuses a Select, from what is left of that Select's budget. Select never reads it;
+the pair's commitment keeps the choice stable. A plan step is a verb on a percept, and a phantom
 percept advertises as its kind does: a clever Fella plans through a hallucinated door and fails at it as a dim one
 fails at a real one. Intelligence 0 is the Fella of `brain-goal-targets`: no plans, every want pair direct. With no
 pair offered the goal in force stays and lets go of its target.
@@ -321,7 +330,8 @@ one joint contest by will. Nothing in the cuts below may write a body-wide outpu
   and remembered). Owner of what is real to him: the same; phantom-ness is not an input the Brain reads.
 - Owner of which goal and which target: `Brain` data, committed by the `Actor`.
 - Owner of how a goal is reached: the planner, reading percept facts and advertised verbs to the depth the
-  intelligence stat gives it. The plan is derived, never stored across Selects; nothing outside the Actor writes it.
+  intelligence stat gives it. The plan belongs to the decision: written by the Select that chooses or re-chooses the
+  pair (or by its refusal), carried with it, checked on carried ticks; Select never reads it; nothing outside the Actor writes it.
 - Owner of the four mind stats' current values: physiology, from character base and live afflictions. Brain,
   planner and Perception read them; a potion, a session or BDS never writes a depth, a latency or a memory time.
 - Owner of motion: the will mix over voluntary layers; reflexes act against it.
@@ -435,12 +445,14 @@ a This give of in-reach is a move, so after it another thing is in reach only if
 Plan call and `LastExhausted`), `lodur-planner-select` (wants, the gate, the plan on the Actor) and follow-up
 `lodur-planner-frustration`. The gate: a satisfied want is not offered; a planned pair scores through `PlanSteps`; an
 unplanned or not-worked-out pair is tried direct at `DirectDiscount`, reading `PlanSteps` at depth + 1 so a futile try
-never outranks an equal pair he can plan. Pairs are planned best raw score first and planning stops when no remaining
-raw score can win, as ReGoap tries goals in priority order with a per-attempt cap; fact 21 shows this changes no
-choice. One `ThinkBudget` per Select bounds cost (fact 22) at the price of 4-7% of choices in crowds at depth 5 and up (fact 21; fact 31 measures the built gate far higher where unplannable wants outrank plannable ones):
+never outranks an equal pair he can plan. Pairs are planned by deepening across them (round k, a bound per pair, a round
+ends when no bound can win; with an unbounded budget this chooses exactly as planning every pair), so a pair that no plan
+reaches cannot spend the budget before a cheap plan is found; fact 31 measures best raw first starving at 59 of 100
+decisions at depth 6 and deepening at 0. One `ThinkBudget` per Select bounds cost (fact 22) at the price of 4-7% of choices in crowds at depth 5 and up (fact 21), and 0-2% in fact 31's room:
 question `bds-think-budget-per-decision` (Deru). With no pair offered, the goal in force stays and lets go of its
-target (finding `stale-target-without-pair`); the orient layers then rest. The committed pair's plan is derived each
-tick after the commit block, a second Plan call on the current pair that the budget bounds.
+target (finding `stale-target-without-pair`); the orient layers then rest. The pair's plan is made with the decision (the
+Select that chose it, or re-chose it, or was refused and plans the pair in force) and carried; it is not derived each tick, which cost a
+second Plan call per tick (fact 31).
 
 ## Mind stats
 
