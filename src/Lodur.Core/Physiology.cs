@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Runtime.InteropServices;
 
 namespace Lodur
 {
@@ -165,7 +166,7 @@ namespace Lodur
         /// <summary>The ordinal (from 0) of the <see cref="Step"/> that killed, -1 while alive.</summary>
         public long DiedAtStep { get; private set; } = -1;
 
-        /// <summary>Afflictions refused because the table was full.</summary>
+        /// <summary>Afflictions refused because the table lacked room; a span call refused counts once.</summary>
         public int Refused { get; private set; }
 
         /// <summary>Wakefulness, 0..1; 0 once dead.</summary>
@@ -249,24 +250,48 @@ namespace Lodur
         /// Binds a new instance of the affliction to a tissue, never merged with another. Returns false, counting a refusal and
         /// overwriting nothing, when the table is full. Allowed while dead: it records the wound and nothing steps.
         /// </summary>
-        public bool Afflict(int affliction, int part, int layer, double severity)
+        public bool Afflict(int affliction, int part, int layer, double severity) =>
+            Afflict(affliction, part, MemoryMarshal.CreateReadOnlySpan(ref layer, 1), severity);
+
+        /// <summary>
+        /// A wound of several layers of one part, all or none: binds one new instance of the affliction per layer, in span order into
+        /// the lowest free slots, and returns true; with fewer free slots than layers it writes nothing, counts one refusal and returns
+        /// false. The affliction, severity and every layer are validated before anything is written; an empty span or a layer named
+        /// twice throws. Allowed while dead, as the single-layer call.
+        /// </summary>
+        public bool Afflict(int affliction, int part, ReadOnlySpan<int> layers, double severity)
         {
             if ((uint)affliction >= (uint)_defs.Length) throw new ArgumentException("not an affliction.");
-            var tissue = Flat(part, layer);
+            if (layers.Length == 0) throw new ArgumentException("a wound needs at least one layer.");
             if (!(severity > 0.0 && !double.IsInfinity(severity))) throw new ArgumentException("severity must be finite and above 0.");
-            for (var s = 0; s < _slotDef.Length; s++)
+            for (var i = 0; i < layers.Length; i++)
             {
-                if (_slotDef[s] >= 0) continue;
-                _slotDef[s] = affliction;
-                _slotPart[s] = part;
-                _slotTissue[s] = tissue;
-                _slotSeverity[s] = severity;
-                _slotAge[s] = 0.0;
-                return true;
+                Flat(part, layers[i]);
+                for (var j = 0; j < i; j++)
+                    if (layers[j] == layers[i]) throw new ArgumentException("a layer is named twice.");
             }
 
-            Refused++;
-            return false;
+            var free = 0;
+            for (var s = 0; s < _slotDef.Length; s++)
+                if (_slotDef[s] < 0) free++;
+            if (free < layers.Length)
+            {
+                Refused++;
+                return false;
+            }
+
+            var slot = 0;
+            for (var i = 0; i < layers.Length; i++)
+            {
+                while (_slotDef[slot] >= 0) slot++;
+                _slotDef[slot] = affliction;
+                _slotPart[slot] = part;
+                _slotTissue[slot] = Flat(part, layers[i]);
+                _slotSeverity[slot] = severity;
+                _slotAge[slot] = 0.0;
+            }
+
+            return true;
         }
 
         /// <summary>

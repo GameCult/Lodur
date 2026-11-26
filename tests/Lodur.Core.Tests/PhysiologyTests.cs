@@ -626,6 +626,60 @@ public sealed class PhysiologyTests
         Assert.True(p.Afflict(Af("Lesion"), 1, 0, 1));
     }
 
+    private static readonly TissueDef[] TwoLayers = { new("skin", 10, 1), new("muscle", 10, 1, Motor: 1) };
+
+    [Fact]
+    public void A_span_afflict_is_all_or_none()
+    {
+        var p = Make(slots: 3, limbA: TwoLayers);
+        Assert.True(p.Afflict(Af("Lesion"), 0, 0, 1));
+        Assert.True(p.Afflict(Af("Lesion"), 0, 1, 2));          // one free slot, two layers
+        Assert.False(p.Afflict(Af("Lesion"), 1, new[] { 0, 1 }, 5));
+        Assert.Equal(1, p.Refused);
+        Assert.Equal(2, Live(p));
+        Assert.Equal(-1, p.SlotDef(2));
+        var q = Make(slots: 2, limbA: TwoLayers);               // exactly enough
+        Assert.True(q.Afflict(Af("Lesion"), 1, new[] { 1, 0 }, 5));
+        Assert.Equal(0, q.Refused);
+        Assert.Equal(2, Live(q));
+        Assert.Equal(5.0, q.SlotSeverity(0));
+        Assert.Equal(5.0, q.SlotSeverity(1));
+        Assert.False(q.Afflict(Af("Lesion"), 1, new[] { 0 }, 5));
+        Assert.Equal(1, q.Refused);
+    }
+
+    [Fact]
+    public void A_healed_slot_is_free_to_the_span_call()
+    {
+        var p = Make(slots: 3, limbA: TwoLayers);
+        Assert.True(p.Afflict(Af("Heal"), 1, 0, 0.5));
+        Assert.True(p.Afflict(Af("Lesion"), 0, 0, 1));
+        Assert.True(p.Afflict(Af("Lesion"), 0, 1, 1));
+        Assert.False(p.Afflict(Af("Lesion"), 1, new[] { 0, 1 }, 1));    // full
+        p.Step(1.0);                                                    // Heal is gone, its slot is free
+        Assert.Equal(2, Live(p));
+        Assert.False(p.Afflict(Af("Lesion"), 1, new[] { 0, 1 }, 1));    // one free, two wanted
+        Assert.Equal(2, p.Refused);
+        Assert.True(p.Afflict(Af("Lesion"), 1, new[] { 1 }, 1));
+        Assert.Equal(3, Live(p));
+    }
+
+    [Fact]
+    public void A_bad_or_repeated_layer_throws_before_any_write()
+    {
+        var p = Make(slots: 8, limbA: TwoLayers);
+        var lesion = Af("Lesion");
+        Assert.Throws<ArgumentException>(() => p.Afflict(lesion, 1, new[] { 0, 2 }, 1));
+        Assert.Throws<ArgumentException>(() => p.Afflict(lesion, 1, new[] { 0, -1 }, 1));
+        Assert.Throws<ArgumentException>(() => p.Afflict(lesion, 1, new[] { 0, 1, 0 }, 1));
+        Assert.Throws<ArgumentException>(() => p.Afflict(lesion, 1, ReadOnlySpan<int>.Empty, 1));
+        Assert.Throws<ArgumentException>(() => p.Afflict(lesion, 9, new[] { 0 }, 1));
+        Assert.Throws<ArgumentException>(() => p.Afflict(lesion, 1, new[] { 0, 1 }, 0));
+        Assert.Throws<ArgumentException>(() => p.Afflict(99, 1, new[] { 0, 1 }, 1));
+        Assert.Equal(0, Live(p));
+        Assert.Equal(0, p.Refused);
+    }
+
     // Determinism.
 
     private static (long Volume, long Consciousness, long Motor) Bits(Physiology p) =>
