@@ -430,7 +430,10 @@ namespace Lodur
                         }
 
                         var factor = length > 0 ? goal.PlanFactor(length) : goal.PlanFactor(PlanDepth + 1) * DirectDiscount;
-                        Offer(pair.Goal, pair.Slot, pair.Target, pair.Raw * factor, pair.Current, ref best);
+                        if (Offer(pair.Goal, pair.Slot, pair.Target, pair.Raw * factor, pair.Current, ref best))
+                        {
+                            d.KeepBest(pair.Goal, length, goal.Want!.Value.Subject == FactSubject.Self);
+                        }
                     }
 
                     if (!d.NextRound())
@@ -456,7 +459,10 @@ namespace Lodur
 
             if (spec.Want is not { } want)
             {
-                Offer(goal, slot, target, raw, isCurrent, ref best);
+                if (Offer(goal, slot, target, raw, isCurrent, ref best))
+                {
+                    d?.KeepBest(goal, 0, false);
+                }
             }
             else if (!d!.Holds(goal, want, slot))
             {
@@ -464,14 +470,17 @@ namespace Lodur
             }
         }
 
-        // Ties resolve by key (current, then lowest goal, then lowest slot), not by call order: pass 2 offers out of index order.
-        private static void Offer(int goal, int slot, ulong target, double score, bool isCurrent, ref Pick best)
+        // Ties resolve by key (current, then lowest goal, then lowest slot), not by call order: pass 2 offers out of index order. True when the offer became the best, so its plan is kept.
+        private static bool Offer(int goal, int slot, ulong target, double score, bool isCurrent, ref Pick best)
         {
             if (!best.Found || score > best.Score
                 || (score == best.Score && (isCurrent != best.IsCurrent ? isCurrent : goal < best.Goal || (goal == best.Goal && slot < best.Slot))))
             {
                 best = new Pick { Goal = goal, Slot = slot, Target = target, Score = score, IsCurrent = isCurrent, Found = true };
+                return true;
             }
+
+            return false;
         }
 
         private struct Pick

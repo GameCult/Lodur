@@ -344,17 +344,91 @@ public sealed class PlannerSelectTests
     }
 
     [Fact]
-    public void The_plan_is_derived_each_tick_from_the_percepts()
+    public void The_plan_is_made_with_the_decision_and_carried()
     {
         var brain = new Brain { PlanDepth = 4, Goals = new[] { Goal("idle", 1.0), Goal("open", 3.0, Kinds(Door), This(Open)) } };
         var a = Build(brain);
         Run(a, Settle, new[] { BoltedDoor(1) });
         Assert.Equal(4, a.PlanLength);
-        // The door is sensed unlocked next tick: the plan shortens at once, without a new decision.
+
+        // The plan in force is the one the Select made, step for step.
+        var probe = new Planner(Catalogue(), 8, 4, 0.6);
+        var expected = new PlanStep[4];
+        var seen = See(8, BoltedDoor(1));
+        Assert.Equal(4, probe.Plan(seen, 0UL, 0f, 0f, 0f, 0, This(Open), 4, expected));
+        for (var i = 0; i < 4; i++)
+        {
+            Assert.Equal(expected[i], a.PlanStep(i));
+        }
+
+        // The door is sensed unlocked while the Select re-chooses the pair: the plan shortens the same tick.
         Run(a, 1, new[] { PlainDoor(1) });
         Assert.Equal(2, a.PlanLength);
+        // The door is seen open: the pair is no longer offered and the switch is pending, so this tick only checks the plan, and the want holds.
         Run(a, 1, new[] { Thing(1, Door, 6f, 1UL << Open) });
+        Assert.Equal(1, a.GoalIndex);
+        Assert.Equal(1UL, a.TargetId);
         Assert.Equal(0, a.PlanLength);
+        Run(a, Settle, new[] { Thing(1, Door, 6f, 1UL << Open) });
+        Assert.Equal(0, a.GoalIndex);
+        Assert.Equal(0, a.PlanLength);
+    }
+
+    [Fact]
+    public void A_carried_plan_goes_direct_when_a_step_s_thing_is_forgotten()
+    {
+        var brain = new Brain { PlanDepth = 4, Goals = new[] { Goal("idle", 1.0), Goal("calm", 3.0, Kinds(Knife), Self(Fed)) } };
+        var a = Build(brain, memory: 0.5);
+        Run(a, Settle, new[] { Thing(1, Knife, 5f) });
+        Assert.Equal(1, a.GoalIndex);
+        Assert.Equal(2, a.PlanLength);
+
+        // The knife leaves memory: the Select lets the goal go, a latency later; in between the plan in force is checked, and its steps have nothing to act on.
+        var lengths = new HashSet<int>();
+        for (var i = 0; i < 120; i++)
+        {
+            Run(a, 1, Array.Empty<Emitter>());
+            lengths.Add(a.PlanLength);
+        }
+
+        Assert.Contains(-1, lengths);
+        Assert.Equal(0, a.GoalIndex);
+        Assert.Equal(0, a.PlanLength);
+    }
+
+    [Fact]
+    public void A_refused_select_replans_the_pair_in_force()
+    {
+        // The open goal is in force and inside its minimum dwell; a knife appears that a second goal of equal priority would take at once, so the Select is refused.
+        Brain Make(int budget) => new()
+        {
+            PlanDepth = 4, ThinkBudget = budget,
+            Goals = new[]
+            {
+                Goal("idle", 0.5),
+                Goal("open", 3.0, Kinds(Door), This(Open), Shorter()) with { MinDwellSeconds = 50.0 },
+                Goal("grab", 3.0, Kinds(Knife), This(Held), Shorter()),
+            },
+        };
+
+        var a = Build(Make(Planner.NodeBudget));
+        Run(a, Settle, new[] { BoltedDoor(1) });
+        Assert.Equal(1, a.GoalIndex);
+        Assert.Equal(4, a.PlanLength);
+        Run(a, 1, new[] { PlainDoor(1), Thing(2, Knife, 0.3f) });
+        Assert.Equal(1, a.GoalIndex);
+        Assert.Equal(2, a.PlanLength);       // the refused Select planned the pair in force again, from this tick's percepts
+
+        // With the budget spent by the Select itself nothing is left to plan the pair in force: its plan is carried, only checked.
+        var b = Build(Make(1));
+        Run(b, Settle, new[] { BoltedDoor(1) });
+        Assert.Equal(1, b.GoalIndex);
+        Assert.Equal(-1, b.PlanLength);      // no budget to plan: he goes direct
+        Run(b, 1, new[] { PlainDoor(1), Thing(2, Knife, 0.3f) });
+        Assert.Equal(1, b.GoalIndex);
+        Assert.Equal(-1, b.PlanLength);
+        Run(b, 1, new[] { Thing(1, Door, 6f, 1UL << Open), Thing(2, Knife, 0.3f) });
+        Assert.Equal(0, b.PlanLength);
     }
 
     [Fact]

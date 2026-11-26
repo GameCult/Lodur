@@ -62,7 +62,7 @@ namespace Lodur
         private readonly OrientRig? _rig;
         private readonly bool _layered;
         private Side _arm = Side.Right;
-        // The want gate's thinking space (null when no goal has a want) and the plan length of the committed pair, derived each tick.
+        // The want gate's thinking space (null when no goal has a want), which also holds the plan of the decision in force, and its length as read.
         private readonly Deliberation? _deliberation;
         private int _planLength;
 
@@ -216,12 +216,13 @@ namespace Lodur
         public ulong TargetId => _target;
 
         /// <summary>
-        /// The length of the plan to the committed pair's want, derived each tick from the percepts (never kept across ticks): n steps, -1 when he goes at it direct (no plan within
-        /// <see cref="Brain.PlanDepth"/>), 0 when the goal has no want, the want holds, or its target is no longer in memory.
+        /// The length of the plan of the decision in force, made by the Select that chose or re-chose the pair and carried with it (a tick that decides nothing only checks it): n steps,
+        /// -1 when he goes at it direct (no plan within <see cref="Brain.PlanDepth"/>, the think budget gone, or a step's thing forgotten), 0 when the goal has no want, the want holds,
+        /// or its target is no longer in memory.
         /// </summary>
         public int PlanLength => _planLength;
 
-        /// <summary>Step <paramref name="i"/> of the committed pair's plan, for i below <see cref="PlanLength"/>: a verb of the Actor's list and the percept ids it is grounded on.</summary>
+        /// <summary>Step <paramref name="i"/> of the plan of the decision in force, for i below <see cref="PlanLength"/>: a verb of the Actor's list and the percept ids it is grounded on.</summary>
         public PlanStep PlanStep(int i)
         {
             if ((uint)i >= (uint)Math.Max(_planLength, 0))
@@ -357,6 +358,7 @@ namespace Lodur
 
             // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is
             // pending. Within the goal in force's minimum dwell only a strictly higher-priority goal is decided on.
+            var planned = false;
             if (_pending < 0)
             {
                 var sr = _perception.SenseRegion;
@@ -373,6 +375,20 @@ namespace Lodur
                     _pending = wanted.Goal;
                     _pendingTarget = wanted.Target;
                     _switchTick = _tick + _latency;
+                    _deliberation?.Adopt();
+                }
+                else if (_deliberation != null)
+                {
+                    // The Select re-chose the pair in force, or was refused by the dwell and the pair in force is planned again with what is left of its budget.
+                    if (wanted == now)
+                    {
+                        _deliberation.Refresh();
+                        planned = true;
+                    }
+                    else if (_brain.Goals[_goal].Want is { } inForceWant)
+                    {
+                        planned = _deliberation.ReplanInForce(_perception, regionX[sr], regionY[sr], regionZ[sr], inForceWant, _target);
+                    }
                 }
             }
 
@@ -383,6 +399,12 @@ namespace Lodur
                 _target = _pendingTarget;
                 _pending = -1;
                 _rig?.Commit();
+                if (_deliberation != null)
+                {
+                    _deliberation.Commit();
+                    planned = true;
+                }
+
                 if (_layered && _brain.Goals[_goal].Behaviour.Arms is { Side: ArmSide.Nearer } && _target != 0UL)
                 {
                     var committed = Target;
@@ -406,13 +428,18 @@ namespace Lodur
                 }
             }
 
-            // The committed pair's plan, derived afresh from the percepts of this tick with the whole think budget.
+            // The plan of the decision in force was written above by the Select that chose it, or is carried: a tick that wrote none only checks it against the percepts.
             _planLength = 0;
             if (_deliberation != null && _brain.Goals[_goal].Want is { } committedWant)
             {
-                var sr = _perception.SenseRegion;
-                _deliberation.SelfFacts = selfFacts;
-                _planLength = _deliberation.Derive(_perception, regionX[sr], regionY[sr], regionZ[sr], committedWant, _target);
+                if (!planned)
+                {
+                    var sr = _perception.SenseRegion;
+                    _deliberation.SelfFacts = selfFacts;
+                    _deliberation.CheckCarried(_perception, regionX[sr], regionY[sr], regionZ[sr], committedWant, _target);
+                }
+
+                _planLength = _deliberation.InForceLength;
             }
 
             // For EntrySeconds after a takeover the Actor, not the drive, takes the gain (and the arousal, if the goal declares one) from their values at
