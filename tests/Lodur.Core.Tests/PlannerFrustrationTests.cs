@@ -6,7 +6,7 @@ namespace Lodur.Core.Tests;
 
 /// <summary>
 /// A futile direct try ends (ruling bds-unplannable-tries-direct): after FrustrationSeconds at PlanLength -1 the Actor bars the pair's direct try, reports Frustrated and decides again
-/// past the dwell; the bar lifts when what he knows changes, or after RetrySeconds.
+/// past the dwell; the bar ends when the target is forgotten or after RetrySeconds, and a pair that becomes plannable is offered through it; a changed fact does not lift it (ruling frustration-lifts-without-fact-changes).
 /// </summary>
 public sealed class PlannerFrustrationTests
 {
@@ -215,10 +215,10 @@ public sealed class PlannerFrustrationTests
     }
 
     [Fact]
-    public void A_changed_fact_a_changed_self_fact_or_a_forgotten_door_lifts_the_bar_at_once()
+    public void A_changed_fact_or_self_fact_does_not_lift_the_bar_but_a_forgotten_door_does()
     {
-        // Barred, idle in force; then the change; the door goal is back in force a latency (and a tick) later.
-        void Lifts(Action<Bench, Emitter[]> change)
+        // Barred, idle in force; a change of the door's facts or his own leaves the bar standing (ruling frustration-lifts-without-fact-changes).
+        void Holds(Action<Bench, Emitter[]> change)
         {
             var b = new Bench(Build(Make(), memory: 0.5));
             var door = new[] { BoltedDoor() };
@@ -226,24 +226,37 @@ public sealed class PlannerFrustrationTests
             b.Run(Latency + 20, door);
             Assert.Equal(0, b.A.GoalIndex);
             change(b, door);
-            Assert.Equal(1, b.A.GoalIndex);
-            Assert.Equal(1UL, b.A.TargetId);
+            b.Run(Latency + 200, new[] { BoltedDoor(1UL << Noise) }, 1UL << Noise);
+            Assert.Equal(0, b.A.GoalIndex);
+            Assert.Single(b.Frustrated);
         }
 
-        Lifts((b, _) => b.Run(Latency + 2, new[] { BoltedDoor(1UL << Noise) }));      // an unrelated bit of the door's facts
-        Lifts((b, door) => b.Run(Latency + 2, door, 1UL << Noise));                   // an unrelated self fact
-        Lifts((b, _) =>
-        {
-            b.Run(60, None);                                                          // the door leaves memory (0.5 s)
-            b.Run(Latency + 2, new[] { BoltedDoor() });                               // and is sensed again, unchanged
-        });
+        Holds((b, _) => b.Run(Latency + 2, new[] { BoltedDoor(1UL << Noise) }));      // an unrelated bit of the door's facts
+        Holds((b, door) => b.Run(Latency + 2, door, 1UL << Noise));                   // an unrelated self fact
 
-        // With nothing changed the bar holds well past all of that.
-        var held = new Bench(Build(Make(), memory: 0.5));
+        // The door leaving memory (0.5 s) ends the bar: sensed again, unchanged, the try resumes.
+        var f = new Bench(Build(Make(), memory: 0.5));
         var same = new[] { BoltedDoor() };
-        held.RunToFrustration(same);
-        held.Run(Latency + 200, same);
-        Assert.Equal(0, held.A.GoalIndex);
+        f.RunToFrustration(same);
+        f.Run(Latency + 20, same);
+        Assert.Equal(0, f.A.GoalIndex);
+        f.Run(60, None);
+        f.Run(Latency + 2, same);
+        Assert.Equal(1, f.A.GoalIndex);
+        Assert.Equal(1UL, f.A.TargetId);
+    }
+
+    [Fact]
+    public void A_fact_that_flips_for_200_seconds_frustrates_a_bounded_number_of_times()
+    {
+        // His own futile try may rattle the door's facts; with the bar standing the count is that of the retries (30 s), not of the flips (every 0.5 s).
+        var b = new Bench(Build(Make(frustration: 1.0, retry: 30.0)));
+        for (var i = 0; i < 20000; i++)
+        {
+            b.Step(new[] { BoltedDoor((i / 50) % 2 == 0 ? 0UL : 1UL << Noise) });
+        }
+
+        Assert.InRange(b.Frustrated.Count, 1, 7);
     }
 
     [Fact]
@@ -324,7 +337,7 @@ public sealed class PlannerFrustrationTests
     }
 
     [Fact]
-    public void A_self_want_with_no_target_frustrates_and_lifts_on_a_self_fact()
+    public void A_self_want_with_no_target_frustrates_and_lifts_only_after_the_retry()
     {
         var brain = new Brain
         {
@@ -335,7 +348,13 @@ public sealed class PlannerFrustrationTests
         b.RunToFrustration(None);
         b.Run(Latency + 20, None);
         Assert.Equal(0, b.A.GoalIndex);
-        b.Run(Latency + 2, None, 1UL << Held);               // a self fact changes: the bar lifts, the try resumes
+        b.Run(Latency + 200, None, 1UL << Held);              // a self fact changes: the bar stands
+        Assert.Equal(0, b.A.GoalIndex);
+        for (var i = 0; i < 3000 && b.A.GoalIndex == 0; i++)  // the retry passes: the try resumes
+        {
+            b.Step(None);
+        }
+
         Assert.Equal(1, b.A.GoalIndex);
         Assert.Equal(0UL, b.A.TargetId);
         Assert.Equal(-1, b.A.PlanLength);

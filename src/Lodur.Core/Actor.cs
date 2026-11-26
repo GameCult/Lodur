@@ -371,10 +371,10 @@ namespace Lodur
 
             // A decision in flight commits at its tick even if the condition that chose it has lapsed; none is made while one is
             // pending. Within the goal in force's minimum dwell only a strictly higher-priority goal is decided on.
-            // Order: the bars lift on what he knows now, then a direct try that has lasted its time is barred (and the next decision made impatient), then the decision.
+            // Order: the bars lift on time or a forgotten target, then a direct try that has lasted its time is barred (and the next decision made impatient), then the decision.
             if (_deliberation != null)
             {
-                _deliberation.Lift(_perception, selfFacts, _tick);
+                _deliberation.Lift(_perception, _tick);
                 if (_directSince >= 0 && _tick - _directSince >= _frustrationTicks && !_deliberation.Barred(_goal, _target))
                 {
                     _deliberation.Bar(_goal, _target, _retryTicks > long.MaxValue - _tick ? long.MaxValue : _tick + _retryTicks);

@@ -331,7 +331,7 @@ namespace Lodur
         /// <summary>How long a direct try (<see cref="Actor.PlanLength"/> -1) of one (goal, target) pair may last before the Actor gives it up: it bars the pair's direct try, reports <see cref="TickEvents.Frustrated"/> and decides again past the goal's dwell. Not NaN, not negative; +infinity never frustrates. Default 5 (a placeholder; ruling bds-unplannable-tries-direct).</summary>
         public double FrustrationSeconds { get; init; } = 5.0;
 
-        /// <summary>How long a bar on a direct try lasts if the world he knows does not change first: the pair is tried direct again after it. Positive, not NaN; +infinity never lifts by time. Default 30 (a placeholder).</summary>
+        /// <summary>How long a bar on a direct try lasts if its target is not forgotten first: the pair is tried direct again after it. Positive, not NaN; +infinity never lifts by time. Default 30 (a placeholder).</summary>
         public double RetrySeconds { get; init; } = 30.0;
 
         /// <summary>The most groundings one Select may regress across all its plans, at least 1, default 4096: one budget per decision, spent by deepening across the want pairs, short plans first (lodur:question:bds-think-budget-per-decision).</summary>
