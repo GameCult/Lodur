@@ -421,7 +421,7 @@ public sealed class AirwayTests
         var flipDown = Sweep(down, 40f, -40f, -0.05f, Nose);
         // The hold is the margin itself (ruling deterministic-bound-margin, readings at 0.05 degree steps): margin 5 mm (shipped) holds Mouth to +10.40 and Nose to -26.35 degrees; 1 mm holds +5.95 and -21.90, 10 mm holds +15.99 and -31.95.
         // Mouth bound (7.87, 12.9) = sqrt(10.40 x 5.95) and sqrt(10.40 x 15.99), separation 1.75 and 1.54; Nose bound (-29.0, -24.0) = sqrt(26.35 x 31.95) and sqrt(26.35 x 21.90), separation 1.21 and 1.20.
-        // Why the Nose separation is 1.20: the Nose reading is 20.4 degrees plus 1.12 per mm of margin, so no margin pair a 5 mm shipped value is held against separates it by more; the Mouth bound (1.75, 1.54) is the pin, and this one claims the same mutants
+        // Why the Nose separation is 1.20: the Nose reading is 20.8 degrees plus 1.11 per mm of margin, so no margin pair a 5 mm shipped value is held against separates it by more; the Mouth bound (1.75, 1.54) is the pin, and this one claims the same mutants
         // (a margin of 2.5 mm or less, 8 mm or more; 3 to 7 mm pass both) on a second axis, 0.05 degree steps, identical on a MinGW and an MSVC native build.
         Assert.True(flipUp > 7.87f && flipUp < 12.9f, $"held Mouth to {flipUp} degrees");
         Assert.True(flipDown < -24.0f && flipDown > -29.0f, $"held Nose to {flipDown} degrees");

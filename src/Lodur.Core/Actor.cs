@@ -299,9 +299,11 @@ namespace Lodur
                 }
 
                 // The physiology steps first, on the drive as the last tick left it, and its consciousness is the slot's only writer.
-                if (!_physiology.Dead)
+                // A dead physiology is stepped too: that step zeroes its flows, so they stand only on the tick it died.
+                var wasDead = _physiology.Dead;
+                _physiology.Step(_dt, new PhysiologyInput(_drive.Arousal, _effort, _held, airway));
+                if (!wasDead)
                 {
-                    _physiology.Step(_dt, new PhysiologyInput(_drive.Arousal, _effort, _held, airway));
                     _drive.Consciousness = _physiology.Consciousness;
                     _drive.AirHunger = _physiology.BreathUrge;
                 }

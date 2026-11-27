@@ -113,6 +113,29 @@ public sealed class ActorPhysiologyTests
     }
 
     [Fact]
+    public void A_dead_physiologys_flows_stand_on_the_tick_it_died_and_read_zero_after()
+    {
+        var p = new Physiology(Body3(), Plan3(blood: new BloodDef(1000.0, 0.5, 1e-4), slots: 9, organism: new[] { Hypoxia }), 20);
+        Assert.True(p.Afflict(Af("Bleeder"), 1, 0, 0.8));
+        var a = Make(p);
+        var s = new float[2];
+        var q = new Quat[2];
+        for (var i = 0; i < 10; i++) Assert.Equal(TickEvents.None, Tick(a, 0.0, s, q) & TickEvents.Died);
+        Assert.True(p.Bleed(1) > 0.0);
+        Assert.True(p.Afflict(Af("Lesion"), 0, BrainLayer, 10));   // not the heart: a stopped heart would stop the bleed on the dying step
+        Assert.Equal(TickEvents.Died, Tick(a, 0.0, s, q));
+        Assert.True(p.Dead);
+        Assert.True(p.Bleed(1) > 0.0, "the dying step's bleed was not reported");   // Lodur reports the step it died on
+        Assert.Equal(TickEvents.None, Tick(a, 0.0, s, q));
+        Assert.Equal(0.0, p.Bleed(1));
+        Assert.Equal(0.0, p.AirwayBleed);
+        Assert.Equal(0.0, p.DrawnLive);
+        Assert.Equal(0.0, p.DrawnPooled);
+        Assert.Equal(0.0, p.Coughed);
+        Assert.Equal(0.0, p.Drained);
+    }
+
+    [Fact]
     public void A_physiology_that_died_before_it_was_bound_reports_the_death_on_the_first_tick()
     {
         var p = Make3();
