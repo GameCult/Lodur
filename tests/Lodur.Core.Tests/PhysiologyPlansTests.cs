@@ -100,7 +100,9 @@ public sealed class PhysiologyPlansTests
 
             var muscleSheet = tissues.Any(t => t.Label == "Muscle" && t.Sheet != null);
             var shells = 1 + (fat ? 1 : 0) + (muscleSheet ? 1 : 0);
-            for (var l = shells; l < tissues.Count; l++) Assert.Equal(0.0, tissues[l].Thickness);   // cores only after the shells
+            Assert.Equal(shells, tissues.Count(t => t.Thickness > 0.0));
+            var lastShell = tissues.ToList().FindLastIndex(t => t.Thickness > 0.0);
+            for (var l = 0; l < lastShell; l++) Assert.True(tissues[l].Thickness > 0.0 || tissues[l].Site != null, $"{label}: an unsited core precedes a shell");   // only a sited tissue (a vessel) sits among the shells
 
             Assert.Equal(Array.IndexOf(sheetKinds, label) >= 0, muscleSheet);
             if (muscleSheet) muscleSheets++;

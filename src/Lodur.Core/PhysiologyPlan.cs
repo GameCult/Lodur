@@ -35,7 +35,7 @@ namespace Lodur
     /// One tissue layer of a part. <paramref name="Consciousness"/>, <paramref name="BloodPumping"/> and <paramref name="Motor"/> are
     /// function weights, a closed set with one reader each (<paramref name="Breathing"/> is the lungs' share of ventilation): a capacity is the weighted mean integrity of the tissues that carry its weight.
     /// A Vital tissue at integrity 0 kills. A stack is shells (<see cref="Thickness"/> above 0, in m) outside-in, then cores (Thickness 0:
-    /// bone, organs, a muscle with no sheet); a core with a <see cref="Site"/> occupies that sphere of the part, one with none fills what the shells leave of the part's shape. <see cref="Sheet"/> is the
+    /// bone, organs, a muscle with no sheet); a core with a <see cref="Site"/> occupies that sphere of the part, one with none fills what the shells leave of the part's shape. Stack order is depth order: a sited tissue may sit among the shells (a vessel between fat and a muscle sheet), at the depth the shells listed before it give; an unsited core fills past all the shells and may not precede one. <see cref="Sheet"/> is the
     /// material of a shell simulated as a particle sheet; null means it is not.
     /// </summary>
     public readonly record struct TissueDef(
@@ -44,7 +44,7 @@ namespace Lodur
         public double Thickness { get; init; }
         public SheetDef? Sheet { get; init; }
 
-        /// <summary>Where a core sits in the part's frame; null fills the part past its shells. A shell takes none.</summary>
+        /// <summary>Where a core sits in the part's frame; null fills the part past its shells. A shell takes none. A sited tissue's depth is the summed thickness of the shells listed before it.</summary>
         public TissueSite? Site { get; init; }
 
         /// <summary>The fraction, 0..1, of a wound's bleed in this tissue that enters the airway instead of leaving through the part's surface (the larynx, trachea and lungs' mucosa); 0 for every other tissue.</summary>
@@ -56,8 +56,8 @@ namespace Lodur
     {
         /// <summary>
         /// The layers a wound of <paramref name="depth"/> (m, finite and above 0) at <paramref name="point"/> (the part's frame) reaches, written into <paramref name="layers"/> as stack indices in stack order; returns the count.
-        /// Shells (Thickness above 0) outside-in: shell i is reached iff depth exceeds the summed Thickness of the shells before it. With S the shells' total, a core is reached iff depth exceeds S and
-        /// (it has no Site, or depth exceeds the distance from point to the Site's centre less its radius). Strict: a depth equal to a boundary does not reach past it. Allocates nothing.
+        /// Shells (Thickness above 0) outside-in: shell i is reached iff depth exceeds the summed Thickness of the shells before it. With S the shells' total and B the summed Thickness of the shells listed before a core:
+        /// an unsited core is reached iff depth exceeds S; a sited one iff depth exceeds B and depth exceeds the distance from point to the Site's centre less its radius (B is S for a site listed after every shell). Strict: a depth equal to a boundary does not reach past it. Allocates nothing.
         /// </summary>
         public int Reach((float X, float Y, float Z) point, double depth, Span<int> layers)
         {
@@ -76,10 +76,13 @@ namespace Lodur
                     if (depth > before) layers[n++] = i;
                     before += t.Thickness;
                 }
-                else if (depth > shells)
+                else
                 {
-                    if (t.Site is not TissueSite site) layers[n++] = i;
-                    else
+                    if (t.Site is not TissueSite site)
+                    {
+                        if (depth > shells) layers[n++] = i;
+                    }
+                    else if (depth > before)
                     {
                         double dx = point.X - site.Centre.X, dy = point.Y - site.Centre.Y, dz = point.Z - site.Centre.Z;
                         if (depth > Math.Sqrt(dx * dx + dy * dy + dz * dz) - site.Radius) layers[n++] = i;
@@ -299,8 +302,8 @@ namespace Lodur
                         if (!(float.IsFinite(site.Radius) && site.Radius > 0f)) throw new ArgumentException($"{where}: the site radius is not finite and above 0.");
                     }
 
-                    if (t.Thickness == 0.0) core = true;
-                    else if (core) throw new ArgumentException($"{where}: a shell follows a core.");
+                    if (t.Thickness == 0.0 && t.Site is null) core = true;
+                    else if (t.Thickness > 0.0 && core) throw new ArgumentException($"{where}: a shell follows a core.");
                     if (t.Sheet is SheetDef sh)
                     {
                         if (!(t.Thickness > 0.0)) throw new ArgumentException($"{where}: a sheet needs a thickness above 0.");

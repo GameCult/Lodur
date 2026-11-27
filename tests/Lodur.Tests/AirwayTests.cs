@@ -419,8 +419,10 @@ public sealed class AirwayTests
         // and pitching back it holds Nose past face down (measured: to -26.3), and each still lands the change inside 40 degrees.
         var flipUp = Sweep(up, -40f, 40f, 0.05f, Mouth);
         var flipDown = Sweep(down, 40f, -40f, -0.05f, Nose);
-        Assert.True(flipUp > 0f && flipUp < 40f, $"held Mouth to {flipUp} degrees");
-        Assert.True(flipDown < 0f && flipDown > -40f, $"held Nose to {flipDown} degrees");
+        // The hold is the margin itself (ruling deterministic-bound-margin, readings at 0.05 degree steps): margin 5 mm (shipped) holds Mouth to +10.40 and Nose to -26.35 degrees; 1 mm holds +5.95 and -21.90, 10 mm holds +15.99 and -31.95.
+        // Mouth bound (7.87, 12.9) = sqrt(10.40 x 5.95) and sqrt(10.40 x 15.99), separation 1.75 and 1.54; Nose bound (-29.0, -24.0) = sqrt(26.35 x 31.95) and sqrt(26.35 x 21.90), separation 1.21 and 1.20.
+        Assert.True(flipUp > 7.87f && flipUp < 12.9f, $"held Mouth to {flipUp} degrees");
+        Assert.True(flipDown < -24.0f && flipDown > -29.0f, $"held Nose to {flipDown} degrees");
     }
 
     [Fact]

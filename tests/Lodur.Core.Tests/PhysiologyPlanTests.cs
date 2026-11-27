@@ -116,6 +116,9 @@ public sealed class PhysiologyPlanTests
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = double.NaN } } }));
         Refuses(() => Plan(new[] { shell with { Sheet = sheet with { TensileStrength = double.PositiveInfinity } } }));
         Refuses(() => Plan(new[] { t, shell }));                                               // a shell after a core
+        var vessel = t with { Label = "vessel", Site = new TissueSite((0f, 0f, 0f), 0.01f) };
+        Plan(new[] { vessel, shell });                                                         // a sited tissue may precede a shell: stack order is depth order
+        Refuses(() => Plan(new[] { t, vessel, shell }));                                       // a shell after an unsited core, a sited tissue between or not
 
         var a = new AfflictionDef("a", PhysiologyClock.Acute, 0, true, Array.Empty<Effect>());
         Refuses(() => Plan(afflictions: new[] { a, a }));                                      // duplicate affliction label
