@@ -353,3 +353,16 @@ Probe: `<scratchpad>/nibu-imagination/probe/Program.cs` (Release, net10 roll-for
 - **I, identity.** A SeatedPuppet world with particle capacities and no fluid steps byte-identically over 1200 driven ticks (hash `B3ACA960FE3B41E7` both); Ragdoll.Build places 2 airway sensors.
 
 Order: `cut-bds-wound-blood.r1`, then `cut-bds-client-office.r1`, then follow-up `bds-drown-own-blood-slice` (its Lodur part, `lodur-airway-internal-bleed`, can run beside the client cut). Idea `bds-slice-map.gain-at-circulation-boundary` holds the aspirate-cough amplification hazard for that slice.
+
+## Airway internal bleed (pass `internal-bleed-map`, 2026-11-27; mains Lodur `cb20b37`, Ymir `c635c17`, BDS `407319b`)
+
+Probe: `<scratchpad>/imag-airway/probe` (a scratch copy of Lodur.Core at `cb20b37` with spec `cut-lodur-airway-internal-bleed.r1`'s rule; `Program.cs`, Release, net10).
+
+- **P1, conservation.** Over every run (knife on Skin, Fat, Muscle plus a Larynx core of share 1; gains 1 and 10; vascularity 0.2 and 1), blood lost = skin bleed + airway bleed exactly (2500.2 = 2166.9 + 333.4 mL), and Coughed + Drained + AirwayLiquid = gain x airway bleed exactly (3183.6 + 150.0 = 3333.6 mL at gain 10), the overflow spill included.
+- **P2, timing.** Larynx-only Cut 60 (vascularity 1): airway full (occlusion 0.99) at 0.3 s at gain 10, 31.1 s at gain 1; dies of BloodLoss at 53.7 s either way. Larynx-only Cut 20: full at 129 s (gain 10) and 147 s (gain 1), unconscious at 127.7 s both, dead 275-290 s by Consciousness: blood-loss stages, not hypoxia, take him first. With the knife's skin, fat and muscle also cut he is unconscious at 11-18 s and dead at 20-32 s, before the ruled 75 s asphyxia: a cut throat cannot drown him with today's knife (question `bds-throat-cut-bleed-band`).
+- **P3, cost.** Physiology.Step on the humanoid with two knife wounds: 2.563 us base, 2.687 us with the rule and Larynx and Trachea added (paired interleaved medians of 7, +0.17 us).
+- **Source reads.** Breathing in takes nothing from the world: `Ragdoll.ReadAirway` and `SeatedBody.ReadAirway` only read sensor lanes (idea `internal-bleed-map.drawn-liquid-stays-in-world`). Ymir creates and removes sensors at runtime (`Box3DSoaWorld.CreateSensors`, `Remove`) and destroys particles (`DestroyParticles`), but has no partial take from a wet patch. BDS's knife names Skin, Fat, Muscle and no airway tissue; the Humanoid has no larynx or trachea at `cb20b37`.
+
+Gain owner: the caller (BDS `BloodParameters.Gain`), passed to `Physiology` at construction like `slowScale`; Lodur content holds none. The airway is in world units, so bled blood enters at the gain and leaves at 1x.
+
+Order: `cut-lodur-airway-internal-bleed.r1` (beside `cut-bds-client-office.r1`), then follow-up `lodur-wound-reach` (Lodur), then `bds-throat-cut` (BDS, after client-office and question `bds-throat-cut-bleed-band`), then `bds-airway-expulsion`, then `bds-fella-air-hunger` (question `bds-air-hunger-struggle-look`). `lodur-airway-wound-openings` is off the slice's path.
