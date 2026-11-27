@@ -77,6 +77,8 @@ namespace Lodur
         private double _urge;
         private double _coughed;
         private double _drained;
+        private double _drawnLive;
+        private double _drawnPooled;
         private bool _atAirway;
         private long _steps;
         private bool _bound;
@@ -210,6 +212,12 @@ namespace Lodur
         /// <summary>The liquid in world m^3 the last step drained out of the airway (by gravity through the mouth), including what a full airway spilled.</summary>
         public double Drained => _drained;
 
+        /// <summary>The liquid in world m^3 the last step drew into the airway from the live liquid at the openings, after the room-left clip; 0 for a held breath, and after a Step on a dead physiology.</summary>
+        public double DrawnLive => _drawnLive;
+
+        /// <summary>The liquid in world m^3 the last step drew into the airway from the pooled liquid at the openings, after the room-left clip; 0 for a held breath, and after a Step on a dead physiology.</summary>
+        public double DrawnPooled => _drawnPooled;
+
         /// <summary>The tissue's remaining fraction, 0..1, as of the last step.</summary>
         public double Integrity(int part, int layer) => _integrity[Flat(part, layer)];
 
@@ -305,7 +313,7 @@ namespace Lodur
         /// <summary>
         /// Advances by dt seconds of the caller's clock: afflictions age and change severity (healed ones free their slot), integrity,
         /// capacities, bleeding and regrowth follow, then the airway and the gases on the Acute clock, the motor ceilings, and death is judged once. Bleeding is computed before the airway.
-        /// A dead physiology does not change, except that its flows (Bleed, AirwayBleed, Coughed, Drained) read 0 after a Step on it. A non-finite input, or one outside [0, 1], is refused before anything changes.
+        /// A dead physiology does not change, except that its flows (Bleed, AirwayBleed, Coughed, Drained, DrawnLive, DrawnPooled) read 0 after a Step on it. A non-finite input, or one outside [0, 1], is refused before anything changes.
         /// </summary>
         public void Step(double dt, in PhysiologyInput input = default)
         {
@@ -326,6 +334,8 @@ namespace Lodur
                 _airwayBleed = 0.0;
                 _coughed = 0.0;
                 _drained = 0.0;
+                _drawnLive = 0.0;
+                _drawnPooled = 0.0;
                 return;
             }
 
@@ -379,7 +389,7 @@ namespace Lodur
 
             // 4b. The airway, a quantity (not particles): liquid at the openings is drawn in by a free breath, never by a held one, and only into the room left; blood bled into it enters at the
             // blood gain whether or not the breath is held; a cough clears it by this step's consciousness, and it drains by gravity through the mouth. What a full airway cannot hold of the bled blood
-            // spills through the mouth. What a step removes is reported as Coughed and Drained; occlusion takes its share of the ventilation below.
+            // spills through the mouth. What a step removes is reported as Coughed and Drained, and what a breath drew as DrawnLive and DrawnPooled; occlusion takes its share of the ventilation below.
             var held = input.BreathHeld;
             var aw = _airway;
             var at = aw.LiveWeight * air.Live + aw.PooledWeight * air.Pooled;
@@ -398,6 +408,10 @@ namespace Lodur
             var spill = Math.Max(0.0, _airwayLiquid + bled - removed - aw.Capacity);
             _coughed = total > 0.0 ? removed * cough / total : 0.0;
             _drained = removed - _coughed + spill;
+            // What the breath really drew: the draw clipped to the room left after what the airway held, bled in and lost (a full airway with nothing removed leaves exactly 0), split by the sample's weighted shares.
+            var drawn = Math.Max(0.0, Math.Min(drawRaw, aw.Capacity - (_airwayLiquid + bled - removed)));
+            _drawnLive = at > 0.0 ? drawn * (aw.LiveWeight * air.Live / at) : 0.0;
+            _drawnPooled = at > 0.0 ? drawn * (aw.PooledWeight * air.Pooled / at) : 0.0;
             _airwayLiquid = Math.Min(aw.Capacity, after);
             _occlusion = Clamp01(_airwayLiquid / aw.Capacity);
 

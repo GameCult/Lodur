@@ -135,9 +135,90 @@ public sealed class AirwayBleedTests
             Assert.Equal(Quiet.Capacity, pp.AirwayLiquid);
             Assert.Equal(0.0, pp.Drained);
             Assert.Equal(0.0, pp.Coughed);
+            Assert.Equal(0.0, pp.DrawnLive);
+            Assert.Equal(0.0, pp.DrawnPooled);
         }
 
         Assert.Equal(0.0, p.AirwayBleed);
+    }
+
+    [Fact]
+    public void A_breath_reports_what_it_drew_split_by_the_airways_weights()
+    {
+        var p = new Physiology(Body3(), Plan3(airway: Quiet), 20.0);
+        p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(2e-5, 6e-5, 0.0)));
+        Near(Dt * 2e-5, p.DrawnLive);
+        Near(Dt * 6e-5, p.DrawnPooled);
+
+        var half = new Physiology(Body3(), Plan3(airway: Quiet with { PooledWeight = 0.5 }), 20.0);
+        half.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(2e-5, 6e-5, 0.0)));
+        Near(Dt * 2e-5, half.DrawnLive);
+        Near(Dt * 3e-5, half.DrawnPooled);
+    }
+
+    [Fact]
+    public void A_nearly_full_airway_draws_only_the_room_left()
+    {
+        var p = new Physiology(Body3(), Plan3(airway: Quiet), 20.0);
+        var wet = new AirwaySample(1e-3, 3e-3, 0.0);
+        for (var i = 0; i < 100 && p.AirwayLiquid < Quiet.Capacity; i++)
+        {
+            var room = Quiet.Capacity - p.AirwayLiquid;
+            p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, wet));
+            if (Dt * 4e-3 > room)
+            {
+                Near(room, p.DrawnLive + p.DrawnPooled);
+                Near(0.25, p.DrawnLive / (p.DrawnLive + p.DrawnPooled));
+                Assert.Equal(Quiet.Capacity, p.AirwayLiquid);
+            }
+        }
+
+        Assert.Equal(Quiet.Capacity, p.AirwayLiquid);
+    }
+
+    [Fact]
+    public void A_held_breath_draws_nothing_while_the_airway_bleeds()
+    {
+        var p = Bleeding(1.0, 10.0);
+        p.Step(Dt, new PhysiologyInput(0.0, 0.0, true, new AirwaySample(1e-4, 1e-4, 0.0)));
+        Assert.Equal(0.0, p.DrawnLive);
+        Assert.Equal(0.0, p.DrawnPooled);
+        Near(Dt * 10.0 * Rate, p.AirwayLiquid);
+    }
+
+    [Fact]
+    public void The_airways_liquid_is_conserved_with_the_draw()
+    {
+        var p = Bleeding(0.5, 10.0, InertAirway, new BloodDef(1.0, 0.5, 0.0));
+        var rng = new Random(7);
+        var drew = 0.0;
+        for (var i = 0; i < 2000; i++)
+        {
+            var before = p.AirwayLiquid;
+            var sample = new AirwaySample(rng.NextDouble() * 1e-4, rng.NextDouble() * 1e-4, rng.NextDouble() * InertAirway.DrainDrop);
+            p.Step(Dt, new PhysiologyInput(0.0, 0.0, rng.NextDouble() < 0.2, sample));
+            Assert.True(p.DrawnLive >= 0.0 && p.DrawnPooled >= 0.0);
+            var expected = Dt * 10.0 * p.AirwayBleed + p.DrawnLive + p.DrawnPooled - p.Coughed - p.Drained;
+            Assert.InRange(Math.Abs(p.AirwayLiquid - before - expected), 0.0, 1e-18);
+            drew += p.DrawnLive + p.DrawnPooled;
+        }
+
+        Assert.True(drew > 0.0);
+    }
+
+    [Fact]
+    public void The_dying_step_reports_its_draw_and_the_next_step_none()
+    {
+        var p = Bleeding(0.5, 0.1, InertAirway);
+        var pooled = new AirwaySample(0.0, 1e-6, InertAirway.DrainDrop);
+        for (var i = 0; i < 100000 && !p.Dead; i++) p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, pooled));
+        Assert.True(p.Dead);
+        Assert.True(p.DrawnPooled > 0.0);
+        Assert.Equal(0.0, p.DrawnLive);
+
+        p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, pooled));
+        Assert.Equal(0.0, p.DrawnLive);
+        Assert.Equal(0.0, p.DrawnPooled);
     }
 
     [Fact]
