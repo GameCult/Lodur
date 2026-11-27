@@ -11,6 +11,9 @@ namespace Lodur
         // Vascularity is the blood a wound in the tissue loses relative to muscle (play-tuned placeholders): skin and bone are thin, organs rich.
         private const double SkinV = 0.2, MuscleV = 1.0, BoneV = 0.3, BrainV = 1.0, HeartV = 4.0, LungV = 2.0, LiverV = 3.0, KidneyV = 2.0, GutV = 1.0;
 
+        // Airway tissues: mucosa as perfused as muscle (placeholders). AirwayShare is the fraction of a wound's bleed that enters the airway: all of the larynx's and trachea's, half a lung's (half coughed up, half stays in the chest).
+        private const double LarynxV = 1.0, TracheaV = 1.0, MucosaShare = 1.0, LungShare = 0.5;
+
         // Fat is thickness in the stack, not particles; its vascularity is a placeholder.
         private const double FatV = 0.1;
 
@@ -43,10 +46,13 @@ namespace Lodur
             Stack("Torso", Side.Center,
                 Skin(10), Fat(10), MuscleSheet(40), Bone("Ribcage", 25),
                 new TissueDef("Heart", 15, HeartV, BloodPumping: 1.0),
-                new TissueDef("LungLeft", 15, LungV, Breathing: 1.0), new TissueDef("LungRight", 15, LungV, Breathing: 1.0),
-                new TissueDef("Liver", 20, LiverV), new TissueDef("KidneyLeft", 15, KidneyV), new TissueDef("KidneyRight", 15, KidneyV));
+                new TissueDef("LungLeft", 15, LungV, Breathing: 1.0) { AirwayShare = LungShare }, new TissueDef("LungRight", 15, LungV, Breathing: 1.0) { AirwayShare = LungShare },
+                new TissueDef("Liver", 20, LiverV), new TissueDef("KidneyLeft", 15, KidneyV), new TissueDef("KidneyRight", 15, KidneyV),
+                // The trachea sits at Torso's top in the 19-part plan, the larynx in Head's lower region; where a cut reaches them is follow-up lodur-wound-reach.
+                new TissueDef("Trachea", 10, TracheaV) { AirwayShare = MucosaShare });
             // The neck's muscle carries the Neck joint's motor weight: the head has to be a joint child with a muscle (spec discrepancy, report deviation).
-            Stack("Head", Side.Center, Skin(5), Fat(5), Muscle(25), Bone("Skull", 25), new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0));
+            Stack("Head", Side.Center, Skin(5), Fat(5), Muscle(25), Bone("Skull", 25), new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0),
+                new TissueDef("Larynx", 10, LarynxV) { AirwayShare = MucosaShare });
             foreach (var side in new[] { Side.Left, Side.Right })
             {
                 Stack("UpperArm", side, Skin(8), Fat(8), MuscleSheet(30), Bone("Humerus", 25));

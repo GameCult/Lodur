@@ -40,6 +40,9 @@ namespace Lodur
     {
         public double Thickness { get; init; }
         public SheetDef? Sheet { get; init; }
+
+        /// <summary>The fraction, 0..1, of a wound's bleed in this tissue that enters the airway instead of leaving through the part's surface (the larynx, trachea and lungs' mucosa); 0 for every other tissue.</summary>
+        public double AirwayShare { get; init; }
     }
 
     /// <summary>The one tissue stack of a part, outside-in, owned by <see cref="PhysiologyPlan.Parts"/> and joined to a <see cref="BodyPlan"/> only through <see cref="PhysiologyPlan.Resolve"/>.</summary>
@@ -68,7 +71,8 @@ namespace Lodur
     /// and the Actor holds the breath. A free breath draws <paramref name="DrawPerSecond"/> x Breathing x (liquid at the airway) per second into it; a cough
     /// removes <paramref name="CoughPerSecond"/> x <paramref name="CoughByConsciousness"/>(consciousness) x contents per second; and it drains at
     /// <paramref name="DrainPerSecond"/> x clamp01(drop / <paramref name="DrainDrop"/>) x contents, drop being how far (m) the lowest opening's rim lies below the deepest airway sump along
-    /// gravity: <paramref name="DrainDrop"/> m of drop drains at the full rate.
+    /// gravity: <paramref name="DrainDrop"/> m of drop drains at the full rate. The airway holds liquid in the world's units (what the openings sample); blood bled into it
+    /// (<see cref="TissueDef.AirwayShare"/>) enters at the physiology's blood gain; a breath draws only into the room left, and what bleeds into a full airway spills through the mouth and is reported as drained.
     /// </summary>
     public readonly record struct AirwayDef(
         double Capacity, double DrawPerSecond, double LiveWeight, double PooledWeight, double HoldAt, double CoughPerSecond,
@@ -221,6 +225,7 @@ namespace Lodur
                     if (!seen.Add(t.Label)) throw new ArgumentException($"{where}: the label is not unique within the part.");
                     if (!(IsFinite(t.Hp) && t.Hp > 0.0)) throw new ArgumentException($"{where}: Hp is not finite and above 0.");
                     if (!(IsFinite(t.Vascularity) && t.Vascularity >= 0.0)) throw new ArgumentException($"{where}: vascularity is not finite and at least 0.");
+                    if (!(IsFinite(t.AirwayShare) && t.AirwayShare >= 0.0 && t.AirwayShare <= 1.0)) throw new ArgumentException($"{where}: the airway share is not finite and in [0, 1].");
                     if (!(IsFinite(t.Consciousness) && t.Consciousness >= 0.0 && IsFinite(t.BloodPumping) && t.BloodPumping >= 0.0 && IsFinite(t.Motor) && t.Motor >= 0.0 && IsFinite(t.Breathing) && t.Breathing >= 0.0))
                     {
                         throw new ArgumentException($"{where}: a function weight is not finite and at least 0.");

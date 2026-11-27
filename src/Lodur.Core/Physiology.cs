@@ -36,7 +36,7 @@ namespace Lodur
     /// The body's physiology: tissue integrity, bound afflictions, blood and its oxygen, the capacities they fold into, the motor ceiling and death.
     /// Harm enters only through <see cref="Afflict"/>; time through <see cref="Step"/>. Integrity is derived from the severities of the
     /// Injures afflictions bound to a tissue (part HP is never stored), and capacities, bleed and the motor ceiling are recomputed each step;
-    /// nobody writes them; the gases are integrated by Step and nobody writes those either. Content owns every label and number (<see cref="PhysiologyPlan"/>). Everything is allocated in the constructor.
+    /// nobody writes them. A bleed leaves the circulation once, through the part's surface (<see cref="Bleed"/>) or into the airway (<see cref="AirwayBleed"/>), split by each tissue's <see cref="TissueDef.AirwayShare"/>; the gases are integrated by Step and nobody writes those either. Content owns every label and number (<see cref="PhysiologyPlan"/>). Everything is allocated in the constructor.
     /// </summary>
     public sealed class Physiology
     {
@@ -61,7 +61,9 @@ namespace Lodur
         private readonly int[] _slotTissue;             // flattened
         private readonly double[] _slotSeverity;
         private readonly double[] _slotAge;
-        private readonly double[] _bleed;               // per part, m^3/s
+        private readonly double[] _bleed;               // per part, m^3/s, through the surface
+        private readonly double _bloodGain;
+        private double _airwayBleed;                    // m^3/s into the airway
         private readonly double[] _motor;               // per joint
         private double _volume;
         private double _consciousness;
@@ -79,9 +81,12 @@ namespace Lodur
         private long _steps;
         private bool _bound;
 
-        public Physiology(BodyPlan body, PhysiologyPlan plan, double slowScale)
+        /// <param name="bloodGain">The world's liquid volume per m^3 of blood, owned by the caller: blood bled into the airway enters it at this multiple of its real volume. Finite and above 0.</param>
+        public Physiology(BodyPlan body, PhysiologyPlan plan, double slowScale, double bloodGain = 1.0)
         {
             if (!(slowScale > 0.0 && !double.IsInfinity(slowScale))) throw new ArgumentException("the slow scale must be finite and above 0.");
+            if (!(bloodGain > 0.0 && !double.IsInfinity(bloodGain))) throw new ArgumentException("the blood gain must be finite and above 0.");
+            _bloodGain = bloodGain;
             _body = body;
             _slowScale = slowScale;
             _nominal = plan.Blood.NominalVolume;
@@ -199,17 +204,20 @@ namespace Lodur
         /// <summary>True when the liquid at the airway the last step was sampled was at least the airway's HoldAt: the Actor holds the breath while it is.</summary>
         public bool LiquidAtAirway => _atAirway;
 
-        /// <summary>The liquid in m^3 the last step coughed out of the airway.</summary>
+        /// <summary>The liquid in world m^3 the last step coughed out of the airway.</summary>
         public double Coughed => _coughed;
 
-        /// <summary>The liquid in m^3 the last step drained out of the airway (by gravity through the mouth).</summary>
+        /// <summary>The liquid in world m^3 the last step drained out of the airway (by gravity through the mouth), including what a full airway spilled.</summary>
         public double Drained => _drained;
 
         /// <summary>The tissue's remaining fraction, 0..1, as of the last step.</summary>
         public double Integrity(int part, int layer) => _integrity[Flat(part, layer)];
 
-        /// <summary>The part's blood loss in m^3/s as of the last step; 0 once dead.</summary>
-        public double Bleed(int part) => Dead ? 0.0 : _bleed[part];
+        /// <summary>The blood lost through the part's surface in real m^3/s over the last Step that ran, the dying step included; 0 after a Step on a dead physiology.</summary>
+        public double Bleed(int part) => _bleed[part];
+
+        /// <summary>The blood bled into the airway in real m^3/s over the last Step that ran (same lifetime as <see cref="Bleed"/>); it enters the airway at the blood gain.</summary>
+        public double AirwayBleed => _airwayBleed;
 
         /// <summary>The ceiling on a joint's muscle strength, 0..1: its capacity times consciousness; 0 once dead.</summary>
         public double MotorCeiling(int joint) => Dead ? 0.0 : _motor[joint];
@@ -296,8 +304,8 @@ namespace Lodur
 
         /// <summary>
         /// Advances by dt seconds of the caller's clock: afflictions age and change severity (healed ones free their slot), integrity,
-        /// capacities, bleeding and regrowth follow, then the gases on the Acute clock, the motor ceilings, and death is judged once.
-        /// A dead physiology does not change. A non-finite input, or one outside [0, 1], is refused before anything changes.
+        /// capacities, bleeding and regrowth follow, then the airway and the gases on the Acute clock, the motor ceilings, and death is judged once. Bleeding is computed before the airway.
+        /// A dead physiology does not change, except that its flows (Bleed, AirwayBleed, Coughed, Drained) read 0 after a Step on it. A non-finite input, or one outside [0, 1], is refused before anything changes.
         /// </summary>
         public void Step(double dt, in PhysiologyInput input = default)
         {
@@ -312,7 +320,15 @@ namespace Lodur
                 throw new ArgumentException("the airway sample's liquid must be finite and not negative and its drop finite and not negative.");
             }
 
-            if (Dead) return;
+            if (Dead)
+            {
+                Array.Clear(_bleed, 0, _bleed.Length);
+                _airwayBleed = 0.0;
+                _coughed = 0.0;
+                _drained = 0.0;
+                return;
+            }
+
             var slowDt = dt * _slowScale;
 
             // 1. Each live affliction on its own clock.
@@ -342,8 +358,28 @@ namespace Lodur
             _pumping = Capacity(EffectTarget.BloodPumping);
             _breathing = Capacity(EffectTarget.Breathing);
 
-            // 3b. The airway, a quantity (not particles): liquid at the openings is drawn in by a free breath, never by a held one; a cough clears it by this step's
-            // consciousness, and it drains by gravity through the mouth. What a step removes is reported as Coughed and Drained; occlusion takes its share of the ventilation below.
+            // 4. Bleeding: each affliction's bleed effects, through its tissue's vascularity and the pumping; the tissue's airway share enters the airway, the rest leaves through the part's surface.
+            Array.Clear(_bleed, 0, _bleed.Length);
+            var totalBleed = 0.0;
+            var internalBleed = 0.0;
+            for (var s = 0; s < _slotDef.Length; s++)
+            {
+                if (_slotDef[s] < 0) continue;
+                double offset = 0.0, factor = 1.0;
+                Fold(_defs[_slotDef[s]].Effects, EffectTarget.Bleed, _slotSeverity[s], _slotAge[s], ref offset, ref factor);
+                var tissue = _tissues[_slotTissue[s]];
+                var rate = Math.Max(0.0, offset * factor) * tissue.Vascularity * _pumping;
+                _bleed[_slotPart[s]] += rate * (1.0 - tissue.AirwayShare);
+                internalBleed += rate * tissue.AirwayShare;
+                totalBleed += rate;
+            }
+
+            _airwayBleed = internalBleed;
+            _volume -= totalBleed * dt;
+
+            // 4b. The airway, a quantity (not particles): liquid at the openings is drawn in by a free breath, never by a held one, and only into the room left; blood bled into it enters at the
+            // blood gain whether or not the breath is held; a cough clears it by this step's consciousness, and it drains by gravity through the mouth. What a full airway cannot hold of the bled blood
+            // spills through the mouth. What a step removes is reported as Coughed and Drained; occlusion takes its share of the ventilation below.
             var held = input.BreathHeld;
             var aw = _airway;
             var at = aw.LiveWeight * air.Live + aw.PooledWeight * air.Pooled;
@@ -352,28 +388,18 @@ namespace Lodur
             var cough = aw.CoughPerSecond * Effect.EvalCurve(aw.CoughByConsciousness, _consciousness);
             var drain = aw.DrainPerSecond * Clamp01(air.Drop / aw.DrainDrop);
             var total = cough + drain;
-            var avail = _airwayLiquid + dt * inflow;
+            var bled = dt * _bloodGain * _airwayBleed;
+            var drawRaw = dt * inflow;
+            var avail = _airwayLiquid + bled + drawRaw;
             var want = dt * total * _airwayLiquid;
             var removed = want < avail ? want : avail;
+            var after = avail - removed;
+            // Only bled blood overflows: a breath draws into the room left, so the spill is what the airway held plus what bled in, less what left, above capacity (after - capacity - drawRaw, ordered so a full airway with no bleed spills exactly 0).
+            var spill = Math.Max(0.0, _airwayLiquid + bled - removed - aw.Capacity);
             _coughed = total > 0.0 ? removed * cough / total : 0.0;
-            _drained = removed - _coughed;
-            _airwayLiquid = Math.Min(aw.Capacity, avail - removed);
+            _drained = removed - _coughed + spill;
+            _airwayLiquid = Math.Min(aw.Capacity, after);
             _occlusion = Clamp01(_airwayLiquid / aw.Capacity);
-
-            // 4. Bleeding: each affliction's bleed effects, through its tissue's vascularity and the pumping.
-            Array.Clear(_bleed, 0, _bleed.Length);
-            var totalBleed = 0.0;
-            for (var s = 0; s < _slotDef.Length; s++)
-            {
-                if (_slotDef[s] < 0) continue;
-                double offset = 0.0, factor = 1.0;
-                Fold(_defs[_slotDef[s]].Effects, EffectTarget.Bleed, _slotSeverity[s], _slotAge[s], ref offset, ref factor);
-                var rate = Math.Max(0.0, offset * factor) * _tissues[_slotTissue[s]].Vascularity * _pumping;
-                _bleed[_slotPart[s]] += rate;
-                totalBleed += rate;
-            }
-
-            _volume -= totalBleed * dt;
 
             // 5. Regrowth, on the slow clock, only while nothing bleeds.
             if (totalBleed == 0.0)

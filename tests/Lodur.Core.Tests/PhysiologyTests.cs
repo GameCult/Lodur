@@ -424,7 +424,7 @@ public sealed class PhysiologyTests
     }
 
     [Fact]
-    public void A_dead_body_reads_no_bleed_whatever_it_was_bleeding()
+    public void A_dead_body_reads_the_dying_steps_bleed_and_then_none()
     {
         var p = Make();
         Afflict(p, "Bleeder", 1, 0, 1);
@@ -432,7 +432,9 @@ public sealed class PhysiologyTests
         p.Step(0.01);
         Assert.True(p.Dead);
         Assert.Equal(DeathCause.Consciousness, p.Cause);
-        Assert.Equal(0.0, p.Bleed(1));
+        Assert.Equal(1e-3, p.Bleed(1), 15);        // the dying step's own bleed: the last Step that ran
+        p.Step(0.01);
+        Assert.Equal(0.0, p.Bleed(1));             // a Step on the dead zeroes the flows
     }
 
     [Fact]
@@ -576,7 +578,7 @@ public sealed class PhysiologyTests
         Assert.Equal(0, p.DiedAtStep);
         Assert.Equal(0.0, p.Consciousness);
         Assert.Equal(0.0, p.BloodPumping);
-        Assert.Equal(0.0, p.Bleed(1));
+        Assert.Equal(0.0, p.Bleed(1));                          // the heart is the cause here: pumping 0 on the dying step, so nothing bleeds
         Assert.Equal(0.0, p.MotorCeiling(0));
         Assert.Equal(0.0, p.MotorCeiling(1));
 
@@ -586,6 +588,7 @@ public sealed class PhysiologyTests
         for (var s = 0; s < p.SlotCount; s++) { severity[s] = p.SlotSeverity(s); age[s] = p.SlotAge(s); }
         var integrity = p.Integrity(0, Heart);
         for (var i = 0; i < 100; i++) p.Step(1.0);
+        Assert.Equal(0.0, p.Bleed(1));                          // one Step on the dead zeroes the flows
         Assert.Equal(volume, p.BloodVolume);
         Assert.Equal(0, p.DiedAtStep);
         Assert.Equal(DeathCause.VitalTissue, p.Cause);
