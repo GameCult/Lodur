@@ -25,6 +25,8 @@ namespace Lodur.Body.Ymir
         private readonly Box3DSoaConstraintHandle[] _sensors;
         private readonly float[] _ask, _taken;
         private bool _hasSensors;
+        // LowestOpening's last answer (-1 before the first): the opening it keeps until another's rim lies LowestHysteresis lower.
+        private int _lowest = -1;
         private readonly MuscleGains[] _gains;
         // Subtree mass and mass-weighted position per part: scratch rebuilt every Drive, never read across ticks.
         private readonly float[] _mass, _momentX, _momentY, _momentZ;
@@ -324,9 +326,13 @@ namespace Lodur.Body.Ymir
             return taken;
         }
 
+        /// <summary>The margin (m) by which another opening's rim must lie below the current lowest one's before <see cref="LowestOpening"/> changes its answer: face down the two rims are 0.2 mm apart and a few degrees of head pitch would swap them.</summary>
+        public const float LowestHysteresis = 0.005f;
+
         /// <summary>
         /// The plan airway opening whose rim lies lowest along <paramref name="down"/> (the largest drop of <see cref="ReadAirway"/>, the first on a tie): where liquid leaves
-        /// (ruling bds-drain-head-decides, the head's pose alone decides). Refuses a zero <paramref name="down"/>. Allocates nothing.
+        /// (ruling bds-drain-head-decides, the head's pose alone decides). The answer keeps the previous call's opening until another's drop exceeds that opening's by <see cref="LowestHysteresis"/>, so a head lying face down
+        /// does not swap nose and mouth with every degree of pitch; the first call (or a ragdoll with no previous answer) takes the largest drop. Refuses a zero <paramref name="down"/>. Allocates nothing.
         /// </summary>
         public int LowestOpening((float X, float Y, float Z) down)
         {
@@ -334,9 +340,11 @@ namespace Lodur.Body.Ymir
             var deepest = DeepestSump(dx, dy, dz);
             var best = 0;
             var bestDrop = float.NegativeInfinity;
+            var keptDrop = float.NegativeInfinity;
             for (var k = 0; k < _sensors.Length; k++)
             {
                 var drop = OpeningDrop(k, dx, dy, dz, deepest);
+                if (k == _lowest) keptDrop = drop;
                 if (drop > bestDrop)
                 {
                     bestDrop = drop;
@@ -344,6 +352,8 @@ namespace Lodur.Body.Ymir
                 }
             }
 
+            if (_lowest >= 0 && bestDrop <= keptDrop + LowestHysteresis) best = _lowest;
+            _lowest = best;
             return best;
         }
 

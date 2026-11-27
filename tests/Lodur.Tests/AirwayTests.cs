@@ -348,13 +348,26 @@ public sealed class AirwayTests
     }
 
     [Fact]
+    public void A_wet_airway_takes_nothing_for_an_ask_of_zero_below_zero_or_not_a_number()
+    {
+        var (world, doll) = Pooled((Mouth, R));
+        using var _ = world;
+        var before = Read(doll).Pooled[Mouth];
+        Assert.Equal(DropVolume, before, 9);
+        foreach (var ask in new[] { 0.0, -1e-6, -DropVolume, double.NaN, double.NegativeInfinity })
+        {
+            Assert.Equal(0.0, doll.TakeDrawn(ask));
+            world.Step(Dt, 4);
+            Assert.Equal(before, Read(doll).Pooled[Mouth]);
+        }
+    }
+
+    [Fact]
     public void Liquid_leaves_by_the_lowest_opening()
     {
         using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
         var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
         Assert.Equal(Mouth, doll.LowestOpening((0f, -1f, 0f)));
-        var prone = DropOf(doll, (0f, 0f, 1f)); // face down the two rims are 0.2 mm apart (the nose's lower): the opening is the larger drop, not a fixed one
-        Assert.Equal(prone[Nose] > prone[Mouth] ? Nose : Mouth, doll.LowestOpening((0f, 0f, 1f)));
         Assert.Equal(Mouth, doll.LowestOpening((0f, 0f, -1f)));
         Assert.Equal(Nose, doll.LowestOpening((0f, 1f, 0f)));
 
@@ -378,6 +391,50 @@ public sealed class AirwayTests
                 seen.Add(expect);
             });
         Assert.NotEmpty(seen);
+    }
+
+    [Fact]
+    public void Face_down_the_opening_is_the_larger_drop_at_first_and_then_held_through_the_pitch_sweep()
+    {
+        using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        var prone = DropOf(doll, (0f, 0f, 1f)); // the two rims are 0.2 mm apart (the nose's lower); a fresh ragdoll takes the larger
+        Assert.True(prone[Nose] > prone[Mouth] && prone[Nose] - prone[Mouth] < Ragdoll.LowestHysteresis, $"prone drops {prone[Mouth]} {prone[Nose]}");
+        Assert.Equal(Nose, doll.LowestOpening((0f, 0f, 1f)));
+
+        // down (0, sin t, cos t): pitch t from face down.
+        float Sweep(Ragdoll d, float from, float to, float step, int expectFirst)
+        {
+            Assert.Equal(expectFirst, d.LowestOpening((0f, MathF.Sin(from * MathF.PI / 180f), MathF.Cos(from * MathF.PI / 180f))));
+            for (var deg = from; deg * MathF.Sign(to - from) <= to * MathF.Sign(to - from); deg += step)
+                if (d.LowestOpening((0f, MathF.Sin(deg * MathF.PI / 180f), MathF.Cos(deg * MathF.PI / 180f))) != expectFirst) return deg;
+            return float.NaN;
+        }
+
+        using var upWorld = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        using var downWorld = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var up = Ragdoll.Build(upWorld, Plan, (0f, 0f), firstStableId: 100);
+        var down = Ragdoll.Build(downWorld, Plan, (0f, 0f), firstStableId: 100);
+        // Pitching toward the nose, a ragdoll with no memory swaps Mouth for Nose at -5.8 degrees (Soul's sweep, 0.05 degree steps); with the margin it holds Mouth past face down (measured: to +10.4)
+        // and pitching back it holds Nose past face down (measured: to -26.3), and each still lands the change inside 40 degrees.
+        var flipUp = Sweep(up, -40f, 40f, 0.05f, Mouth);
+        var flipDown = Sweep(down, 40f, -40f, -0.05f, Nose);
+        Assert.True(flipUp > 0f && flipUp < 40f, $"held Mouth to {flipUp} degrees");
+        Assert.True(flipDown < 0f && flipDown > -40f, $"held Nose to {flipDown} degrees");
+    }
+
+    [Fact]
+    public void Two_openings_with_equal_drops_take_the_first()
+    {
+        var head = new PartDef("Head", Side.Center, PartShape.Box, (0.1f, 0.1f, 0.1f), (0f, 1f, 0f), Quat.Identity, 1000f, 0.5f, 0f);
+        var a = Plan.AirwayOpenings[0] with { Part = 0 };
+        var twin = a with { Label = "Twin" };
+        var plan = new BodyPlan([head], [], [], [a, twin], [new AirwaySumpDef("Sump", 0, (0f, 0f, 0f))]);
+        var (bodies, joints, _) = Ragdoll.Needs(plan);
+        using var world = new Box3DSoaWorld(bodies, gravityY: 0f, jointCapacity: joints);
+        var doll = Ragdoll.Build(world, plan, (0f, 0f), firstStableId: 100);
+        Assert.Equal(0, doll.LowestOpening((0f, -1f, 0f)));
+        Assert.Equal(0, doll.LowestOpening((0f, 1f, 0f)));
     }
 
     [Fact]
