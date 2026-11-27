@@ -207,14 +207,45 @@ public sealed class AirwayBleedTests
     }
 
     [Fact]
+    public void A_dry_sample_draws_exactly_zero_not_nan()
+    {
+        var p = new Physiology(Body3(), Plan3(airway: Quiet), 20.0);
+        for (var i = 0; i < 10; i++)
+        {
+            p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, 0.0)));
+            Assert.Equal(0.0, p.DrawnLive);
+            Assert.Equal(0.0, p.DrawnPooled);
+        }
+
+        var b = Bleeding(1.0, 10.0);
+        b.Step(Dt, new PhysiologyInput(0.0, 0.0, false));
+        Assert.Equal(0.0, b.DrawnLive);
+        Assert.Equal(0.0, b.DrawnPooled);
+    }
+
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(10.0)]
+    public void The_dying_step_into_a_full_airway_draws_nothing(double gain)
+    {
+        var p = Bleeding(0.5, gain, Quiet, new BloodDef(0.005, 0.5, 0.0));
+        var wet = new AirwaySample(1e-5, 1e-5, 0.0);
+        for (var i = 0; i < 100000 && !p.Dead; i++) p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, wet));
+        Assert.True(p.Dead);
+        Assert.Equal(Quiet.Capacity, p.AirwayLiquid);
+        Assert.Equal(0.0, p.DrawnLive);
+        Assert.Equal(0.0, p.DrawnPooled);
+    }
+
+    [Fact]
     public void The_dying_step_reports_its_draw_and_the_next_step_none()
     {
         var p = Bleeding(0.5, 0.1, InertAirway);
-        var pooled = new AirwaySample(0.0, 1e-6, InertAirway.DrainDrop);
+        var pooled = new AirwaySample(1e-6, 1e-6, InertAirway.DrainDrop);
         for (var i = 0; i < 100000 && !p.Dead; i++) p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, pooled));
         Assert.True(p.Dead);
         Assert.True(p.DrawnPooled > 0.0);
-        Assert.Equal(0.0, p.DrawnLive);
+        Assert.True(p.DrawnLive > 0.0);
 
         p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, pooled));
         Assert.Equal(0.0, p.DrawnLive);
