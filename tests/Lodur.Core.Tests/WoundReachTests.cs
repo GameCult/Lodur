@@ -52,6 +52,16 @@ public sealed class WoundReachTests
     }
 
     [Fact]
+    public void A_depth_exactly_at_a_sites_surface_does_not_reach_it()
+    {
+        // Exact floats: the centre is 0.25 from the point, the radius 0.125, so the surface is 0.125 away.
+        var stack = Stack(Shell("Skin", 0.002), Core("Organ", new TissueSite((0f, 0f, 0.25f), 0.125f)));
+        var p = (0f, 0f, 0.5f);
+        Assert.Equal(new[] { 0 }, Reach(stack, p, 0.125));
+        Assert.Equal(new[] { 0, 1 }, Reach(stack, p, 0.1251));
+    }
+
+    [Fact]
     public void Unsited_cores_fill_the_part_and_output_is_in_stack_order()
     {
         var stack = Stack(Shell("Skin", 0.002), Core("Far", new TissueSite((0f, 0f, 0.5f), 0.01f)), Core("Fill"));
@@ -70,7 +80,12 @@ public sealed class WoundReachTests
             Assert.Throws<ArgumentException>(() => Reach(stack, p, depth));
         }
 
-        Assert.Throws<ArgumentException>(() => Reach(stack, (float.NaN, 0f, 0f), 0.01));
+        foreach (var bad in new[] { float.NaN, float.PositiveInfinity })
+        {
+            Assert.Throws<ArgumentException>(() => Reach(stack, (bad, 0f, 0f), 0.01));
+            Assert.Throws<ArgumentException>(() => Reach(stack, (0f, bad, 0f), 0.01));
+            Assert.Throws<ArgumentException>(() => Reach(stack, (0f, 0f, bad), 0.01));
+        }
         Assert.Throws<ArgumentException>(() =>
         {
             Span<int> short1 = stackalloc int[1];
@@ -103,6 +118,21 @@ public sealed class WoundReachTests
         string[] Thigh(double depth) => Reach(thigh, (0.07f, 0f, 0f), depth).Select(i => thigh.Tissues[i].Label).ToArray();
         Assert.Equal(new[] { "Skin", "Fat", "Muscle" }, Thigh(0.02));
         Assert.Equal(new[] { "Skin", "Fat", "Muscle", "Femur" }, Thigh(0.03));
+    }
+
+    [Fact]
+    public void The_trachea_and_the_left_kidney_sit_where_the_content_puts_them()
+    {
+        // Trachea (0,0.2,0.06) r 0.015: reached from the front at its height, not from the back.
+        Assert.Contains("Trachea", Labels("Torso", (0f, 0.2f, 0.09f), 0.04));
+        Assert.DoesNotContain("Trachea", Labels("Torso", (0f, 0.2f, -0.09f), 0.04));
+        Assert.DoesNotContain("Trachea", Labels("Torso", (0f, -0.1f, 0.09f), 0.04));
+        // KidneyLeft (+x, 0.06,-0.15,-0.05) r 0.03: reached from the back on the left, not the right, not the front.
+        Assert.Contains("KidneyLeft", Labels("Torso", (0.06f, -0.15f, -0.09f), 0.04));
+        Assert.DoesNotContain("KidneyRight", Labels("Torso", (0.06f, -0.15f, -0.09f), 0.04));
+        Assert.Contains("KidneyRight", Labels("Torso", (-0.06f, -0.15f, -0.09f), 0.04));
+        Assert.DoesNotContain("KidneyLeft", Labels("Torso", (-0.06f, -0.15f, -0.09f), 0.04));
+        Assert.DoesNotContain("KidneyLeft", Labels("Torso", (0.06f, -0.15f, 0.09f), 0.04));
     }
 
     [Fact]
