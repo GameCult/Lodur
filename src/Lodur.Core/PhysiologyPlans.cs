@@ -45,14 +45,19 @@ namespace Lodur
             Stack("Pelvis", Side.Center, Skin(10), Fat(10), MuscleSheet(30), Bone("Pelvis", 25), new TissueDef("Gut", 20, GutV));
             Stack("Torso", Side.Center,
                 Skin(10), Fat(10), MuscleSheet(40), Bone("Ribcage", 25),
-                new TissueDef("Heart", 15, HeartV, BloodPumping: 1.0),
-                new TissueDef("LungLeft", 15, LungV, Breathing: 1.0) { AirwayShare = LungShare }, new TissueDef("LungRight", 15, LungV, Breathing: 1.0) { AirwayShare = LungShare },
-                new TissueDef("Liver", 20, LiverV), new TissueDef("KidneyLeft", 15, KidneyV), new TissueDef("KidneyRight", 15, KidneyV),
-                // The trachea sits at Torso's top in the 19-part plan, the larynx in Head's lower region; where a cut reaches them is follow-up lodur-wound-reach.
-                new TissueDef("Trachea", 10, TracheaV) { AirwayShare = MucosaShare });
+                // Organ sites (placeholders in the part's frame, left is +x, probed against PartTissuesDef.Reach); the ribcage stays unsited and fills the torso.
+                new TissueDef("Heart", 15, HeartV, BloodPumping: 1.0) { Site = new TissueSite((0.02f, 0.05f, 0.03f), 0.05f) },
+                new TissueDef("LungLeft", 15, LungV, Breathing: 1.0) { AirwayShare = LungShare, Site = new TissueSite((0.08f, 0.07f, 0f), 0.06f) },
+                new TissueDef("LungRight", 15, LungV, Breathing: 1.0) { AirwayShare = LungShare, Site = new TissueSite((-0.08f, 0.07f, 0f), 0.06f) },
+                new TissueDef("Liver", 20, LiverV) { Site = new TissueSite((-0.06f, -0.1f, 0.01f), 0.06f) },
+                new TissueDef("KidneyLeft", 15, KidneyV) { Site = new TissueSite((0.06f, -0.15f, -0.05f), 0.03f) },
+                new TissueDef("KidneyRight", 15, KidneyV) { Site = new TissueSite((-0.06f, -0.15f, -0.05f), 0.03f) },
+                new TissueDef("Trachea", 10, TracheaV) { AirwayShare = MucosaShare, Site = new TissueSite((0f, 0.2f, 0.06f), 0.015f) });
             // The neck's muscle carries the Neck joint's motor weight: the head has to be a joint child with a muscle (spec discrepancy, report deviation).
-            Stack("Head", Side.Center, Skin(5), Fat(5), Muscle(25), Bone("Skull", 25), new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0),
-                new TissueDef("Larynx", 10, LarynxV) { AirwayShare = MucosaShare });
+            // Head sites are placeholders in the part's frame (+z face, -y chin), probed against PartTissuesDef.Reach: the neck muscle low at the chin, skull and brain about the crown, the larynx at the throat.
+            Stack("Head", Side.Center, Skin(5), Fat(5), Muscle(25) with { Site = new TissueSite((0f, -0.085f, -0.01f), 0.06f) }, Bone("Skull", 25) with { Site = new TissueSite((0f, 0.02f, -0.005f), 0.09f) },
+                new TissueDef("Brain", 10, BrainV, Vital: true, Consciousness: 1.0) { Site = new TissueSite((0f, 0.02f, -0.005f), 0.07f) },
+                new TissueDef("Larynx", 10, LarynxV) { AirwayShare = MucosaShare, Site = new TissueSite((0f, -0.075f, 0.06f), 0.015f) });
             foreach (var side in new[] { Side.Left, Side.Right })
             {
                 Stack("UpperArm", side, Skin(8), Fat(8), MuscleSheet(30), Bone("Humerus", 25));

@@ -23,6 +23,43 @@ public sealed class PhysiologyPlanTests
 
     private static void Refuses(Action build) => Assert.Throws<ArgumentException>(build);
 
+    private static TissueDef Core(string label, TissueSite? site) => new TissueDef(label, 10, 1, Consciousness: 1, Motor: 1) { Site = site };
+
+    private static PartDef OnePart(PartShape shape, (float X, float Y, float Z) size) =>
+        new("A", Side.Center, shape, size, (0f, 0f, 0f), Quat.Identity, 1000f, 0.8f, 0f);
+
+    private static void ResolvesOnePart(PartShape shape, (float X, float Y, float Z) size, (float X, float Y, float Z) centre, bool inside)
+    {
+        var plan = Plan(new[] { new TissueDef("skin", 10, 1) { Thickness = 0.01 }, Core("core", new TissueSite(centre, 0.01f)) });
+        var body = new BodyPlan(new[] { OnePart(shape, size) }, Array.Empty<JointDef>(), Array.Empty<SensePointDef>());
+        if (inside) plan.Resolve(body);
+        else Assert.Throws<ArgumentException>(() => plan.Resolve(body));
+    }
+
+    [Fact]
+    public void Sites_are_validated()
+    {
+        Refuses(() => Plan(new[] { new TissueDef("skin", 10, 1) { Thickness = 0.01, Site = new TissueSite((0f, 0f, 0f), 0.01f) }, Core("core", null) }));
+        Refuses(() => Plan(new[] { Core("core", new TissueSite((0f, 0f, 0f), 0f)) }));
+        Refuses(() => Plan(new[] { Core("core", new TissueSite((0f, 0f, 0f), float.NaN)) }));
+        Refuses(() => Plan(new[] { Core("core", new TissueSite((float.NaN, 0f, 0f), 0.01f)) }));
+        Plan(new[] { Core("core", new TissueSite((0f, 0f, 0f), 0.01f)) });
+    }
+
+    [Fact]
+    public void Resolve_refuses_a_site_centre_outside_a_sphere_a_box_and_a_capsule_and_accepts_one_just_inside()
+    {
+        ResolvesOnePart(PartShape.Sphere, (0.1f, 0f, 0f), (0.099f, 0f, 0f), true);
+        ResolvesOnePart(PartShape.Sphere, (0.1f, 0f, 0f), (0.1f, 0f, 0f), false);
+        ResolvesOnePart(PartShape.Box, (0.1f, 0.2f, 0.3f), (0.099f, 0.199f, 0.299f), true);
+        ResolvesOnePart(PartShape.Box, (0.1f, 0.2f, 0.3f), (0.1f, 0f, 0f), false);
+        ResolvesOnePart(PartShape.Box, (0.1f, 0.2f, 0.3f), (0f, 0f, -0.3f), false);
+        ResolvesOnePart(PartShape.Capsule, (0.05f, 0.1f, 0f), (0f, 0.149f, 0f), true);
+        ResolvesOnePart(PartShape.Capsule, (0.05f, 0.1f, 0f), (0f, 0.15f, 0f), false);
+        ResolvesOnePart(PartShape.Capsule, (0.05f, 0.1f, 0f), (0.049f, 0f, 0f), true);
+        ResolvesOnePart(PartShape.Capsule, (0.05f, 0.1f, 0f), (0.05f, 0f, 0f), false);
+    }
+
     [Fact]
     public void A_well_formed_plan_constructs_and_finds_afflictions_by_label()
     {

@@ -28,11 +28,14 @@ namespace Lodur
     /// </summary>
     public readonly record struct SheetDef(double Spacing, double EdgeCompliance, double AttachCompliance, double TensileStrength);
 
+    /// <summary>A sphere in the part's frame (origin at the part's Position, axes by its Rotation) that a sited core occupies: <paramref name="Radius"/> in m about <paramref name="Centre"/>.</summary>
+    public readonly record struct TissueSite((float X, float Y, float Z) Centre, float Radius);
+
     /// <summary>
     /// One tissue layer of a part. <paramref name="Consciousness"/>, <paramref name="BloodPumping"/> and <paramref name="Motor"/> are
     /// function weights, a closed set with one reader each (<paramref name="Breathing"/> is the lungs' share of ventilation): a capacity is the weighted mean integrity of the tissues that carry its weight.
     /// A Vital tissue at integrity 0 kills. A stack is shells (<see cref="Thickness"/> above 0, in m) outside-in, then cores (Thickness 0:
-    /// bone, organs, a muscle with no sheet); the cores fill what the shells leave of the part's shape. <see cref="Sheet"/> is the
+    /// bone, organs, a muscle with no sheet); a core with a <see cref="Site"/> occupies that sphere of the part, one with none fills what the shells leave of the part's shape. <see cref="Sheet"/> is the
     /// material of a shell simulated as a particle sheet; null means it is not.
     /// </summary>
     public readonly record struct TissueDef(
@@ -41,12 +44,52 @@ namespace Lodur
         public double Thickness { get; init; }
         public SheetDef? Sheet { get; init; }
 
+        /// <summary>Where a core sits in the part's frame; null fills the part past its shells. A shell takes none.</summary>
+        public TissueSite? Site { get; init; }
+
         /// <summary>The fraction, 0..1, of a wound's bleed in this tissue that enters the airway instead of leaving through the part's surface (the larynx, trachea and lungs' mucosa); 0 for every other tissue.</summary>
         public double AirwayShare { get; init; }
     }
 
     /// <summary>The one tissue stack of a part, outside-in, owned by <see cref="PhysiologyPlan.Parts"/> and joined to a <see cref="BodyPlan"/> only through <see cref="PhysiologyPlan.Resolve"/>.</summary>
-    public readonly record struct PartTissuesDef(string PartLabel, Side Side, IReadOnlyList<TissueDef> Tissues);
+    public readonly record struct PartTissuesDef(string PartLabel, Side Side, IReadOnlyList<TissueDef> Tissues)
+    {
+        /// <summary>
+        /// The layers a wound of <paramref name="depth"/> (m, finite and above 0) at <paramref name="point"/> (the part's frame) reaches, written into <paramref name="layers"/> as stack indices in stack order; returns the count.
+        /// Shells (Thickness above 0) outside-in: shell i is reached iff depth exceeds the summed Thickness of the shells before it. With S the shells' total, a core is reached iff depth exceeds S and
+        /// (it has no Site, or depth exceeds the distance from point to the Site's centre less its radius). Strict: a depth equal to a boundary does not reach past it. Allocates nothing.
+        /// </summary>
+        public int Reach((float X, float Y, float Z) point, double depth, Span<int> layers)
+        {
+            if (!(double.IsFinite(depth) && depth > 0.0)) throw new ArgumentException("depth is not finite and above 0.");
+            if (!(float.IsFinite(point.X) && float.IsFinite(point.Y) && float.IsFinite(point.Z))) throw new ArgumentException("the point is not finite.");
+            if (layers.Length < Tissues.Count) throw new ArgumentException("layers is shorter than the stack.");
+            var shells = 0.0;
+            for (var i = 0; i < Tissues.Count; i++) shells += Tissues[i].Thickness;
+            var n = 0;
+            var before = 0.0;
+            for (var i = 0; i < Tissues.Count; i++)
+            {
+                var t = Tissues[i];
+                if (t.Thickness > 0.0)
+                {
+                    if (depth > before) layers[n++] = i;
+                    before += t.Thickness;
+                }
+                else if (depth > shells)
+                {
+                    if (t.Site is not TissueSite site) layers[n++] = i;
+                    else
+                    {
+                        double dx = point.X - site.Centre.X, dy = point.Y - site.Centre.Y, dz = point.Z - site.Centre.Z;
+                        if (depth > Math.Sqrt(dx * dx + dy * dy + dz * dz) - site.Radius) layers[n++] = i;
+                    }
+                }
+            }
+
+            return n;
+        }
+    }
 
     /// <summary>The blood: nominal volume in m^3, the lost fraction that kills, and the regrowth per slow second as a fraction of nominal.</summary>
     public readonly record struct BloodDef(double NominalVolume, double LethalLossFraction, double RegenPerSecond);
@@ -162,7 +205,7 @@ namespace Lodur
         /// <summary>
         /// The one (label, side) join of stacks to a body: element p is the index in <see cref="Parts"/> of body part p's stack. Refuses a
         /// stack naming no part, a part with two stacks, a part with no stack, and shells that do not fit (a stack's summed Thickness must be
-        /// below the part's inscribed half extent, compared at the shape's float precision). Physiology and the sheet builder call it; it allocates, at construction only.
+        /// below the part's inscribed half extent, compared at the shape's float precision), and a sited core whose site centre is not strictly inside its part's shape. Physiology and the sheet builder call it; it allocates, at construction only.
         /// </summary>
         public int[] Resolve(BodyPlan body)
         {
@@ -191,9 +234,26 @@ namespace Lodur
                 foreach (var t in Parts[stackOf[p]].Tissues) shells += t.Thickness;
                 var half = d.Shape == PartShape.Box ? Math.Min(d.Size.X, Math.Min(d.Size.Y, d.Size.Z)) : d.Size.X;
                 if (!((float)shells < half)) throw new ArgumentException($"body part '{d.Label}' {d.Side}: the shells ({shells} m) do not fit inside its inscribed half extent ({half} m).");
+                foreach (var t in Parts[stackOf[p]].Tissues)
+                {
+                    if (t.Site is TissueSite site && !Inside(d, site.Centre)) throw new ArgumentException($"body part '{d.Label}' {d.Side}: the site of tissue '{t.Label}' is not inside the part's shape.");
+                }
             }
 
             return stackOf;
+        }
+
+        private static bool Inside(PartDef d, (float X, float Y, float Z) c)
+        {
+            double x = c.X, y = c.Y, z = c.Z;
+            switch (d.Shape)
+            {
+                case PartShape.Box: return Math.Abs(x) < d.Size.X && Math.Abs(y) < d.Size.Y && Math.Abs(z) < d.Size.Z;
+                case PartShape.Capsule:
+                    double along = Math.Max(-d.Size.Y, Math.Min(d.Size.Y, y));
+                    return Math.Sqrt(x * x + (y - along) * (y - along) + z * z) < d.Size.X;
+                default: return Math.Sqrt(x * x + y * y + z * z) < d.Size.X;
+            }
         }
 
         private static IReadOnlyList<(double X, double Y)> OwnCurve(IReadOnlyList<(double X, double Y)>? curve) =>
@@ -232,6 +292,13 @@ namespace Lodur
                     }
 
                     if (!(IsFinite(t.Thickness) && t.Thickness >= 0.0)) throw new ArgumentException($"{where}: thickness is not finite and at least 0.");
+                    if (t.Site is TissueSite site)
+                    {
+                        if (t.Thickness > 0.0) throw new ArgumentException($"{where}: a shell takes no site.");
+                        if (!(float.IsFinite(site.Centre.X) && float.IsFinite(site.Centre.Y) && float.IsFinite(site.Centre.Z))) throw new ArgumentException($"{where}: the site centre is not finite.");
+                        if (!(float.IsFinite(site.Radius) && site.Radius > 0f)) throw new ArgumentException($"{where}: the site radius is not finite and above 0.");
+                    }
+
                     if (t.Thickness == 0.0) core = true;
                     else if (core) throw new ArgumentException($"{where}: a shell follows a core.");
                     if (t.Sheet is SheetDef sh)
