@@ -63,6 +63,40 @@ public sealed class AirwayBleedTests
         Assert.Equal(0.0, p.Drained);
     }
 
+    [Theory]
+    [InlineData(1.0)]
+    [InlineData(10.0)]
+    [InlineData(0.1)]
+    public void The_gain_is_applied_once_at_airway_entry_and_not_to_the_circulation_or_the_readouts(double gain)
+    {
+        const double share = 0.25;
+        var p = Bleeding(share, gain);
+        p.Step(Dt);
+        // Real m^3/s and real blood volume are ungained at any gain; only the airway's intake is.
+        Assert.Equal(Rate * (1.0 - share), p.Bleed(0), 15);
+        Assert.Equal(Rate * share, p.AirwayBleed, 15);
+        Near(Dt * Rate, 0.005 - p.BloodVolume);
+        Near(gain * Dt * Rate * share, p.AirwayLiquid);
+    }
+
+    [Fact]
+    public void A_breath_into_a_full_airway_spills_exactly_nothing_whatever_the_draw()
+    {
+        // The spill is only what bled in: a draw into a full airway must leave Drained exactly 0, not a rounding residue (after - Capacity - drawRaw leaves up to ~1e-20).
+        for (var k = 0; k < 400; k++)
+        {
+            var p = new Physiology(Body3(), Plan3(airway: Quiet), 20.0);
+            var wet = new AirwaySample(1e-4 * (1.0 + 0.0371 * k), 0.0, 0.0);
+            for (var i = 0; i < 200; i++)
+            {
+                p.Step(Dt * (1.0 + 0.013 * k), new PhysiologyInput(0.0, 0.0, false, wet));
+                Assert.Equal(0.0, p.Drained);
+            }
+
+            Assert.Equal(Quiet.Capacity, p.AirwayLiquid);
+        }
+    }
+
     [Fact]
     public void A_full_airway_spills_what_bleeds_into_it_through_the_mouth()
     {
