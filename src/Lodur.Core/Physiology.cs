@@ -406,7 +406,8 @@ namespace Lodur
             var after = avail - removed;
             // Only bled blood overflows: a breath draws into the room left, so the spill is what the airway held plus what bled in, less what left, above capacity (after - capacity - drawRaw, ordered so a full airway with no bleed spills exactly 0).
             var spill = Math.Max(0.0, _airwayLiquid + bled - removed - aw.Capacity);
-            _coughed = total > 0.0 ? removed * cough / total : 0.0;
+            // Coughed is capped at removed: for a cough that is not a power of two removed x cough / total can exceed removed by an ulp, and Drained (removed - Coughed + spill) would read a negative, which no consumer can take.
+            _coughed = total > 0.0 ? Math.Min(removed, removed * cough / total) : 0.0;
             _drained = removed - _coughed + spill;
             // What the breath really drew: the draw clipped to the room left after what the airway held, bled in and lost (a full airway with nothing removed leaves exactly 0), split by the sample's weighted shares.
             var drawn = Math.Max(0.0, Math.Min(drawRaw, aw.Capacity - (_airwayLiquid + bled - removed)));

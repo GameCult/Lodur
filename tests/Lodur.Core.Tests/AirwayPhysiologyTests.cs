@@ -275,22 +275,25 @@ public sealed class AirwayPhysiologyTests
     public void An_awake_Fella_coughs_his_airway_clear()
     {
         // Placeholders deciding this: Cough (0.3 per second, a continuous airway bleed must beat it: ruling bds-drown-in-own-blood-first) and every bound below; Draw only fills the half airway first and decides no outcome; Drain is 0 face up and decides nothing.
-        // Half the airway, awake, face up, nothing at the openings, 20 s. Readings (deterministic): shipped liquid 1.9e-7 m^3 (half the airway down to 0.25%, quarter at 2.4 s), a cough at half the rate 3.86e-6 (quarter at 4.9 s), no cough 7.8e-5.
-        // Liquid bound 8.6e-7 = sqrt(1.9e-7 x 3.86e-6), separation 20 (ruling deterministic-bound-margin); the half-rate cough is claimed. Coughed total (fraction of capacity): shipped 0.515, no cough 0 (one unit 0.01,
-        // midpoint 0.07): the bound stays at 0.4, tighter than that midpoint, 1.29 under the shipped reading; a half-rate cough (0.493) is not claimed by this metric, the liquid bound claims it.
+        // Half the airway, awake, face up, nothing at the openings, 20 s. Readings (deterministic, ruling deterministic-bound-margin): the time for the liquid to fall to a quarter of the capacity (half of what it held)
+        // shipped 2.425 s, a cough at half the rate 4.867 s, cough 2.0 0.417 s; the liquid left after 20 s shipped 1.9e-7 m^3, half-rate 3.864e-6, no cough 7.8e-5; the total coughed (fraction of the capacity) shipped 0.515, no cough 0.
+        // Time bound (1.005, 3.436) = sqrt(2.425 x 0.417) and sqrt(2.425 x 4.867), separation 5.8 and 2.0: it claims cough 2.0 and the half-rate cough (a cough of 0.36 or 0.24 is not claimed). Liquid bound 8.6e-7 = sqrt(1.9e-7 x 3.864e-6),
+        // separation 20: it claims the half-rate and the missing cough. Coughed bound 0.0718 = sqrt(0.515 x 0.01), the zero reading's mutant counted as one unit of 0.01 (ruling deterministic-bound-zero-reading), separation 7.2.
         var p = Breather(20.0);
         var flood = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(100.0 * HoldAt, 0.0, 0.0));
         while (p.AirwayLiquid < 0.5 * Capacity) p.Step(Dt, flood);
         var clear = new PhysiologyInput(0.0, 0.0, false, new AirwaySample(0.0, 0.0, 0.0));
-        double coughed = 0.0;
+        double coughed = 0.0, quarter = -1.0;
         for (long i = 0; i < (long)(20.0 / Dt); i++)
         {
             p.Step(Dt, clear);
             coughed += p.Coughed;
+            if (quarter < 0.0 && p.AirwayLiquid < 0.25 * Capacity) quarter = (i + 1) * Dt;
         }
 
+        Assert.True(quarter > 1.005 && quarter < 3.436, $"quarter at {quarter} s");
         Assert.True(p.AirwayLiquid < 8.6e-7, $"airway liquid {p.AirwayLiquid}");
-        Assert.True(coughed > 0.4 * Capacity, $"coughed {coughed}");
+        Assert.True(coughed > 0.0718 * Capacity, $"coughed {coughed}");
         Assert.Equal(0.0, p.Drained);
     }
 

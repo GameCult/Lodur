@@ -122,6 +122,35 @@ public sealed class AirwayBleedTests
     }
 
     [Fact]
+    public void Every_airway_flow_is_at_least_zero_at_any_cough_rate()
+    {
+        // Drained was removed - Coughed + spill, with Coughed = removed x cough / total: for a cough that is not a power of two the product can exceed removed by an ulp and Drained read -5e-23 (BDS refuses a negative drain).
+        // Fill the airway, then clear it with drain on and off, and read every flow every step.
+        var humanoid = PhysiologyPlans.Humanoid().Airway;
+        var rates = new List<double> { 0.3, 0.36, 0.24, 2.0, humanoid.CoughPerSecond };
+        for (var k = 1; k <= 300; k++) rates.Add(0.01 * k);
+        foreach (var rate in rates)
+        {
+            foreach (var drop in new[] { 0.0, 0.5 * humanoid.DrainDrop, humanoid.DrainDrop })
+            {
+                var air = humanoid with { CoughPerSecond = rate };
+                var p = new Physiology(Body3(), Plan3(airway: air), 20.0);
+                var flood = new AirwaySample(100.0 * air.HoldAt, 0.0, drop);
+                var clear = new AirwaySample(0.0, 0.0, drop);
+                for (var i = 0; i < 1500; i++)
+                {
+                    p.Step(Dt, new PhysiologyInput(0.0, 0.0, false, i < 100 ? flood : clear));
+                    var at = $"cough {rate} drop {drop} step {i}";
+                    Assert.True(p.Coughed >= 0.0, $"{at}: Coughed {p.Coughed:R}");
+                    Assert.True(p.Drained >= 0.0, $"{at}: Drained {p.Drained:R}");
+                    Assert.True(p.AirwayBleed >= 0.0 && p.DrawnLive >= 0.0 && p.DrawnPooled >= 0.0, $"{at}: a flow is negative");
+                    Assert.True(p.AirwayLiquid >= 0.0, $"{at}: liquid {p.AirwayLiquid:R}");
+                }
+            }
+        }
+    }
+
+    [Fact]
     public void A_breath_draws_only_into_the_room_left()
     {
         var p = Make();   // no wound: nothing bleeds

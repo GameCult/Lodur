@@ -33,9 +33,9 @@ public sealed class VesselTests
             },
             new GoalSpec
             {
-                Id = "clutch", Priority = 1.0, InvoluntarySeconds = double.PositiveInfinity,
+                Id = "clutch", Priority = 3.0, InvoluntarySeconds = double.PositiveInfinity,
                 When = new[] { new Condition(DriveQuantity.AirHunger, ConditionOp.AtLeast, 0.3) },
-                Behaviour = new PoseBehaviour { Keys = new[] { Identity() }, FlinchPose = Identity(), Hold = new HoldParameters { HoldStrength = 1f, FlinchGain = 0.0, StrainShake = 0.0 } },
+                Behaviour = new PoseBehaviour { Keys = new[] { Identity() }, FlinchPose = Identity(), Hold = new HoldParameters { HoldStrength = 0.8f, FlinchGain = 0.0, StrainShake = 0.0 } },
             },
         },
     };
@@ -73,10 +73,10 @@ public sealed class VesselTests
         return new Band(p.Cause, deadAt, outAt, oxygen, loss, maxOcc, fullAt, names);
     }
 
-    // Shipped readings (deterministic, Release): either carotid and either femoral die of BloodLoss at 29.73 s, out at 16.82 s with brain oxygen 0.995 and no occlusion; the front of the throat
-    // fills the airway at 1.29 s, is out at 83.46 s with brain oxygen 0.371 and blood loss 0.450 and dies of Consciousness at 167.3 s. Mutants measured the same way: VesselV 1.0 dies at 79.35 s;
+    // The clutch fixture is the spec's probe setup: hold 0.8, priority 3. Shipped readings (deterministic, Release): either carotid and either femoral die of BloodLoss at 29.73 s, out at 16.82 s with brain oxygen 0.995 and no occlusion;
+    // the front of the throat fills the airway at 1.29 s, is out at 95.56 s with brain oxygen 0.376 and blood loss 0.4937 and dies of Consciousness at 184.8 s. Mutants measured the same way: VesselV 1.0 dies at 79.35 s;
     // a carotid with no site (reached at the front of the throat too) at 16.15 s; cough 2.0 fills the airway at 129.95 s, is out at 127.7 s with brain oxygen 0.994 and blood loss 0.6000 and dies of BloodLoss at 380.9 s;
-    // larynx V 1.0 is out at 86.61 s with blood loss 0.6001 (brain oxygen 0.376: the hypoxia bound does not claim it).
+    // larynx V 1.0 fills at 0.85 s, is out at 86.61 s with brain oxygen 0.435 and blood loss 0.6001, dies of BloodLoss at 191.0 s. Every bound is the geometric midpoint of shipped and its least claimed mutant (ruling deterministic-bound-margin).
 
     [Theory]
     [InlineData("Head", Side.Center, 0.0778f, -0.0778f, 0f, "CarotidLeft")]
@@ -85,12 +85,11 @@ public sealed class VesselTests
     [InlineData("Thigh", Side.Right, 0.0495f, 0.12f, 0.0495f, "Femoral")]
     public void A_vessel_kills_in_about_30_seconds_of_blood_loss_and_does_not_drown(string part, Side side, float x, float y, float z, string vessel)
     {
-        // Death in [20, 40] s: shipped 29.73 (ruled about 30). VesselV 1.0 reads 79.35 (2.0 x the upper bound), an unsited carotid 16.15 (1.24 x under the lower bound); the shipped reading is 1.35 and 1.49 inside them.
-        // The geometric midpoints (48.6 and 21.9 s) are looser; the ruled band is kept.
+        // Death in (21.9, 48.6) s: shipped 29.73 (ruling bds-bleed-by-vessels, about 30 s, sets the target, not a band); the bounds are the midpoints sqrt(29.73 x 16.15) for the unsited carotid and sqrt(29.73 x 79.35) for VesselV 1.0, separation 1.84 and 2.67.
         var r = Cut(part, side, (x, y, z), 0.02);
         Assert.Contains(vessel, r.Layers);
         Assert.Equal(DeathCause.BloodLoss, r.Cause);
-        Assert.InRange(r.DeadAt, 20.0, 40.0);
+        Assert.InRange(r.DeadAt, 21.9, 48.6);
         Assert.Equal(0.0, r.MaxOcclusion);   // no airway tissue reached: exactly zero
     }
 
@@ -99,13 +98,13 @@ public sealed class VesselTests
     {
         var r = Cut("Head", Side.Center, (0f, -0.0778f, 0.0778f), 0.02);
         Assert.Equal(new[] { "Skin", "Fat", "Larynx" }, r.Layers);   // no carotid at the front
-        // Occlusion full within 5 s: shipped 1.29 s (3.9 x inside), cough 2.0 reads 129.95 s (26 x outside).
-        Assert.InRange(r.OcclusionFullAt, 0.0, 5.0);
+        // Occlusion full within 12.9 s = sqrt(1.29 x 129.95): shipped 1.29 s, cough 2.0 129.95 s, separation 10.
+        Assert.InRange(r.OcclusionFullAt, 0.0, 12.9);
         Assert.True(r.OutAt > 0.0, "he never loses consciousness");
-        // Brain oxygen at consciousness 0.1: shipped 0.371, cough 2.0 0.994; bound sqrt(0.371 x 0.994) = 0.607 (separation 2.7).
-        Assert.True(r.BrainOxygenOut < 0.607, $"brain oxygen {r.BrainOxygenOut}");
-        // Blood loss then: shipped 0.4501, cough 2.0 and larynx V 1.0 0.6000; bound sqrt(0.4501 x 0.6000) = 0.5197 (separation 1.33, ruling deterministic-bound-margin).
-        Assert.True(r.BloodLossOut < 0.5197, $"blood loss {r.BloodLossOut}");
+        // Brain oxygen at consciousness 0.1: shipped 0.376, cough 2.0 0.994; bound sqrt(0.376 x 0.994) = 0.611 (separation 2.6).
+        Assert.True(r.BrainOxygenOut < 0.611, $"brain oxygen {r.BrainOxygenOut}");
+        // Blood loss then: shipped 0.4937, cough 2.0 0.60004 and larynx V 1.0 0.60008; bound sqrt(0.4937 x 0.60004) = 0.5443 (separation 1.2155).
+        Assert.True(r.BloodLossOut < 0.5443, $"blood loss {r.BloodLossOut}");
         Assert.Equal(DeathCause.Consciousness, r.Cause);
     }
 }

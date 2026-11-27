@@ -56,16 +56,14 @@ namespace Lodur
     {
         /// <summary>
         /// The layers a wound of <paramref name="depth"/> (m, finite and above 0) at <paramref name="point"/> (the part's frame) reaches, written into <paramref name="layers"/> as stack indices in stack order; returns the count.
-        /// Shells (Thickness above 0) outside-in: shell i is reached iff depth exceeds the summed Thickness of the shells before it. With S the shells' total and B the summed Thickness of the shells listed before a core:
-        /// an unsited core is reached iff depth exceeds S; a sited one iff depth exceeds B and depth exceeds the distance from point to the Site's centre less its radius (B is S for a site listed after every shell). Strict: a depth equal to a boundary does not reach past it. Allocates nothing.
+        /// Stack order is depth order: with B the summed Thickness of the shells listed before a tissue, a shell is reached iff depth exceeds B, and a core iff depth exceeds B and (it has no Site, or depth exceeds the distance from point to the Site's centre less its radius).
+        /// The validator refuses a shell after an unsited core, so an unsited core's B is every shell's total. Strict: a depth equal to a boundary does not reach past it. Allocates nothing.
         /// </summary>
         public int Reach((float X, float Y, float Z) point, double depth, Span<int> layers)
         {
             if (!(double.IsFinite(depth) && depth > 0.0)) throw new ArgumentException("depth is not finite and above 0.");
             if (!(float.IsFinite(point.X) && float.IsFinite(point.Y) && float.IsFinite(point.Z))) throw new ArgumentException("the point is not finite.");
             if (layers.Length < Tissues.Count) throw new ArgumentException("layers is shorter than the stack.");
-            var shells = 0.0;
-            for (var i = 0; i < Tissues.Count; i++) shells += Tissues[i].Thickness;
             var n = 0;
             var before = 0.0;
             for (var i = 0; i < Tissues.Count; i++)
@@ -78,11 +76,9 @@ namespace Lodur
                 }
                 else
                 {
-                    if (t.Site is not TissueSite site)
-                    {
-                        if (depth > shells) layers[n++] = i;
-                    }
-                    else if (depth > before)
+                    if (!(depth > before)) continue;
+                    if (t.Site is not TissueSite site) layers[n++] = i;
+                    else
                     {
                         double dx = point.X - site.Centre.X, dy = point.Y - site.Centre.Y, dz = point.Z - site.Centre.Z;
                         if (depth > Math.Sqrt(dx * dx + dy * dy + dz * dz) - site.Radius) layers[n++] = i;
