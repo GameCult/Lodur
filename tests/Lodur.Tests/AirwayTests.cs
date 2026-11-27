@@ -28,10 +28,10 @@ public sealed class AirwayTests
     private static readonly int Mouth = Plan.AirwayIndex("Mouth");
     private static readonly int Nose = Plan.AirwayIndex("Nose");
 
-    private static Box3DSoaWorld ParticleWorld(int sensors, float gravityZ = 0f)
+    private static Box3DSoaWorld ParticleWorld(int sensors, float gravityZ = 0f, bool extra = false)
     {
         var (bodies, joints, _) = Ragdoll.Needs(Plan);
-        return new Box3DSoaWorld(bodies, gravityY: 0f, gravityZ: gravityZ, jointCapacity: joints,
+        return new Box3DSoaWorld(bodies + (extra ? 1 : 0), gravityY: 0f, gravityZ: gravityZ, jointCapacity: joints + (extra ? 1 : 0),
             particles: new Box3DSoaParticleCapacities(16, 16, 16, 16, 64, 2, 16, 8, sensors));
     }
 
@@ -180,7 +180,7 @@ public sealed class AirwayTests
     }
 
     /// <summary>The humanoid on a ground slab, limp, shoved by a seeded torque on pelvis and torso for six steps, then six seconds: the largest drop over its openings and the torso's face direction y.</summary>
-    private static (float Drop, float TorsoFaceY) Fall(ulong seed)
+    private static (float Drop, float TorsoFaceY) Fall(ulong seed, Action<Ragdoll>? atRest = null)
     {
         var (bodies, joints, _) = Ragdoll.Needs(Plan);
         using var world = new Box3DSoaWorld(capacity: bodies + 1, jointCapacity: joints);
@@ -210,6 +210,7 @@ public sealed class AirwayTests
 
         var t = doll.BodyLane(Plan.PartIndex("Torso"));
         new Quat(v.RotationX[t], v.RotationY[t], v.RotationZ[t], v.RotationW[t]).Rotate(0f, 0f, 1f, out _, out var faceY, out _);
+        atRest?.Invoke(doll);
         var drop = DropOf(doll, (0f, -1f, 0f));
         return (MathF.Max(drop[Mouth], drop[Nose]), faceY);
     }
@@ -266,6 +267,128 @@ public sealed class AirwayTests
         Assert.Equal(0.1118f, drop[Nose], 0.002f);
         doll.ReadAirway(new float[2], new float[2], drop, (0f, 0f, 1f));
         Assert.Equal(-0.0167f, drop[Mouth], 0.002f);
+    }
+
+    /// <summary>Gravity toward the face (-z); one drop of each given radius rests against the head at each given opening and settles: the pooled patches at those openings.</summary>
+    private static (Box3DSoaWorld World, Ragdoll Doll) Pooled(params (int Opening, float Radius)[] drops)
+    {
+        var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors, gravityZ: -1f, extra: true);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        var head = doll.BodyLane(Plan.PartIndex("Head"));
+        var hv = world.View;
+        var anchor = world.AddStaticBox(2, (hv.PositionX[head], hv.PositionY[head], hv.PositionZ[head] - 0.3f), (0.05f, 0.05f, 0.05f), friction: 0.8f);
+        world.AddJoint(Box3DSoaJointKind.Weld, anchor, head, (hv.PositionX[head], hv.PositionY[head], hv.PositionZ[head] - 0.1f), (0f, 1f, 0f));
+        world.CreateParticles([.. drops.Select(d => new Box3DSoaParticleDesc(Outside(world, doll, d.Opening, d.Radius), 8000f * d.Radius * d.Radius * d.Radius, d.Radius, FluidPhase))]);
+        var settled = new bool[drops.Length];
+        for (var i = 0; i < 120 && settled.Contains(false); i++)
+        {
+            world.Step(Dt, 4);
+            for (var p = 0; p < drops.Length; p++)
+            {
+                if (settled[p] || world.View.SupportBody[p] != head) continue;
+                world.Settle([new Box3DSoaParticleHandle(p, world.View.ParticleGeneration[p])]);
+                settled[p] = true;
+            }
+        }
+
+        Assert.DoesNotContain(false, settled);
+        world.Step(Dt, 4);
+        return (world, doll);
+    }
+
+    [Fact]
+    public void A_take_removes_what_was_drawn_from_the_mouths_pool()
+    {
+        var (world, doll) = Pooled((Mouth, R));
+        using var _ = world;
+        var before = Read(doll).Pooled[Mouth];
+        Assert.Equal(DropVolume, before, 9);
+        var ask = (double)before / 4d;
+        var taken = doll.TakeDrawn(ask);
+        Assert.Equal(ask, taken, ask * 1e-6);
+        world.Step(Dt, 4);
+        Assert.Equal(before - taken, Read(doll).Pooled[Mouth], before * 1e-5);
+    }
+
+    [Fact]
+    public void The_take_splits_by_the_openings_readings()
+    {
+        var (world, doll) = Pooled((Mouth, 0.005f), (Nose, 0.0075f));
+        using var _ = world;
+        var (_, before) = Read(doll);
+        Assert.True(before[Mouth] > 0f && before[Nose] > 1.5f * before[Mouth], $"readings {before[Mouth]} {before[Nose]}");
+        var sum = (double)before[Mouth] + before[Nose];
+        var x = sum / 10d;
+        var taken = doll.TakeDrawn(x);
+        Assert.Equal(x, taken, x * 1e-5);
+        world.Step(Dt, 4);
+        var (_, after) = Read(doll);
+        Assert.Equal(x * before[Mouth] / sum, before[Mouth] - after[Mouth], x * 1e-3);
+        Assert.Equal(x * before[Nose] / sum, before[Nose] - after[Nose], x * 1e-3);
+    }
+
+    [Fact]
+    public void A_dry_airway_or_a_world_without_particles_takes_nothing()
+    {
+        using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        world.Step(Dt, 4);
+        var (live, pooled) = Read(doll);
+        Assert.Equal(0.0, doll.TakeDrawn(1e-6));
+        world.Step(Dt, 4);
+        var (live2, pooled2) = Read(doll);
+        Assert.Equal(live, live2);
+        Assert.Equal(pooled, pooled2);
+
+        var (bodies, joints, _) = Ragdoll.Needs(Plan);
+        using var bare = new Box3DSoaWorld(bodies, jointCapacity: joints);
+        var bareDoll = Ragdoll.Build(bare, Plan, (0f, 0f), firstStableId: 100);
+        Assert.Equal(0.0, bareDoll.TakeDrawn(1e-6));
+        Assert.Equal(0.0, doll.TakeDrawn(-1.0));
+    }
+
+    [Fact]
+    public void Liquid_leaves_by_the_lowest_opening()
+    {
+        using var world = ParticleWorld(Ragdoll.Needs(Plan).Sensors);
+        var doll = Ragdoll.Build(world, Plan, (0f, 0f), firstStableId: 100);
+        Assert.Equal(Mouth, doll.LowestOpening((0f, -1f, 0f)));
+        var prone = DropOf(doll, (0f, 0f, 1f)); // face down the two rims are 0.2 mm apart (the nose's lower): the opening is the larger drop, not a fixed one
+        Assert.Equal(prone[Nose] > prone[Mouth] ? Nose : Mouth, doll.LowestOpening((0f, 0f, 1f)));
+        Assert.Equal(Mouth, doll.LowestOpening((0f, 0f, -1f)));
+        Assert.Equal(Nose, doll.LowestOpening((0f, 1f, 0f)));
+
+        // A head turned pi about x (a lone box with both openings and a sump at its centre) seen from above.
+        var head = new PartDef("Head", Side.Center, PartShape.Box, (0.1f, 0.1f, 0.1f), (0f, 1f, 0f), Quat.FromAxisAngle(1f, 0f, 0f, MathF.PI), 1000f, 0.5f, 0f);
+        var turned = new BodyPlan([head], [], [], [.. Plan.AirwayOpenings.Select(o => o with { Part = 0 })], [new AirwaySumpDef("Sump", 0, (0f, 0f, 0f))]);
+        var (bodies, joints, _) = Ragdoll.Needs(turned);
+        using var flipped = new Box3DSoaWorld(bodies, gravityY: 0f, jointCapacity: joints);
+        var flippedDoll = Ragdoll.Build(flipped, turned, (0f, 0f), firstStableId: 100);
+        Assert.Equal(Nose, flippedDoll.LowestOpening((0f, -1f, 0f)));
+        Assert.Equal(Mouth, flippedDoll.LowestOpening((0f, 1f, 0f)));
+
+        // Side-lying limp falls: the largest of DropOf, and not always the creation pose's opening.
+        var seen = new HashSet<int>();
+        foreach (var seed in new ulong[] { 6, 10, 11, 18, 39, 66, 92, 120, 133, 151, 171, 208 })
+            Fall(seed, d =>
+            {
+                var drop = DropOf(d, (0f, -1f, 0f));
+                var expect = drop[Nose] > drop[Mouth] ? Nose : Mouth;
+                Assert.Equal(expect, d.LowestOpening((0f, -1f, 0f)));
+                seen.Add(expect);
+            });
+        Assert.NotEmpty(seen);
+    }
+
+    [Fact]
+    public void TakeDrawn_allocates_nothing()
+    {
+        var (world, doll) = Pooled((Mouth, 0.005f), (Nose, 0.005f));
+        using var _ = world;
+        doll.TakeDrawn(1e-12);
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < 100; i++) doll.TakeDrawn(1e-12);
+        Assert.Equal(before, GC.GetAllocatedBytesForCurrentThread());
     }
 
     [Fact]

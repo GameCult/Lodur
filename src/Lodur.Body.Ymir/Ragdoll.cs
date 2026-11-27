@@ -21,7 +21,10 @@ namespace Lodur.Body.Ymir
         private readonly Box3DSoaWorld _world;
         private readonly int[] _bodyLane;
         private readonly int[] _jointLane;
-        private readonly int[] _sensorLane;
+        // The airway sensors, one per plan opening, when Build created them (a world with no particle system has none); Ragdoll is their one owner. Ask and taken are TakeDrawn's scratch.
+        private readonly Box3DSoaConstraintHandle[] _sensors;
+        private readonly float[] _ask, _taken;
+        private bool _hasSensors;
         private readonly MuscleGains[] _gains;
         // Subtree mass and mass-weighted position per part: scratch rebuilt every Drive, never read across ticks.
         private readonly float[] _mass, _momentX, _momentY, _momentZ;
@@ -35,8 +38,9 @@ namespace Lodur.Body.Ymir
             Plan = plan;
             _bodyLane = new int[plan.Parts.Count];
             _jointLane = new int[plan.Joints.Count];
-            _sensorLane = new int[plan.AirwayOpenings.Count];
-            Array.Fill(_sensorLane, -1);
+            _sensors = new Box3DSoaConstraintHandle[plan.AirwayOpenings.Count];
+            _ask = new float[plan.AirwayOpenings.Count];
+            _taken = new float[plan.AirwayOpenings.Count];
             _gains = new MuscleGains[plan.Joints.Count];
             _mass = new float[plan.Parts.Count];
             _momentX = new float[plan.Parts.Count];
@@ -111,9 +115,8 @@ namespace Lodur.Body.Ymir
                     sensors[k] = (r._bodyLane[a.Part], a.Offset, a.Radius);
                 }
 
-                var handles = new Box3DSoaConstraintHandle[sensors.Length];
-                world.CreateSensors(sensors, handles);
-                for (var k = 0; k < handles.Length; k++) r._sensorLane[k] = handles[k].Lane;
+                world.CreateSensors(sensors, r._sensors);
+                r._hasSensors = true;
             }
 
             return r;
@@ -289,14 +292,71 @@ namespace Lodur.Body.Ymir
         /// </summary>
         public void ReadAirway(Span<float> live, Span<float> pooled, Span<float> drop, (float X, float Y, float Z) down)
         {
-            var n = _sensorLane.Length;
+            var n = _sensors.Length;
             if (live.Length != n || pooled.Length != n || drop.Length != n) throw new ArgumentException($"live, pooled and drop need {n} entries, one per airway opening.");
+            var (dx, dy, dz) = Unit(down);
+            var deepest = DeepestSump(dx, dy, dz);
+            var v = _world.View;
+            for (var k = 0; k < n; k++)
+            {
+                live[k] = _hasSensors ? v.SensorLiquidVolume[_sensors[k].Lane] : 0f;
+                pooled[k] = _hasSensors ? v.SensorWetVolume[_sensors[k].Lane] : 0f;
+                drop[k] = OpeningDrop(k, dx, dy, dz, deepest);
+            }
+        }
+
+        /// <summary>
+        /// Takes what a breath drew from the pool: <paramref name="drawnPooled"/> (Physiology's DrawnPooled, world m^3) split over the openings by each one's pooled reading at the last step's end
+        /// (exact, because Physiology's weighted sum is linear in the openings), and removed from the wet patches each opening reads. Returns the summed volume that left the world's patches, m^3:
+        /// 0 for a <paramref name="drawnPooled"/> of 0 or less, a world with no sensors or no pooled reading; float rounding can leave it below the ask. Readings change at the next step's end. Allocates nothing.
+        /// </summary>
+        public double TakeDrawn(double drawnPooled)
+        {
+            if (!_hasSensors || !(drawnPooled > 0d)) return 0d;
+            var v = _world.View;
+            var sum = 0d;
+            for (var k = 0; k < _sensors.Length; k++) sum += v.SensorWetVolume[_sensors[k].Lane];
+            if (!(sum > 0d)) return 0d;
+            for (var k = 0; k < _sensors.Length; k++) _ask[k] = (float)(drawnPooled * v.SensorWetVolume[_sensors[k].Lane] / sum);
+            _world.TakeWet(_sensors, _ask, _taken);
+            var taken = 0d;
+            for (var k = 0; k < _taken.Length; k++) taken += _taken[k];
+            return taken;
+        }
+
+        /// <summary>
+        /// The plan airway opening whose rim lies lowest along <paramref name="down"/> (the largest drop of <see cref="ReadAirway"/>, the first on a tie): where liquid leaves
+        /// (ruling bds-drain-head-decides, the head's pose alone decides). Refuses a zero <paramref name="down"/>. Allocates nothing.
+        /// </summary>
+        public int LowestOpening((float X, float Y, float Z) down)
+        {
+            var (dx, dy, dz) = Unit(down);
+            var deepest = DeepestSump(dx, dy, dz);
+            var best = 0;
+            var bestDrop = float.NegativeInfinity;
+            for (var k = 0; k < _sensors.Length; k++)
+            {
+                var drop = OpeningDrop(k, dx, dy, dz, deepest);
+                if (drop > bestDrop)
+                {
+                    bestDrop = drop;
+                    best = k;
+                }
+            }
+
+            return best;
+        }
+
+        private static (float X, float Y, float Z) Unit((float X, float Y, float Z) down)
+        {
             var dl = MathF.Sqrt(down.X * down.X + down.Y * down.Y + down.Z * down.Z);
             if (!(dl > 0f) || !float.IsFinite(dl)) throw new ArgumentException("down needs a nonzero finite direction.", nameof(down));
-            var dx = down.X / dl;
-            var dy = down.Y / dl;
-            var dz = down.Z / dl;
+            return (down.X / dl, down.Y / dl, down.Z / dl);
+        }
 
+        /// <summary>The deepest plan airway sump's position along the unit direction d.</summary>
+        private float DeepestSump(float dx, float dy, float dz)
+        {
             var v = _world.View;
             var deepest = float.NegativeInfinity;
             for (var m = 0; m < Plan.AirwaySumps.Count; m++)
@@ -307,32 +367,32 @@ namespace Lodur.Body.Ymir
                 deepest = MathF.Max(deepest, (v.PositionX[i] + rx) * dx + (v.PositionY[i] + ry) * dy + (v.PositionZ[i] + rz) * dz);
             }
 
-            for (var k = 0; k < n; k++)
+            return deepest;
+        }
+
+        /// <summary>Opening k's lowest rim point's drop below <paramref name="deepest"/> along the unit direction d.</summary>
+        private float OpeningDrop(int k, float dx, float dy, float dz, float deepest)
+        {
+            var v = _world.View;
+            var a = Plan.AirwayOpenings[k];
+            var i = _bodyLane[a.Part];
+            var o = a.Offset;
+            var q = new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i]);
+            q.Rotate(o.X, o.Y, o.Z, out var cx, out var cy, out var cz);
+            var centre = (v.PositionX[i] + cx) * dx + (v.PositionY[i] + cy) * dy + (v.PositionZ[i] + cz) * dz;
+            var ol = MathF.Sqrt(o.X * o.X + o.Y * o.Y + o.Z * o.Z);
+            var rim = a.Radius;
+            if (ol > 0f)
             {
-                var lane = _sensorLane[k];
-                live[k] = lane < 0 ? 0f : v.SensorLiquidVolume[lane];
-                pooled[k] = lane < 0 ? 0f : v.SensorWetVolume[lane];
-
-                var a = Plan.AirwayOpenings[k];
-                var i = _bodyLane[a.Part];
-                var o = a.Offset;
-                var q = new Quat(v.RotationX[i], v.RotationY[i], v.RotationZ[i], v.RotationW[i]);
-                q.Rotate(o.X, o.Y, o.Z, out var cx, out var cy, out var cz);
-                var centre = (v.PositionX[i] + cx) * dx + (v.PositionY[i] + cy) * dy + (v.PositionZ[i] + cz) * dz;
-                var ol = MathF.Sqrt(o.X * o.X + o.Y * o.Y + o.Z * o.Z);
-                var rim = a.Radius;
-                if (ol > 0f)
-                {
-                    q.Rotate(o.X / ol, o.Y / ol, o.Z / ol, out var nx, out var ny, out var nz);
-                    var along = dx * nx + dy * ny + dz * nz;
-                    var px = dx - along * nx;
-                    var py = dy - along * ny;
-                    var pz = dz - along * nz;
-                    rim *= MathF.Sqrt(px * px + py * py + pz * pz);
-                }
-
-                drop[k] = centre + rim - deepest;
+                q.Rotate(o.X / ol, o.Y / ol, o.Z / ol, out var nx, out var ny, out var nz);
+                var along = dx * nx + dy * ny + dz * nz;
+                var px = dx - along * nx;
+                var py = dy - along * ny;
+                var pz = dz - along * nz;
+                rim *= MathF.Sqrt(px * px + py * py + pz * pz);
             }
+
+            return centre + rim - deepest;
         }
     }
 }
