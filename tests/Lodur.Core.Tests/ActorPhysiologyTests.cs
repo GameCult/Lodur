@@ -234,6 +234,15 @@ public sealed class ActorPhysiologyTests
         }
     }
 
+    /// <summary>The measuring loop lives here, fully optimised from its first call, so tiered compilation and TieredPGO instrumentation cannot allocate inside the measurement; only Actor.Tick's own bytes are counted.</summary>
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining | System.Runtime.CompilerServices.MethodImplOptions.AggressiveOptimization)]
+    private static long AllocatedByTicking(Actor a, BoxStimulus[] box, float[] s, Quat[] q, int n)
+    {
+        var before = GC.GetAllocatedBytesForCurrentThread();
+        for (var i = 0; i < n; i++) a.Tick(NoPoint, NoPoint, NoPoint, box, s, q);
+        return GC.GetAllocatedBytesForCurrentThread() - before;
+    }
+
     [Fact]
     public void A_tick_with_a_physiology_and_eight_bleeding_afflictions_allocates_nothing()
     {
@@ -252,11 +261,7 @@ public sealed class ActorPhysiologyTests
         var box = new[] { new BoxStimulus(0f, 0f, 0f, 1f, 1f, 1f) { Intensity = 0.5 } };
         for (var i = 0; i < 2000; i++) a.Tick(NoPoint, NoPoint, NoPoint, box, s, q);   // warm the JIT and the first-use paths
 
-        var before = GC.GetAllocatedBytesForCurrentThread();
-        for (var i = 0; i < 10000; i++) a.Tick(NoPoint, NoPoint, NoPoint, box, s, q);
-        var after = GC.GetAllocatedBytesForCurrentThread();
-
-        Assert.Equal(0L, after - before);
+        Assert.Equal(0L, AllocatedByTicking(a, box, s, q, 10000));
         Assert.False(p.Dead);
         Assert.Equal(8, Live(p));
         Assert.True(p.Bleed(0) > 0.0 && p.Bleed(1) > 0.0);
