@@ -13,23 +13,7 @@ public sealed class AirwayBleedTests
     private const double Dt = 0.01;
     private const double Rate = 1e-3;
 
-    /// <summary>A cough-free, drain-free airway with a breath that draws the liquid at the openings and holds at 1e-3 of it.</summary>
-    private static AirwayDef Quiet => new(150e-6, 1.0, 1.0, 1.0, 1e-3, 0.0, new[] { (0.0, 0.0), (1.0, 0.0) }, 0.0, 0.05);
-
     private static void Near(double expected, double actual) => Assert.InRange(Math.Abs(expected - actual), 0.0, 1e-12 * Math.Abs(expected));
-
-    private static Physiology Bleeding(double share, double gain, AirwayDef? airway = null, BloodDef? blood = null)
-    {
-        var root = new[]
-        {
-            new TissueDef("brain", 10, 1, Consciousness: 1),
-            new TissueDef("heart", 10, 4, true, BloodPumping: 1),
-            new TissueDef("muscle", 10, 1, Motor: 1) { AirwayShare = share },
-        };
-        var p = new Physiology(Body3(), Plan3(root: root, airway: airway ?? Quiet, blood: blood), 20.0, gain);
-        Assert.True(p.Afflict(Af("Bleeder"), 0, RootMuscle, 1));
-        return p;
-    }
 
     [Theory]
     [InlineData(0.25)]
